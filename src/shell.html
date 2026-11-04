@@ -1,0 +1,949 @@
+<title>3D RENDER</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* 레이아웃: 위 툴바 · 왼쪽 도구·기물 · 가운데 2D|3D (끌어서 비율 조절) · 오른쪽 속성 / 폰: 작업창 + 아래 탭 + 시트 */
+:root {
+  --bg: #f5f5f7; --panel: rgba(255,255,255,.82); --solid: #ffffff; --fill: rgba(118,118,128,.12); --fill2: rgba(118,118,128,.2);
+  --line: rgba(60,60,67,.14); --fg: #1d1d1f; --muted: #6e6e73; --accent: #007aff; --on-accent: #ffffff;
+  --canvas: #fbfbfd; --grid: #eef0f4; --grid2: #dcdfe5; --wall: #1d1d1f; --label: #1d1d1f; --labelStroke: rgba(255,255,255,.92);
+  --bad: #ff3b30; --warn: #ff9500; --work: #ff9500; --ok: #34c759; --float: rgba(255,255,255,.86); --segOn: #ffffff;
+  --shadow: 0 12px 32px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.08); --sky1: #cfe0ec; --sky2: #f1f4f6;
+  --f-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  --f-num: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --r: 12px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #000000; --panel: rgba(28,28,30,.86); --solid: #1c1c1e; --fill: rgba(118,118,128,.24); --fill2: rgba(118,118,128,.36);
+  --line: rgba(255,255,255,.1); --fg: #f5f5f7; --muted: #98989d; --accent: #0a84ff; --canvas: #1c1c1e; --grid: #242427; --grid2: #323236;
+  --wall: #f5f5f7; --label: #ffffff; --labelStroke: rgba(0,0,0,.78); --bad: #ff453a; --warn: #ff9f0a; --work: #ff9f0a; --ok: #30d158;
+  --float: rgba(44,44,46,.86); --segOn: #636366; --shadow: 0 12px 32px rgba(0,0,0,.55); color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #000000; --panel: rgba(28,28,30,.86); --solid: #1c1c1e; --fill: rgba(118,118,128,.24); --fill2: rgba(118,118,128,.36);
+  --line: rgba(255,255,255,.1); --fg: #f5f5f7; --muted: #98989d; --accent: #0a84ff; --canvas: #1c1c1e; --grid: #242427; --grid2: #323236;
+  --wall: #f5f5f7; --label: #ffffff; --labelStroke: rgba(0,0,0,.78); --bad: #ff453a; --warn: #ff9f0a; --work: #ff9f0a; --ok: #30d158;
+  --float: rgba(44,44,46,.86); --segOn: #636366; --shadow: 0 12px 32px rgba(0,0,0,.55); color-scheme: dark; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 13px/1.45 var(--f-ui); overflow: hidden; -webkit-font-smoothing: antialiased; letter-spacing: -.005em; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 1px; }
+.app { height: 100%; display: flex; flex-direction: column; }
+.glass { background: var(--float); -webkit-backdrop-filter: saturate(180%) blur(22px); backdrop-filter: saturate(180%) blur(22px); }
+/* 툴바 */
+.top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-block: 8px; padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px)); background: var(--panel); -webkit-backdrop-filter: saturate(180%) blur(22px); backdrop-filter: saturate(180%) blur(22px); border-bottom: 1px solid var(--line); position: relative; z-index: 5; }
+.brand { font-weight: 700; display: flex; align-items: center; gap: 8px; margin-right: 4px; letter-spacing: -.01em; }
+.brand svg { color: var(--accent); }
+.proj { border: 0; background: var(--fill); border-radius: 9px; padding: 6px 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.save { color: var(--muted); font-size: 12px; }
+.sp { flex: 1; }
+.seg { display: inline-flex; background: var(--fill); border-radius: 9px; padding: 2px; gap: 0; }
+.seg button { border: 0; background: none; padding: 5px 12px; border-radius: 7px; color: var(--fg); font-weight: 500; min-height: 28px; }
+.seg button[aria-pressed="true"] { background: var(--segOn); box-shadow: 0 1px 3px rgba(0,0,0,.14), 0 0 0 .5px rgba(0,0,0,.04); font-weight: 600; }
+.btn { border: 0; background: var(--fill); border-radius: 9px; padding: 6px 12px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500; color: var(--fg); }
+.btn:hover, .ic:hover { background: var(--fill2); }
+.btn.pri { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.btn.pri:hover { filter: brightness(1.08); background: var(--accent); }
+.btn.danger { color: var(--bad); }
+.btn.file { position: relative; }
+.ic { border: 0; background: transparent; border-radius: 9px; width: 34px; height: 34px; display: grid; place-items: center; color: var(--fg); font-weight: 600; }
+.ic[aria-pressed="true"] { background: var(--fill2); color: var(--accent); }
+.main { flex: 1; min-height: 0; display: flex; }
+/* 사이드바 */
+.left { width: 252px; flex: none; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.right { width: 320px; flex: none; background: var(--panel); border-left: 1px solid var(--line); overflow: auto; }
+body.no-left .left, body.no-right .right { display: none; }
+.tools { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; padding: 10px; }
+.tools button { border: 0; background: transparent; border-radius: 10px; padding: 7px 2px 5px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); min-height: 48px; }
+.tools button:hover { background: var(--fill); }
+.tools button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-weight: 600; }
+.lk { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 10px; }
+.hint { color: var(--muted); font-size: 12px; margin: 0; }
+.toolhint { padding: 0 12px 8px; border-bottom: 1px solid var(--line); }
+.lib { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.search { background: var(--fill); border: 0; border-radius: 9px; padding: 8px 10px; width: 100%; box-sizing: border-box; color: var(--fg); }
+.search::placeholder { color: var(--muted); }
+.cats { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { border: 0; background: var(--fill); border-radius: 999px; padding: 5px 11px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; color: var(--fg); font-weight: 500; }
+.chip.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.sq { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+.grid { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; align-content: start; touch-action: pan-y; }
+.card { border: 0; background: var(--solid); border-radius: 12px; padding: 8px 2px 7px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; box-shadow: 0 0 0 1px var(--line); color: var(--fg); }
+.card:hover { box-shadow: 0 0 0 2px var(--accent); }
+.thumb { width: 34px; height: 30px; display: grid; place-items: center; }
+.thumb svg, .thumb img { width: 30px; height: 30px; object-fit: contain; }
+.nm { font-size: 11px; line-height: 1.25; }
+.sz { font: 10px var(--f-num); color: var(--muted); }
+.empty { color: var(--muted); grid-column: 1 / -1; margin: 6px 2px; }
+/* 작업창 */
+.stage { flex: 1; min-width: 0; display: flex; position: relative; background: var(--canvas); }
+.pane { position: relative; flex: 1; min-width: 0; }
+body[data-view="split"] #v2d { flex: 0 0 var(--split, 50%); }
+#v3d { background: linear-gradient(var(--sky1), var(--sky2)); }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+#ov3c { position: absolute; inset: 0; pointer-events: none; }
+body[data-view="2d"] #v3d, body[data-view="3d"] #v2d, body[data-view="2d"] .gutter, body[data-view="3d"] .gutter { display: none; }
+.gutter { flex: 0 0 10px; margin: 0 -5px; z-index: 6; cursor: col-resize; position: relative; touch-action: none; }
+.gutter::before { content: ""; position: absolute; inset: 0 4px; background: var(--line); }
+.gutter::after { content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 44px; transform: translate(-50%, -50%); border-radius: 3px; background: var(--muted); opacity: .55; }
+.gutter:hover::after, .gutter.on::after { background: var(--accent); opacity: 1; }
+.bar { position: absolute; left: 10px; top: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; z-index: 4; }
+.bar > * { pointer-events: auto; }
+.tg { display: inline-flex; align-items: center; gap: 6px; border: 0; background: var(--float); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); color: var(--fg); border-radius: 9px; padding: 6px 11px; font-size: 12px; font-weight: 500; box-shadow: 0 1px 4px rgba(0,0,0,.1), 0 0 0 .5px var(--line); min-height: 30px; box-sizing: border-box; }
+.tg[aria-pressed="true"] { color: var(--accent); }
+.bar .seg { background: var(--float); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); box-shadow: 0 1px 4px rgba(0,0,0,.1), 0 0 0 .5px var(--line); }
+.bm button[data-bm="build"][aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.pop { position: relative; }
+.pop summary { list-style: none; cursor: pointer; }
+.pop summary::-webkit-details-marker { display: none; }
+.popin { position: absolute; top: calc(100% + 6px); left: 0; z-index: 12; background: var(--float); -webkit-backdrop-filter: saturate(180%) blur(22px); backdrop-filter: saturate(180%) blur(22px); color: var(--fg); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 9px; min-width: 210px; box-shadow: var(--shadow); }
+.popin label { display: flex; gap: 8px; align-items: center; }
+.pin { position: absolute; transform: translate(-50%, -100%); background: var(--fg); color: var(--bg); font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 7px; white-space: nowrap; pointer-events: none; }
+.pin.bad { background: var(--bad); color: #fff; }
+#ov3d { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.hist { position: absolute; left: 12px; bottom: 12px; z-index: 6; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 11px; box-shadow: 0 1px 4px rgba(0,0,0,.12), 0 0 0 .5px var(--line); }
+.hist button { border: 0; background: none; border-radius: 8px; padding: 5px 9px; font-size: 12px; font-weight: 500; color: var(--fg); min-height: 30px; }
+.hist button:hover:not(:disabled) { background: var(--fill); }
+.hist button:disabled { opacity: .35; cursor: default; }
+.hist span { font: 11px var(--f-num); color: var(--muted); padding: 0 4px; }
+/* 오른쪽 패널 */
+.sec { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.sec h2 { margin: 0; font-size: 12px; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; align-items: center; letter-spacing: 0; }
+.ph { display: flex; align-items: center; gap: 10px; }
+.ph b { display: block; font-size: 15px; font-weight: 600; }
+.ph small { color: var(--muted); }
+.dot { width: 30px; height: 30px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line); flex: none; }
+.fld { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); min-width: 0; }
+.fld input, .fld select { background: var(--fill); border: 0; border-radius: 8px; padding: 7px 9px; color: var(--fg); font-size: 13px; min-width: 0; width: 100%; box-sizing: border-box; font-variant-numeric: tabular-nums; }
+.fld input[type="range"] { padding: 0; background: none; }
+.g3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; align-items: end; }
+.g3 .btn { padding: 7px 4px; font-size: 12px; }
+.row { display: flex; gap: 6px; }
+.row.wrap { flex-wrap: wrap; }
+.lbl { font-size: 11px; color: var(--muted); font-weight: 500; }
+.sw { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 5px; }
+.swb { aspect-ratio: 1; border-radius: 50%; border: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); min-height: 20px; padding: 0; }
+.swb.on { box-shadow: 0 0 0 2px var(--solid), 0 0 0 4px var(--accent); }
+.swc { grid-column: span 10; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.swc input { width: 44px; height: 26px; border: 0; background: none; padding: 0; }
+.chk { display: flex; gap: 8px; align-items: center; }
+.alert { margin: 0; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); font-weight: 500; }
+.lay { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.lay small { margin-left: auto; color: var(--muted); font-family: var(--f-num); }
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; flex: none; }
+.pill.bad { background: var(--bad); color: #fff; } .pill.warn { background: var(--warn); color: #1d1405; } .pill.work { background: color-mix(in srgb, var(--work) 18%, transparent); color: var(--work); }
+.sum { display: flex; gap: 6px; }
+.chk-row { display: flex; gap: 8px; align-items: flex-start; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 8px 0; color: var(--fg); }
+.chk-row:hover span:last-child { color: var(--accent); }
+.kw { font-family: var(--f-num); }
+.objs { display: flex; flex-direction: column; gap: 1px; max-height: 340px; overflow: auto; }
+.ohead { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: 0; padding: 6px 0; font-weight: 600; text-align: left; color: var(--fg); }
+.ohead small { margin-left: auto; color: var(--muted); font-family: var(--f-num); }
+.ohead[aria-expanded="false"]::after { content: "›"; color: var(--muted); } .ohead[aria-expanded="true"]::after { content: "⌄"; color: var(--muted); }
+.orow { display: flex; align-items: center; gap: 6px; padding: 1px 6px; border-radius: 8px; }
+.orow.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.orow.off .oname { color: var(--muted); text-decoration: line-through; }
+.oname { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 6px 0; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--fg); }
+.orow small { color: var(--muted); font-family: var(--f-num); font-size: 11px; }
+/* 떠 있는 패널: 그리기 · 이동 · 빠른 수정 */
+.drawbar { position: absolute; left: 50%; top: 52px; transform: translateX(-50%); z-index: 13; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; border-radius: 14px; padding: 8px 10px; max-width: calc(100% - 20px); box-sizing: border-box; box-shadow: var(--shadow); }
+.tg2 { min-height: 30px; border-radius: 8px; border: 0; background: var(--fill); color: var(--fg); padding: 0 11px; font-weight: 500; }
+.tg2[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+#finishBtn { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.b3row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; width: 100%; }
+.skc { display: flex; gap: 5px; }
+.skc button { width: 24px; height: 24px; border-radius: 50%; border: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); padding: 0; }
+.skc button.on { box-shadow: 0 0 0 2px var(--solid), 0 0 0 4px var(--accent); }
+.dhint { width: 100%; margin: 0; text-align: center; font-size: 11px; color: var(--muted); }
+.movehint { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 12; margin: 0; background: var(--accent); color: var(--on-accent); font-weight: 600; padding: 6px 14px; border-radius: 999px; font-size: 12px; white-space: nowrap; box-shadow: var(--shadow); }
+.quick { position: absolute; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 14; border-radius: 16px; display: flex; flex-direction: column; width: min(460px, calc(100% - 24px)); box-sizing: border-box; overflow: hidden; box-shadow: var(--shadow); color: var(--fg); }
+.qhead { display: flex; align-items: center; gap: 8px; padding: 10px 10px 8px 14px; }
+.qn { flex: 1; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mvbtn { min-height: 30px; border-radius: 999px; border: 0; background: var(--fill); color: var(--fg); padding: 0 13px; font-weight: 600; font-size: 12px; }
+.mvbtn.on { background: var(--accent); color: var(--on-accent); }
+.qtabs { display: flex; gap: 2px; margin: 0 10px; padding: 2px; background: var(--fill); border-radius: 9px; }
+.qt { flex: 1; background: none; border: 0; color: var(--fg); padding: 5px 4px; font-size: 12px; min-height: 28px; border-radius: 7px; font-weight: 500; }
+.qt.on { background: var(--segOn); box-shadow: 0 1px 3px rgba(0,0,0,.14); font-weight: 600; }
+.qbody { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 9px; max-height: 230px; overflow: auto; }
+.qrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.qf { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+.qf input { width: 70px; background: var(--fill); border: 0; border-radius: 8px; padding: 6px 7px; color: var(--fg); font-variant-numeric: tabular-nums; }
+.qb { min-height: 30px; min-width: 30px; border-radius: 8px; border: 0; background: var(--fill); color: var(--fg); padding: 0 10px; font-weight: 500; font-size: 12px; }
+.qb:hover:not(:disabled) { background: var(--fill2); }
+.qb.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.qb.danger { color: var(--bad); }
+.qb:disabled { opacity: .4; }
+.qk { font-size: 11px; color: var(--muted); margin: 0; }
+.qgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.qdim { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; gap: 3px; align-items: center; }
+.qdim span { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+.qdim input { min-width: 0; width: 100%; box-sizing: border-box; background: var(--fill); border: 0; border-radius: 8px; padding: 6px 2px; color: var(--fg); text-align: center; font-variant-numeric: tabular-nums; }
+.qdim .qb { min-width: 0; padding: 0; }
+.qmove { display: flex; gap: 12px; align-items: center; }
+.qpad { display: grid; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 38px); gap: 4px; flex: none; }
+.qpad .qb { padding: 0; }
+.qmats { display: flex; flex-wrap: wrap; gap: 5px; }
+.qpal { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; }
+.quick .swc { color: var(--muted); }
+.ghost { position: fixed; z-index: 50; transform: translate(-50%, -120%); background: var(--accent); color: var(--on-accent); font-weight: 600; padding: 6px 12px; border-radius: 999px; pointer-events: none; box-shadow: var(--shadow); }
+.toast { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--float); -webkit-backdrop-filter: saturate(180%) blur(22px); backdrop-filter: saturate(180%) blur(22px); color: var(--fg); padding: 10px 16px; border-radius: 999px; z-index: 60; font-weight: 600; max-width: 90vw; box-shadow: var(--shadow); }
+/* 다이얼로그 */
+dialog { background: var(--solid); color: var(--fg); border: 0; border-radius: 18px; padding: 0; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); box-shadow: 0 30px 80px rgba(0,0,0,.3); }
+dialog.wide { width: min(980px, calc(100vw - 24px)); }
+dialog::backdrop { background: rgba(0,0,0,.32); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.dlg { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.dlg h3 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
+.opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.opt { border-radius: 12px; padding: 10px; display: flex; gap: 8px; align-items: flex-start; background: var(--fill); }
+.opt:has(input:checked) { box-shadow: 0 0 0 2px var(--accent); }
+.opt small { color: var(--muted); }
+.pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; max-height: 52vh; overflow: auto; padding: 4px; }
+.pcard { border-radius: 14px; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; box-shadow: 0 0 0 1px var(--line); }
+.pcard.cur { box-shadow: 0 0 0 2px var(--accent); }
+.pimg { border: 0; padding: 0; background: linear-gradient(var(--sky1), var(--sky2)); aspect-ratio: 3 / 2; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.pimg img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pmeta { padding: 9px 12px 2px; } .pmeta b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; } .pmeta small { color: var(--muted); }
+.pact { display: flex; gap: 6px; padding: 6px 12px 12px; }
+.newbox summary { list-style: none; display: inline-flex; }
+.newbox summary::-webkit-details-marker { display: none; }
+.stdbody { display: flex; flex-direction: column; gap: 8px; max-height: 56vh; overflow: auto; }
+.stdtbl { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; }
+.stdtbl input { min-width: 0; width: 100%; box-sizing: border-box; background: var(--fill); border: 0; border-radius: 8px; padding: 6px 8px; color: var(--fg); font-variant-numeric: tabular-nums; }
+.stdn { font-size: 12px; }
+.fmts { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.fmt { border: 0; background: var(--fill); border-radius: 12px; padding: 11px; text-align: left; display: flex; flex-direction: column; gap: 2px; color: var(--fg); }
+.fmt small { color: var(--muted); font-size: 11px; }
+.fmt.on { box-shadow: 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+#expStatus a { color: var(--accent); }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; align-items: center; }
+kbd { font: 12px var(--f-num); background: var(--fill); border-radius: 6px; padding: 2px 7px; justify-self: start; box-shadow: inset 0 -1px 0 var(--line); }
+.phthumbs { display: flex; gap: 6px; overflow-x: auto; }
+.phth { flex: none; width: 76px; height: 56px; border-radius: 10px; border: 0; padding: 0; overflow: hidden; background: var(--fill); display: grid; place-items: center; font-size: 12px; color: var(--fg); }
+.phth.on { box-shadow: 0 0 0 2px var(--accent); } .phth img { width: 100%; height: 100%; object-fit: cover; }
+.phth.add { cursor: pointer; }
+.phmain { display: grid; place-items: center; }
+.phwrap { position: relative; display: inline-block; max-width: 100%; }
+.phwrap img { display: block; max-width: 100%; max-height: 58vh; border-radius: 10px; cursor: crosshair; }
+.phpin { position: absolute; transform: translate(-50%, -50%); background: var(--accent); color: var(--on-accent); border: 0; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.phpin.gone { background: var(--muted); } .phpin.pending { background: #fff; color: #111; }
+.phpicker { display: flex; flex-direction: column; gap: 8px; }
+.phpicker .cats { max-height: 120px; overflow: auto; }
+.nogl { padding: 40px; color: #22252a; }
+/* 흑백 작업 보기 */
+body.mono #c2d, body.mono #c3d, body.mono #ov3d, body.mono .thumb, body.mono .pimg img { filter: grayscale(1); }
+/* 보여주기 */
+.showbar, .showtitle, .showmode { display: none; }
+body.show .top, body.show .left, body.show .right, body.show .mnav, body.show #v2d, body.show #v3d .bar, body.show .gutter, body.show .hist, body.show .quick { display: none !important; }
+body.show #v3d { display: block !important; }
+body.show .showbar { display: flex; position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; flex-direction: column; gap: 10px; align-items: center; padding-block: 16px calc(18px + env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); background: linear-gradient(transparent, rgba(0,0,0,.35)); }
+body.show .showtitle { display: block; position: absolute; left: max(16px, env(safe-area-inset-left, 0px)); top: calc(14px + env(safe-area-inset-top, 0px)); z-index: 20; border-radius: 14px; padding: 9px 15px; box-shadow: var(--shadow); }
+body.show .showmode { display: inline-flex; position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); top: calc(14px + env(safe-area-inset-top, 0px)); z-index: 20; }
+.showtitle b { font-size: 20px; display: block; letter-spacing: -.01em; }
+.showtitle span { font-size: 13px; color: var(--muted); }
+.shownav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.big { min-height: 46px; min-width: 46px; border-radius: 14px; border: 0; background: var(--float); -webkit-backdrop-filter: saturate(180%) blur(22px); backdrop-filter: saturate(180%) blur(22px); color: var(--fg); font-weight: 600; padding: 0 16px; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.big.pri { background: var(--accent); color: var(--on-accent); }
+#sceneNav { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+#sceneNav .chip { background: rgba(255,255,255,.22); color: #fff; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+#sceneNav .chip.on { background: #fff; color: #1d1d1f; }
+/* 폰 */
+.mnav, .mob { display: none; }
+.badge { background: var(--bad); color: #fff; border-radius: 999px; font-size: 10px; padding: 0 5px; font-weight: 700; }
+.badge:empty { display: none; }
+@media (max-width: 899px), (max-height: 540px) {
+  .top { gap: 4px; }
+  .top .desk, .brand { display: none; }
+  .mob { display: grid; }
+  .proj { max-width: 130px; }
+  .stage { flex-direction: column; }
+  body[data-view="split"] #v3d, .gutter { display: none; }
+  body[data-view="split"] #v2d { flex: 1; }
+  .left, .right { display: none; }
+  body[data-sheet="lib"] .left, body[data-sheet="props"] .right, body[data-sheet="checks"] .right, body[data-sheet="objs"] .right { display: flex; position: fixed; left: 0; right: 0; bottom: calc(58px + env(safe-area-inset-bottom, 0px)); height: 44%; width: auto; z-index: 15; border: 0; border-radius: 18px 18px 0 0; box-shadow: 0 -10px 30px rgba(0,0,0,.18); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); background: var(--solid); }
+  body[data-sheet="props"] .right, body[data-sheet="checks"] .right, body[data-sheet="objs"] .right { flex-direction: column; overflow: auto; }
+  body[data-sheet="props"] .right .s-checks, body[data-sheet="props"] .right .s-layers, body[data-sheet="props"] .right .s-objs,
+  body[data-sheet="checks"] .right .s-props, body[data-sheet="checks"] .right .s-objs,
+  body[data-sheet="objs"] .right .s-props, body[data-sheet="objs"] .right .s-checks, body[data-sheet="objs"] .right .s-layers { display: none; }
+  body[data-sheet="lib"] .stage, body[data-sheet="props"] .stage, body[data-sheet="checks"] .stage, body[data-sheet="objs"] .stage { height: 56%; flex: none; }
+  body[data-sheet="lib"] .quick, body[data-sheet="objs"] .quick, body[data-sheet="props"] .quick, body[data-sheet="checks"] .quick { display: none; }
+  .left .tools, .left .toolhint, .left .lk { display: none; }
+  body[data-sheet="lib"] .left .tools { display: grid; }
+  .grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .objs { max-height: none; }
+  .popin { left: auto; right: 0; }
+  .mnav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--panel); -webkit-backdrop-filter: saturate(180%) blur(22px); backdrop-filter: saturate(180%) blur(22px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+  .mnav button { border: 0; background: none; color: var(--muted); padding: 7px 0; min-height: 50px; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 10px; font-weight: 500; position: relative; }
+  .mnav button[aria-pressed="true"] { color: var(--accent); }
+  .mnav .badge { position: absolute; top: 4px; right: 22%; }
+  .quick { width: 100%; left: 0; right: 0; transform: none; bottom: 0; border-radius: 18px 18px 0 0; }
+  .qbody { max-height: 34vh; }
+  .qf input { width: 60px; }
+  .drawbar { top: 50px; }
+  .movehint { top: 50px; }
+  .hist { display: none; }
+  .opts { grid-template-columns: 1fr; }
+  .pgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* v5: 격자 메뉴 · 렌더링만 보기 · 사진 슬롯 · 가로 화면 · 태블릿 */
+.gridwrap { position: relative; }
+.gridmenu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 240px; box-shadow: var(--shadow); }
+.tg.ico { padding: 0; width: 32px; justify-content: center; }
+.eyeexit { display: none; position: absolute; right: max(14px, env(safe-area-inset-right, 0px)); top: calc(14px + env(safe-area-inset-top, 0px)); z-index: 30; width: 44px; height: 44px; border-radius: 50%; border: 0; place-items: center; color: var(--fg); box-shadow: var(--shadow); opacity: .85; }
+body.clean .top, body.clean .left, body.clean .right, body.clean .mnav, body.clean #v2d, body.clean .gutter, body.clean #v3d .bar, body.clean .hist, body.clean .quick, body.clean .drawbar, body.clean .movehint, body.clean .showbar, body.clean .showtitle, body.clean .showmode, body.clean .toast { display: none !important; }
+body.clean #v3d { display: block !important; flex: 1 1 100%; }
+body.clean .stage { height: 100% !important; }
+body.clean .eyeexit { display: grid; }
+.card.op .thumb { color: var(--fg); }
+.photostart { display: flex; flex-direction: column; gap: 8px; }
+.slots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.slot { aspect-ratio: 4 / 3; border-radius: 12px; background: var(--fill) center / cover no-repeat; display: grid; place-items: end center; padding: 6px; cursor: pointer; box-shadow: inset 0 0 0 1px var(--line); }
+.slot span { background: var(--float); border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 600; }
+.slot.has { box-shadow: 0 0 0 2px var(--accent); }
+.ailog { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.ailog .err { color: var(--bad); } .ailog .sum { font-weight: 600; }
+@media (min-width: 900px) and (max-width: 1279px) and (min-height: 541px) {
+  .left { width: 220px; } .right { width: 284px; }
+  .tools button { font-size: 10px; }
+}
+@media (max-width: 899px), (max-height: 540px) {
+  .slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-height: 540px) and (orientation: landscape) {
+  .top { padding-block: 4px; }
+  .mnav button { min-height: 40px; padding: 4px 0; flex-direction: row; gap: 6px; font-size: 11px; }
+  .quick { left: auto !important; right: 0; top: 0; bottom: 0; width: min(360px, 48vw) !important; border-radius: 16px 0 0 16px !important; transform: none !important; }
+  .qbody { max-height: none !important; flex: 1; }
+  body[data-sheet="lib"] .left, body[data-sheet="props"] .right, body[data-sheet="checks"] .right, body[data-sheet="objs"] .right { left: auto !important; right: 0; top: 0; width: min(380px, 52vw) !important; height: auto !important; bottom: calc(44px + env(safe-area-inset-bottom, 0px)) !important; border-radius: 16px 0 0 16px !important; }
+  body[data-sheet="lib"] .stage, body[data-sheet="props"] .stage, body[data-sheet="checks"] .stage, body[data-sheet="objs"] .stage { height: auto !important; flex: 1 !important; }
+  .drawbar { top: 46px; max-width: 60%; }
+  .bar { top: 6px; }
+}
+
+/* v6: 홈 · 층 · 레이어 · 나누기 */
+dialog.home { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; border-radius: 0; background: var(--bg); }
+.homein { max-width: 1100px; margin: 0 auto; padding-block: calc(20px + env(safe-area-inset-top, 0px)) 40px; padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 26px; }
+.homehead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.homehead .brand { font-size: 20px; }
+.hsec { display: flex; flex-direction: column; gap: 12px; }
+.hsec h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+.starts { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.start { border: 0; border-radius: 16px; background: var(--solid); box-shadow: 0 0 0 1px var(--line); padding: 16px; text-align: left; display: flex; flex-direction: column; gap: 4px; color: var(--fg); cursor: pointer; }
+.start:hover { box-shadow: 0 0 0 2px var(--accent); }
+.start b { font-size: 15px; } .start small { color: var(--muted); }
+.newbox[open] { background: var(--solid); border-radius: 16px; padding: 16px; box-shadow: 0 0 0 1px var(--line); }
+.pcard { position: relative; }
+@media (hover: hover) { .pcard .pact { position: absolute; left: 8px; right: 8px; top: 8px; opacity: 0; transform: translateY(-4px); transition: opacity .15s, transform .15s; flex-wrap: wrap; padding: 6px; border-radius: 12px; background: var(--float); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow); }
+  .pcard:hover .pact, .pcard:focus-within .pact { opacity: 1; transform: none; } }
+@media (hover: none) { .pact { flex-wrap: wrap; } }
+.lvlwrap { position: relative; }
+.lvl { border: 0; background: var(--fill); border-radius: 9px; padding: 6px 10px; font-weight: 600; display: inline-flex; gap: 6px; align-items: center; color: var(--fg); }
+.tri { font-size: 10px; color: var(--muted); }
+.lbadge { background: var(--accent); color: var(--on-accent); border-radius: 999px; font-size: 10px; padding: 1px 6px; }
+.lvlmenu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 40; border-radius: 14px; padding: 12px; min-width: 260px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow); }
+.lvrow { display: flex; align-items: center; gap: 6px; padding: 2px; border-radius: 9px; }
+.lvrow.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.lvgo { flex: 1; text-align: left; border: 0; background: none; padding: 7px 8px; font-weight: 600; color: var(--fg); }
+.lvrow small { color: var(--muted); font-family: var(--f-num); }
+.lvprev { width: 120px; height: 80px; object-fit: cover; border-radius: 10px; }
+.splitfab { position: fixed; z-index: 45; width: 32px; height: 32px; border-radius: 50%; box-shadow: var(--shadow); display: grid; place-items: center; }
+.splitfab button { border: 0; background: none; width: 32px; height: 32px; display: grid; place-items: center; color: var(--accent); }
+.splitpop, .layerpop { position: fixed; z-index: 46; width: 300px; border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow); color: var(--fg); }
+.layerpop { width: 320px; }
+.layerpop select { background: var(--fill); border: 0; border-radius: 8px; padding: 5px; color: var(--fg); }
+.lay { display: flex; align-items: center; gap: 7px; padding: 3px 4px; border-radius: 8px; }
+.lay.focus { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.lay.dim .lname { opacity: .5; }
+.lname { border: 0; background: none; padding: 3px 0; color: var(--fg); text-align: left; flex: 1; min-width: 0; font-weight: 500; }
+.lay.focus .lname { font-weight: 700; color: var(--accent); }
+.lop { width: 70px; }
+.lplus { width: 22px; height: 22px; border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent); font-weight: 700; line-height: 1; padding: 0; }
+.muted { color: var(--muted); }
+.libsub { grid-column: 1 / -1; margin: 6px 2px 0; font-size: 11px; font-weight: 600; color: var(--muted); }
+.rng { flex-direction: column; align-items: stretch !important; gap: 2px !important; font-size: 12px; }
+
+/* ===== v7 디자인: 포토샵 작업 공간 + 애플 Liquid Glass ===== */
+:root {
+  --bg: #e6e6e9; --chrome: #f6f6f8; --panel: #f6f6f8; --solid: #ffffff; --fill: rgba(60,60,67,.07); --fill2: rgba(60,60,67,.13);
+  --line: rgba(60,60,67,.12); --fg: #1d1d1f; --muted: #6b6b72; --accent: #0a7cff; --on-accent: #fff;
+  --canvas: #ececef; --grid: #e0e0e5; --grid2: #cfcfd6; --wall: #1d1d1f; --sky1: #dde2ea; --sky2: #f4f4f7;
+  --glass: rgba(255,255,255,.58); --glassHi: rgba(255,255,255,.9); --glassEdge: rgba(255,255,255,.65); --glassSh: 0 10px 30px rgba(20,20,40,.14), 0 1px 2px rgba(0,0,0,.06);
+  --float: var(--glass); --segOn: #ffffff; --r: 12px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111113; --chrome: #1d1d20; --panel: #1d1d20; --solid: #242428; --fill: rgba(255,255,255,.065); --fill2: rgba(255,255,255,.11);
+  --line: rgba(255,255,255,.075); --fg: #ececef; --muted: #8f8f98; --accent: #2f8bff; --on-accent: #fff;
+  --canvas: #18181a; --grid: #212124; --grid2: #2c2c31; --wall: #f0f0f2; --sky1: #3a3d43; --sky2: #18191c; --label: #fff; --labelStroke: rgba(0,0,0,.8);
+  --glass: rgba(40,40,46,.5); --glassHi: rgba(255,255,255,.16); --glassEdge: rgba(255,255,255,.12); --glassSh: 0 12px 36px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
+  --float: var(--glass); --segOn: #3a3a40; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #111113; --chrome: #1d1d20; --panel: #1d1d20; --solid: #242428; --fill: rgba(255,255,255,.065); --fill2: rgba(255,255,255,.11);
+  --line: rgba(255,255,255,.075); --fg: #ececef; --muted: #8f8f98; --accent: #2f8bff; --on-accent: #fff;
+  --canvas: #18181a; --grid: #212124; --grid2: #2c2c31; --wall: #f0f0f2; --sky1: #3a3d43; --sky2: #18191c; --label: #fff; --labelStroke: rgba(0,0,0,.8);
+  --glass: rgba(40,40,46,.5); --glassHi: rgba(255,255,255,.16); --glassEdge: rgba(255,255,255,.12); --glassSh: 0 12px 36px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
+  --float: var(--glass); --segOn: #3a3a40; color-scheme: dark; }
+body { background: var(--bg); }
+/* Liquid Glass: 반투명 · 흐림 · 위쪽 빛 · 얇은 테두리 */
+.glass, .tg, .bar .seg, .hist, .quick, .drawbar, .ctxbar, .mini, .minion, .walkhud, .cmdbox, .popin, .lvlmenu, .moremenu, .toast, .cmtpop, .histpop, .gridmenu, .splitpop, .layerpop, .showtitle, .big, .joy {
+  background: var(--glass) !important; -webkit-backdrop-filter: blur(22px) saturate(190%); backdrop-filter: blur(22px) saturate(190%);
+  box-shadow: inset 0 1px 0 var(--glassHi), inset 0 0 0 1px var(--glassEdge), var(--glassSh) !important; border: 0; color: var(--fg); }
+.big.pri { background: var(--accent) !important; color: var(--on-accent); }
+/* 위 막대: 포토샵 앱 바 */
+.top { background: var(--chrome); -webkit-backdrop-filter: none; backdrop-filter: none; border-bottom: 1px solid var(--line); min-height: 46px; box-sizing: border-box; gap: 6px; }
+.brand { font-weight: 700; letter-spacing: .02em; font-size: 13px; }
+.brand svg { color: #fff; background: linear-gradient(135deg, #2f8bff, #7a5cff); border-radius: 7px; padding: 3px; width: 22px; height: 22px; box-sizing: border-box; }
+.proj, .lvl { background: var(--fill); border-radius: 9px; }
+.seg { border-radius: 10px; background: var(--fill); }
+.seg button { border-radius: 8px; }
+.btn { border-radius: 9px; }
+.btn.pri { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #fff), var(--accent)); box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 2px rgba(0,0,0,.2); }
+.cmdbtn { display: inline-flex; align-items: center; gap: 8px; border: 0; background: var(--fill); color: var(--muted); border-radius: 10px; padding: 0 8px 0 10px; min-height: 32px; min-width: 170px; font-size: 13px; }
+@media (max-width: 1560px) { #saveState, .cmdbtn kbd { display: none; } .cmdbtn { min-width: 120px; } .top .btn { padding: 6px 10px; } }
+@media (max-width: 1280px) { .brand span { display: none; } }
+.cmdbtn span { flex: 1; text-align: left; }
+.cmdbtn kbd { font-size: 11px; padding: 1px 6px; }
+.cmdbtn:hover { background: var(--fill2); color: var(--fg); }
+#moreBtn { gap: 6px; }
+.moremenu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; border-radius: 20px; padding: 8px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; width: min(470px, calc(100vw - 24px)); }
+.moremenu button { border: 0; background: transparent; color: var(--fg); text-align: left; border-radius: 13px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.moremenu button:hover { background: var(--fill2); }
+.moremenu small { color: var(--muted); font-size: 11px; }
+/* 왼쪽: 세로 도구 막대 + 기물 패널 (포토샵) */
+@media (min-width: 900px) and (min-height: 541px) {
+  .left { width: 312px; display: grid; grid-template-columns: 56px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); background: var(--bg); border-right: 1px solid var(--line); }
+  .left .tools { grid-column: 1; grid-row: 1 / span 3; grid-template-columns: 1fr; align-content: start; gap: 4px; padding: 10px 6px; background: var(--chrome); border-right: 1px solid var(--line); }
+  .left .tools button { min-height: 50px; padding: 7px 0 5px; font-size: 10px; border-radius: 10px; }
+  .left .lk { grid-column: 2; grid-row: 1; padding: 8px 8px 0; } .left .toolhint { grid-column: 2; grid-row: 2; border: 0; padding: 8px 12px 0; }
+  .left .lib { grid-column: 2; grid-row: 3; margin: 6px; background: var(--chrome); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); min-height: 0; }
+  .right { background: var(--bg); border-left: 1px solid var(--line); padding: 6px; display: flex; flex-direction: column; gap: 6px; width: 320px; }
+  .right .sec { background: var(--chrome); border: 0; box-shadow: inset 0 0 0 1px var(--line); border-radius: 14px; flex: none; }
+}
+.tools button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.sec h2 { font-size: 11px; letter-spacing: .04em; color: var(--muted); }
+.card { background: var(--solid); box-shadow: inset 0 0 0 1px var(--line); border-radius: 12px; }
+.chip { border-radius: 999px; }
+/* 작업창: 포토샵 바탕 + 스튜디오 3D 배경 */
+.stage { background: var(--canvas); }
+#v3d { background: radial-gradient(120% 90% at 50% 0%, var(--sky1), var(--sky2)); }
+.gutter::before { background: var(--line); }
+.bar { left: 12px; top: 12px; right: 12px; gap: 6px; }
+.tg { border-radius: 999px; padding: 6px 12px; min-height: 32px; box-sizing: border-box; }
+.tg.ico { width: 32px; border-radius: 50%; }
+.tg[aria-pressed="true"] { color: var(--accent); }
+.bar .seg { border-radius: 999px; padding: 3px; }
+.bar .seg button { border-radius: 999px; }
+.hist { border-radius: 999px; padding: 4px; left: 12px; bottom: 12px; }
+.hist button { border-radius: 999px; }
+.quick { border-radius: 24px; }
+.qtabs { border-radius: 11px; } .qt { border-radius: 9px; }
+.drawbar { border-radius: 22px; }
+.popin, .lvlmenu, .gridmenu { border-radius: 18px; }
+.toast { border-radius: 999px; }
+dialog { background: var(--solid); border-radius: 22px; box-shadow: 0 0 0 1px var(--line), 0 30px 90px rgba(0,0,0,.45); }
+dialog.full { width: 96vw; max-width: none; height: 92vh; max-height: none; }
+dialog.home { background: radial-gradient(900px 420px at 0% -10%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%), radial-gradient(700px 380px at 100% 0%, color-mix(in srgb, #7a5cff 16%, transparent), transparent 70%), var(--bg); }
+.start, .pcard { background: var(--chrome); }
+/* 떠 있는 도구 막대 (선택) */
+.ctxbar { position: absolute; z-index: 15; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 999px; white-space: nowrap; }
+.ctxbar button { border: 0; background: transparent; color: var(--fg); width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; padding: 0; }
+.ctxbar button:hover { background: var(--fill2); }
+.ctxbar button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.ctxbar .cxdel:hover { color: var(--bad); }
+.ctxbar .cxmore { width: auto; padding: 0 12px 0 10px; display: inline-flex; gap: 5px; border-radius: 999px; font-weight: 600; font-size: 12px; }
+.cxn { font-size: 12px; font-weight: 600; padding: 0 6px 0 10px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.cxsep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; }
+/* 미니맵 */
+.mini { position: absolute; right: 12px; bottom: 12px; z-index: 7; border-radius: 16px; overflow: hidden; }
+.mini canvas { width: 100%; height: 100%; cursor: crosshair; }
+.minigrip, .minix { position: absolute; top: 4px; border: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--fill2); color: var(--fg); display: grid; place-items: center; padding: 0; font-size: 10px; opacity: .7; }
+.minigrip { left: 4px; cursor: nwse-resize; touch-action: none; } .minix { right: 4px; }
+.mini:hover .minigrip, .mini:hover .minix { opacity: 1; }
+.minion { position: absolute; right: 12px; bottom: 12px; z-index: 7; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; }
+/* 작업 기록 */
+.histpop { position: absolute; left: 12px; bottom: 60px; z-index: 16; width: 300px; max-height: min(60vh, 460px); border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; }
+.hphead { display: flex; align-items: center; gap: 8px; padding: 12px 12px 8px 16px; } .hphead b { flex: 1; } .hphead .muted { font-size: 11px; }
+.hlist { overflow: auto; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 1px; }
+.hrow { display: flex; justify-content: space-between; gap: 8px; border: 0; background: transparent; color: var(--fg); text-align: left; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
+.hrow small { color: var(--muted); font-size: 11px; flex: none; }
+button.hrow:hover { background: var(--fill2); }
+.hrow.now { background: color-mix(in srgb, var(--accent) 18%, transparent); font-weight: 600; }
+.hrow.redo { opacity: .55; font-style: italic; } .hrow.first { color: var(--muted); }
+/* 명령 검색 */
+.cmdk { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.28); display: flex; justify-content: center; align-items: flex-start; padding-top: max(10vh, env(safe-area-inset-top, 0px)); padding-left: 12px; padding-right: 12px; }
+.cmdbox { width: min(640px, 100%); border-radius: 22px; overflow: hidden; display: flex; flex-direction: column; }
+.cmdin { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); color: var(--muted); }
+.cmdin input { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 17px; color: var(--fg); outline: none; }
+#cmdList { list-style: none; margin: 0; padding: 6px; max-height: min(52vh, 460px); overflow: auto; }
+.cmdg { font-size: 11px; color: var(--muted); font-weight: 600; padding: 10px 10px 4px; }
+.cmdi { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 11px; cursor: pointer; }
+.cmdi.on { background: var(--accent); color: var(--on-accent); } .cmdi.on kbd { background: rgba(255,255,255,.2); color: #fff; }
+.cmdi kbd { font-size: 11px; }
+.cmdfoot { margin: 0; padding: 8px 16px 12px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); }
+/* 걷기 */
+.walkhud { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 12; border-radius: 22px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; width: max-content; max-width: calc(100% - 24px); box-sizing: border-box; }
+.whrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.whtitle { display: inline-flex; align-items: center; gap: 6px; }
+.whh { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+.whh input { width: 56px; background: var(--fill); border: 0; border-radius: 8px; padding: 6px 7px; color: var(--fg); font-size: 14px; font-weight: 600; text-align: center; }
+.wheye { font-size: 12px; color: var(--muted); border-radius: 8px; padding: 2px 6px; }
+.wheye.flash { animation: flash .6s; } @keyframes flash { from { background: color-mix(in srgb, var(--accent) 40%, transparent); } to { background: transparent; } } .wheye b { color: var(--fg); font-size: 15px; font-variant-numeric: tabular-nums; }
+.whud { display: inline-flex; gap: 2px; }
+.whk { margin: 0; font-size: 11px; color: var(--muted); }
+.joy { display: none; position: absolute; left: 20px; bottom: 120px; z-index: 12; width: 112px; height: 112px; border-radius: 50%; touch-action: none; }
+.joy span { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: var(--fg); opacity: .55; }
+body.walking .joy { display: block; }
+@media (hover: hover) and (pointer: fine) { body.walking .joy { display: none; } }
+body.walking #v3d .bar, body.walking .quick, body.walking .ctxbar, body.walking #ov3d .pin { display: none !important; }
+body.walking #c3d { cursor: grab; }
+/* 댓글 */
+.cpin { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #ffcc00; color: #111; font-size: 11px; font-weight: 700; flex: none; border: 0; padding: 0; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+.cpin.done { background: var(--muted); color: #fff; }
+.pin3 { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; width: 26px; height: 26px; }
+.cmtpop { position: fixed; z-index: 70; width: 290px; border-radius: 18px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.cmtpop textarea { background: var(--fill); border: 0; border-radius: 10px; padding: 8px 10px; color: var(--fg); font: inherit; resize: vertical; }
+.cth { max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 8px; } .cth p { margin: 0; }
+.chk-row.done { opacity: .55; }
+body.commenting #c3d, body.commenting #c2d { cursor: crosshair; }
+/* 안 비교 */
+.cmpbox { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; min-height: 0; flex: 1; position: relative; }
+.cmpf { margin: 0; position: relative; } .cmpf img { width: 100%; height: auto; display: block; border-radius: 14px; background: var(--canvas); }
+.cmpf figcaption { position: absolute; left: 10px; top: 10px; padding: 4px 12px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; font-weight: 600; font-size: 12px; }
+.cmpbox[data-mode="swipe"] { grid-template-columns: 1fr; }
+.cmpbox[data-mode="swipe"] .cmpf { grid-area: 1 / 1; } .cmpbox[data-mode="swipe"] .cmpf.b { clip-path: inset(0 0 0 var(--cut, 50%)); } .cmpbox[data-mode="swipe"] .cmpf.b figcaption { left: auto; right: 10px; }
+.cmpr { grid-area: 1 / 1; align-self: center; width: 100%; z-index: 2; margin: 0; }
+.ctbl { width: 100%; border-collapse: collapse; font-size: 13px; } .ctbl th, .ctbl td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; font-variant-numeric: tabular-nums; }
+.ctbl td.win { color: var(--ok); font-weight: 700; }
+#cmpDlg .dlg { height: 100%; box-sizing: border-box; overflow: auto; }
+/* 견적표 */
+.bomwrap { max-height: 56vh; overflow: auto; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line); }
+.bom { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bom th, .bom td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.bom thead th { position: sticky; top: 0; background: var(--solid); font-size: 11px; color: var(--muted); z-index: 1; }
+.bom tr.bg th { background: var(--fill); font-size: 12px; }
+.bom .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bom .bp { width: 104px; background: var(--fill); border: 0; border-radius: 8px; padding: 5px 8px; color: var(--fg); text-align: right; font-variant-numeric: tabular-nums; }
+.bom tfoot th { text-align: right; font-weight: 500; } .bom tfoot .tot th, .bom tfoot .tot td { font-weight: 700; font-size: 15px; }
+.bom tfoot input[type="number"] { background: var(--fill); border: 0; border-radius: 6px; padding: 3px 6px; color: var(--fg); }
+/* DXF · 모델 · 자동 배치 · 실사 */
+.dxfcv { width: 100%; height: auto; background: var(--canvas); border-radius: 14px; }
+.mdprev { display: grid; place-items: center; min-height: 140px; border-radius: 14px; background: repeating-conic-gradient(var(--fill) 0 25%, transparent 0 50%) 0 0 / 18px 18px; }
+.mdprev img { max-height: 200px; max-width: 100%; }
+.mdprev img:not([src]) { display: none; }
+.hqrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; } .hqrow .fld { min-width: 120px; flex: 1; }
+.hqbar { height: 6px; border-radius: 999px; background: var(--fill); overflow: hidden; } .hqbar span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), #7a5cff); transition: width .2s; }
+.hqprev { width: 100%; height: auto; border-radius: 14px; background: var(--canvas); }
+.aulist { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; max-height: 30vh; overflow: auto; }
+.aurow { display: flex; align-items: center; gap: 8px; justify-content: space-between; background: var(--fill); border-radius: 10px; padding: 6px 8px 6px 12px; font-size: 12px; }
+.aurow.on { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.aurow input { width: 46px; background: var(--solid); border: 0; border-radius: 7px; padding: 4px; color: var(--fg); text-align: center; }
+.aures { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.aucard { margin: 0; border-radius: 16px; overflow: hidden; background: var(--chrome); box-shadow: inset 0 0 0 1px var(--line); }
+.aucard img { width: 100%; display: block; } .aucard figcaption { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; } .aucard small { color: var(--muted); }
+.showvar { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.showvar .chip { background: rgba(255,255,255,.22); color: #fff; } .showvar .chip.on { background: #fff; color: #1d1d1f; }
+/* 공유 링크로 연 보기 전용 */
+body.viewer .left, body.viewer #moreWrap, body.viewer #homeBtn, body.viewer #projBtn, body.viewer #photoBtn, body.viewer #photoBtn2, body.viewer .quick, body.viewer .ctxbar, body.viewer .hist, body.viewer [data-bm="build"], body.viewer #acctBtn, body.viewer #varWrap, body.viewer .s-objs, body.viewer #showAll { display: none !important; }
+body.nocomment [data-cmt] { display: none !important; }
+@media (max-width: 899px), (max-height: 540px) {
+  #themeBtn { display: none; }
+  .ctxbar .cxn { display: none; }
+  .histpop { left: 8px; right: 8px; width: auto; bottom: 8px; }
+  .walkhud { top: 8px; padding: 8px 10px; } .whk { display: none; }
+  .moremenu { grid-template-columns: 1fr; right: -60px; }
+  .cmpbox { grid-template-columns: 1fr; }
+  .mini { bottom: 8px; right: 8px; }
+}
+.pill.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.adbody { overflow: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+#adminDlg .dlg { height: 100%; box-sizing: border-box; }
+.adt { width: 100%; border-collapse: collapse; font-size: 13px; }
+.adt th, .adt td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.adt thead th { position: sticky; top: 0; background: var(--solid); font-size: 11px; color: var(--muted); }
+.adt td.num, .adt th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.adact { display: flex; gap: 4px; justify-content: flex-end; }
+.adview { position: fixed; left: 50%; transform: translateX(-50%); top: calc(54px + env(safe-area-inset-top, 0px)); z-index: 60; border-radius: 999px; padding: 6px 6px 6px 16px; display: flex; gap: 10px; align-items: center; max-width: calc(100vw - 24px); }
+.adview span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+
+<div class="app">
+<header class="top">
+  <button class="ic" id="homeBtn" aria-label="홈 · 프로젝트 목록" title="홈"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg></button>
+  <div class="brand"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3h18v18H3z"/><path d="M3 12h9v9"/><path d="M12 3v5"/></svg><span class="desk">3D RENDER</span></div>
+  <button class="proj" id="projBtn" aria-label="프로젝트 목록 열기"><span id="projName">프로젝트</span></button>
+  <div class="lvlwrap" id="lvlWrap"><button class="lvl" id="lvlBtn" aria-label="층 바꾸기">1층 <span class="tri">▾</span></button><div class="lvlmenu glass" id="lvlMenu" hidden></div></div>
+  <div class="lvlwrap" id="varWrap"><button class="lvl" id="varBtn" aria-label="배치안 바꾸기 · 비교">A안 <span class="tri">▾</span></button><div class="lvlmenu glass" id="varMenu" hidden></div></div>
+  <span class="save desk" id="saveState">저장됨</span>
+  <div class="seg desk" role="group" aria-label="보기"><button data-view="2d">2D</button><button data-view="split">2D + 3D</button><button data-view="3d">3D</button></div>
+  <span class="sp"></span>
+  <button class="cmdbtn desk" id="cmdBtn" aria-label="기능 · 기물 검색 (Ctrl+K)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg><span>검색</span><kbd>Ctrl K</kbd></button>
+  <button class="ic mob" id="cmdBtn2" aria-label="검색"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>
+  <div class="lvlwrap" id="moreWrap"><button class="btn" id="moreBtn" aria-label="도구 더보기"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><path d="M17.5 14v7M14 17.5h7"/></svg><span class="desk">도구</span></button><div class="moremenu glass" id="moreMenu" hidden><button data-mm="auto"><b>주방 자동 배치</b><small>메뉴·기물 고르면 배치안 3개</small></button><button data-mm="cmp"><b>A안 · B안 비교</b><small>나란히 · 겹쳐서</small></button><button data-mm="bom"><b>자재 · 물량 · 견적표</b><small>엑셀로 저장</small></button><button data-mm="walk"><b>걷기 모드</b><small>내 키 눈높이로 둘러보기 · G</small></button><button data-mm="hq"><b>실사 렌더</b><small>그림자 · 부드러운 빛 · 4K</small></button><button data-mm="pano"><b>360° 파노라마</b><small>카톡 · 구글 포토에서 돌려 보기</small></button><button data-mm="dxf"><b>DXF 도면 불러오기</b><small>캐드 선 → 벽</small></button><button data-mm="model"><b>내 3D 모델 올리기</b><small>GLB · OBJ</small></button><button data-mm="cmt"><b>댓글 달기</b><small>3D 위에 핀 · C</small></button><button data-mm="share"><b>링크 공유</b><small>보기 · 댓글 링크</small></button><button data-mm="hist"><b>작업 기록</b><small>그때로 돌아가기 · H</small></button></div></div>
+  <button class="ic" id="themeBtn" aria-label="밝은 화면으로" title="밝게 · 어둡게"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
+  <button class="ic desk" id="tglLeft" aria-label="기물 패널 접기·펴기" title="기물 패널"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
+  <button class="ic desk" id="tglRight" aria-label="속성 패널 접기·펴기" title="속성 패널"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16"/></svg></button>
+  <button class="ic desk" id="photoBtn" aria-label="매장 사진" title="매장 사진에서 옮기기"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="3"/><circle cx="12" cy="12.5" r="3.5"/><path d="M8 5l1.5-2h5L16 5"/></svg></button>
+  <div class="gridwrap" id="gridWrap"><button class="ic" id="gridBtn" aria-pressed="false" aria-label="격자 보기" title="격자 보기"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg></button><div class="gridmenu glass" id="gridMenu" hidden></div></div>
+  <button class="ic" id="monoBtn" aria-pressed="false" aria-label="흑백으로 보기" title="흑백으로 보기"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg></button>
+  <button class="btn desk" id="adminBtn" hidden>관리자</button>
+  <button class="btn desk" id="acctBtn">로그인</button>
+  <button class="ic desk" id="helpBtn" aria-label="단축키 보기" title="단축키 (F1)">?</button>
+  <button class="ic mob" id="undoBtn" aria-label="실행 취소"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+  <button class="ic mob" id="redoBtn" aria-label="다시 실행"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+  <button class="btn desk" id="exportBtn">내보내기</button>
+  <button class="ic mob" id="exportBtn2" aria-label="내보내기"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M5 13v7h14v-7"/></svg></button>
+  <button class="btn pri" id="showBtn">보여주기</button>
+</header>
+
+<div class="main">
+<aside class="left" aria-label="도구와 기물">
+  <div class="tools" role="group" aria-label="도구">
+    <button data-tool="select"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 3l14 8-6 2-2 6z"/></svg>선택</button>
+    <button data-tool="wall"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20V4h16"/><path d="M8 20V8h12"/></svg>벽</button>
+    <button data-tool="door"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20h16"/><path d="M6 20V6"/><path d="M6 6a14 14 0 0 1 14 14"/></svg>문</button>
+    <button data-tool="window"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="5" width="16" height="14"/><path d="M12 5v14M4 12h16"/></svg>창</button>
+    <button data-tool="line"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 18h6V8h6v8h6"/></svg>배선·배관</button>
+  </div>
+  <div class="lk" id="lineKinds" hidden></div>
+  <div class="toolhint"><p class="hint" id="toolHint"></p></div>
+  <div class="lib">
+    <input class="search" id="libSearch" type="search" placeholder="기물 · 태그 검색 (예: 냉장고, 튀김 라인)" aria-label="기물 검색">
+    <div class="cats" id="libCats"></div>
+    <div class="grid" id="libGrid"></div>
+    <button class="btn" id="myBtn">+ 내 기물 등록</button>
+    
+  </div>
+</aside>
+
+<section class="stage" id="stage">
+  <div class="pane" id="v2d">
+    <canvas id="c2d" aria-label="2D 도면 편집 화면"></canvas>
+    <div class="bar">
+      <details class="pop"><summary class="tg">옵션</summary><div class="popin">
+        <label><input type="checkbox" id="snap" checked> 스냅 50mm · 벽에 붙이기</label>
+        <label><input type="checkbox" id="ortho" checked> 직각으로 그리기</label>
+        <span>전력 합계 <b class="kw" id="kwSum">0</b></span></div></details>
+      <button class="tg" id="fitBtn">전체 보기</button>
+    </div>
+  </div>
+  <div class="gutter" id="gutter" role="separator" aria-orientation="vertical" aria-label="2D와 3D 화면 비율 조절" tabindex="0"></div>
+  <div class="pane" id="v3d">
+    <canvas id="c3d" aria-label="3D 미리보기. 끌어서 회전, 휠이나 두 손가락으로 확대"></canvas>
+    <canvas id="ov3c" aria-hidden="true"></canvas>
+    <div id="ov3d"></div>
+    <div class="walkhud glass" id="walkHud" hidden></div>
+    <div class="joy" id="joy" aria-label="걷기 조이스틱" role="application"><span id="joyK"></span></div>
+    <button class="eyeexit glass" id="eyeExit" aria-label="도구 다시 보기" title="도구 다시 보기 (Esc)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.6-7 10-7c2 0 3.7.7 5.1 1.6M22 12s-3.6 7-10 7c-2 0-3.7-.7-5.1-1.6"/><path d="M4 20L20 4"/></svg></button>
+    <div class="bar">
+      <div class="seg bm" role="group" aria-label="3D 모드"><button data-bm="move" aria-pressed="true">Move</button><button data-bm="build" aria-pressed="false">Build</button></div>
+      <button class="tg ico" id="eyeBtn" aria-label="렌더링만 크게 보기" title="렌더링만 보기"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+      <button class="tg ico" id="fit3Btn" aria-label="도면을 가운데로" title="가운데로"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+      <button class="tg" id="spinBtn" aria-pressed="false">돌리기</button>
+      <button class="tg" id="walkBtn" title="1인칭 걷기 (G)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><path d="M12 7v6l-3 8M12 13l3 8M8 10l4-2 4 2"/></svg>걷기</button>
+      <button class="tg" data-cmt aria-pressed="false" title="3D 위에 댓글 (C)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>댓글</button>
+      <button class="tg" id="hqBtn" title="실사 렌더"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.6 5.6L20 9.5l-4 4 1 6-5-2.8L7 19.5l1-6-4-4 5.4-.9z"/></svg>실사</button>
+      <details class="pop"><summary class="tg">보기 옵션</summary><div class="popin">
+        <label><input type="checkbox" id="cutWalls" checked> 벽 낮춰 보기</label>
+        <label><input type="checkbox" id="outside" checked> 바깥 풍경</label>
+        <label><input type="checkbox" id="hq"> 선명하게</label>
+        <label><input type="checkbox" id="labels3d" checked> 조정 필요 표시</label>
+        <label class="rng">햇빛 방향<input type="range" id="rsSun" min="0" max="360" step="5"></label>
+        <label class="rng">햇빛 높이<input type="range" id="rsAlt" min="10" max="90" step="5"></label>
+        <label class="rng">밝기<input type="range" id="rsBright" min="0.5" max="1.6" step="0.05"></label></div></details>
+    </div>
+    <div class="seg bm showmode glass" role="group" aria-label="3D 모드"><button data-bm="move" aria-pressed="true">Move</button><button data-bm="build" aria-pressed="false">Build</button></div>
+    <div class="showtitle glass"><b id="showProj"></b><span id="sceneName"></span> · <span id="sceneNo"></span></div>
+    <div class="showbar">
+      <div id="showVar" class="showvar"></div>
+      <div id="sceneNav"></div>
+      <div class="shownav">
+        <button class="big" id="scPrev" aria-label="이전 장면">◀</button>
+        <button class="big pri" id="tourBtn" aria-pressed="false">자동 투어</button>
+        <button class="big" id="scNext" aria-label="다음 장면">▶</button>
+        <button class="big" id="scSave">지금 시점 저장</button>
+        <button class="big" id="scShot">이미지 저장</button>
+        <button class="big" id="showExit">편집으로</button>
+      </div>
+    </div>
+  </div>
+  <div class="drawbar glass" id="drawBar" hidden>
+    <div class="b3row" id="b3Row" hidden><div class="seg" role="group" aria-label="그릴 것"><button data-b3t="sketch">낙서</button><button data-b3t="wall">벽</button><button data-b3t="line">배선·배관</button></div>
+      <div class="skc" id="skColors"><button data-skc="#ff375f" style="background:#ff375f" aria-label="펜 색 #ff375f"></button><button data-skc="#ff9500" style="background:#ff9500" aria-label="펜 색 #ff9500"></button><button data-skc="#ffd60a" style="background:#ffd60a" aria-label="펜 색 #ffd60a"></button><button data-skc="#34c759" style="background:#34c759" aria-label="펜 색 #34c759"></button><button data-skc="#0a84ff" style="background:#0a84ff" aria-label="펜 색 #0a84ff"></button><button data-skc="#1d1d1f" style="background:#1d1d1f" aria-label="펜 색 #1d1d1f"></button><button data-skc="#ffffff" style="background:#ffffff" aria-label="펜 색 #ffffff"></button></div></div>
+    <div class="seg" role="group" aria-label="그리기 방식"><button data-dm2="line">직선</button><button data-dm2="arc">아치</button><button data-dm2="free">손그림</button></div>
+    <button class="tg2" id="assistBtn" aria-pressed="true">보정 ON</button>
+    <select id="lkSel" class="tg2" aria-label="배선·배관 종류" hidden></select>
+    <button class="tg2" id="finishBtn">끝내기</button><button class="tg2" id="drawExit" aria-label="그리기 닫기">✕</button>
+    <p class="dhint" id="drawHint"></p>
+  </div>
+  <p class="movehint" id="moveHint" hidden>이동 ON · 선택한 오브젝트를 끌어서 옮기세요</p>
+  <div class="hist glass" role="group" aria-label="작업 기록"><button id="undo2" aria-label="되돌리기">↶ 되돌리기</button><span id="histN"></span><button id="redo2" aria-label="다시 실행">다시 실행 ↷</button><button id="histBtn" aria-label="작업 기록 (H)" title="작업 기록 (H)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/></svg></button></div>
+  <div class="quick glass" id="quick" hidden></div>
+  <div class="ctxbar glass" id="ctxbar" role="toolbar" aria-label="선택한 개체 도구" hidden></div>
+  <div class="mini glass" id="mini" hidden><canvas id="miniC" aria-label="미니맵 · 눌러서 이동"></canvas><button class="minigrip" id="miniGrip" aria-label="미니맵 크기 조절" title="끌어서 크기 조절"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10V4h6M4 4l7 7"/></svg></button><button class="minix" id="miniX" aria-label="미니맵 닫기">✕</button></div>
+  <button class="minion glass" id="miniOn" hidden aria-label="미니맵 열기" title="미니맵"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><rect x="12" y="11" width="6" height="5" rx="1"/></svg></button>
+  <div class="histpop glass" id="histPop" hidden></div>
+</section>
+
+<aside class="right" aria-label="속성">
+  <section class="sec s-props"><h2>속성 · 스펙</h2><div id="props" style="display:flex;flex-direction:column;gap:9px"></div></section>
+  <section class="sec s-objs"><h2>오브젝트 <span class="hint" id="objSum"></span></h2>
+    <div class="row"><input class="search" id="objSearch" type="search" placeholder="오브젝트 찾기" aria-label="오브젝트 찾기"><button class="btn" id="showAll">모두 넣기</button></div>
+    <button class="btn" id="photoBtn2">매장 사진에서 옮기기</button>
+    <div id="objects" class="objs"></div></section>
+  <section class="sec s-layers"><h2>레이어</h2><div id="layers"></div></section>
+  <section class="sec s-cmts"><h2>댓글 <span class="hint" id="cmtSum"></span></h2><div id="cmtList" class="objs"></div></section>
+  <section class="sec s-checks"><h2>점검 <span class="sum" id="checkSum"></span></h2><div id="checks"></div></section>
+</aside>
+</div>
+
+<nav class="mnav" aria-label="화면">
+  <button data-mview="2d"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 3h18v18H3z"/><path d="M3 12h9v9"/></svg>도면</button>
+  <button data-mview="3d"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 8l9-5 9 5-9 5z"/><path d="M3 8v8l9 5 9-5V8"/></svg>3D</button>
+  <button data-sheet="lib"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>기물</button>
+  <button data-sheet="objs"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="4" cy="6" r=".5"/></svg>오브젝트</button>
+  <button data-sheet="checks"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>점검<span class="badge" id="badgeChecks"></span></button>
+</nav>
+</div>
+
+<dialog id="projDlg" class="home"><div class="homein">
+  <header class="homehead"><div class="brand"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3h18v18H3z"/><path d="M3 12h9v9"/><path d="M12 3v5"/></svg><span>3D RENDER</span></div><span class="sp"></span><button class="btn" type="button" id="acctBtn2">계정 · 동기화</button><button class="btn pri" type="button" data-close>지금 프로젝트로</button></header>
+  <section class="hsec"><h2>프로젝트 시작하기</h2>
+    <div class="starts">
+      <button class="start" data-start="rect"><b>사각 매장</b><small>가로 · 세로만 넣고 시작</small></button>
+      <button class="start" data-start="empty"><b>빈 도면</b><small>벽을 직접 그리기</small></button>
+      <button class="start" data-start="photos"><b>실측 + 사방 사진</b><small>AI가 기물 찾아 넣기</small></button>
+      <button class="start" data-start="sample"><b>예시 매장</b><small>38평 치킨펍</small></button>
+      <label class="start"><b>파일 불러오기</b><small>공유받은 프로젝트 파일</small><input type="file" id="importFile" accept=".json,application/json" hidden></label>
+    </div>
+    <details class="newbox" id="newBox"><summary hidden>새 프로젝트</summary>
+  <form id="newForm" class="dlg" style="padding:12px 0 0">
+    <label class="fld"><span>이름</span><input id="nfName" name="name" placeholder="예: 강남점 치킨펍" required></label>
+    <div class="g3"><label class="fld"><span>천장 마감 높이</span><input id="nfCeil" name="ceil" type="number" value="2700"></label><label class="fld"><span>천장 가벽 높이</span><input id="nfSoffit" name="soffit" type="number" value="2400"></label><span></span></div>
+    <div class="opts">
+      <label class="opt"><input type="radio" name="start" value="rect" checked><span><b>사각 매장</b><br><small>가로·세로만 넣고 시작</small></span></label>
+      <label class="opt"><input type="radio" name="start" value="empty"><span><b>빈 도면</b><br><small>벽을 직접 그리기</small></span></label>
+      <label class="opt"><input type="radio" name="start" value="sample"><span><b>예시 매장</b><br><small>38평 치킨펍</small></span></label>
+      <label class="opt"><input type="radio" name="start" value="photos"><span><b>실측 + 사방 사진</b><br><small>AI가 기물을 찾아 넣기</small></span></label>
+    </div>
+    <div id="photoStart" class="photostart" hidden>
+      <p class="hint">아래 가로·세로에 실측값을 넣고, 방 가운데쯤에서 네 벽을 각각 정면으로 같은 높이·같은 비율로 찍어 올려 주세요. 위쪽 벽이 북쪽입니다.</p>
+      <div class="slots">
+        <label class="slot"><input type="file" id="phN" accept="image/*" hidden><span>북쪽 벽</span></label>
+        <label class="slot"><input type="file" id="phE" accept="image/*" hidden><span>동쪽 벽</span></label>
+        <label class="slot"><input type="file" id="phS" accept="image/*" hidden><span>남쪽 벽</span></label>
+        <label class="slot"><input type="file" id="phWw" accept="image/*" hidden><span>서쪽 벽</span></label>
+      </div>
+    </div>
+    <div class="g3"><label class="fld"><span>가로 mm (동서)</span><input id="nfW" name="w" type="number" value="8000"></label><label class="fld"><span>세로 mm (남북)</span><input id="nfD" name="d" type="number" value="12000"></label><span></span></div>
+    <div class="row wrap"><button class="btn pri" type="submit">만들기</button></div>
+  </form>
+    </details>
+  </section>
+  <section class="hsec"><h2>최근 프로젝트</h2><div id="projList"></div></section>
+</div></dialog>
+
+<dialog id="stdDlg"><div class="dlg">
+  <h3 id="stdTitle">기본 규격 정하기</h3>
+  <p class="hint">여기서 정한 크기로 기물이 처음부터 놓이고, 스냅과 타일 무늬도 이 단위를 따릅니다. 나중에 프로젝트 설정에서 바꿀 수 있어요.</p>
+  <div id="stdBody" class="stdbody"></div>
+  <div class="row"><button class="btn pri" id="stdGo">이 규격으로 시작</button><button class="btn" id="stdSkip">건너뛰기</button><button class="btn" data-close>닫기</button></div>
+</div></dialog>
+
+<dialog id="syncDlg"><div class="dlg">
+  <h3>계정 · 동기화</h3>
+  <p class="hint" id="syncState"></p>
+  <form id="syncForm" class="dlg" style="padding:0">
+    <div id="syncServer" class="g3" style="grid-template-columns:1fr 1fr"><label class="fld"><span>서버 주소 (Supabase URL)</span><input id="sUrl" placeholder="https://xxxx.supabase.co"></label><label class="fld"><span>공개 키 (anon key)</span><input id="sKey"></label></div>
+    <div id="syncLogin" class="dlg" style="padding:0">
+      <div class="g3" style="grid-template-columns:1fr 1fr"><label class="fld"><span>이메일</span><input id="sEmail" type="email" autocomplete="username"></label><label class="fld"><span>비밀번호</span><input id="sPw" type="password" autocomplete="current-password"></label></div>
+      <div class="row"><button class="btn pri" id="sLogin" type="submit">로그인</button><button class="btn" id="sSignup" type="submit">처음이면 가입</button></div>
+    </div>
+  </form>
+  <div id="syncOn" class="row wrap"><button class="btn pri" id="sNow">지금 동기화</button><label class="chk"><input type="checkbox" id="sAuto"> 자동 동기화</label><button class="btn" id="sOut">로그아웃</button></div>
+  <label class="fld"><span>AI 인식 키 (설치형 앱에서 사진 인식용 · Anthropic API 키)</span><input id="sAi" type="password" autocomplete="off" placeholder="Claude 안에서 열면 없어도 돼요"></label>
+  <p class="hint" id="syncMsg" role="status"></p>
+  <button class="btn" data-close>닫기</button>
+</div></dialog>
+
+<dialog id="helpDlg"><div class="dlg">
+  <h3>단축키</h3>
+  <div class="keys">
+    <kbd>Ctrl+C</kbd><span>복사</span><kbd>Ctrl+X</kbd><span>잘라내기</span><kbd>Ctrl+V</kbd><span>붙여넣기</span><kbd>Ctrl+D</kbd><span>복제</span>
+    <kbd>Ctrl+Z</kbd><span>되돌리기</span><kbd>Ctrl+Y</kbd><span>다시 실행</span><kbd>Ctrl+S</kbd><span>저장</span><kbd>Ctrl+P</kbd><span>내보내기</span>
+    <kbd>Ctrl+Shift+&gt;</kbd><span>비율 유지 10% 크게</span><kbd>Ctrl+Shift+&lt;</kbd><span>비율 유지 10% 작게</span><kbd>Ctrl+] / [</kbd><span>5% 크게 · 작게</span>
+    <kbd>M</kbd><span>이동 ON/OFF</span><kbd>방향키</kbd><span>이동 단위만큼 옮기기 (Shift ×10)</span><kbd>R</kbd><span>90° 돌리기</span>
+    <kbd>Ctrl+K</kbd><span>기능 · 기물 검색</span><kbd>G</kbd><span>걷기 모드 켜기 · 끄기</span><kbd>Q / E</kbd><span>걷기: 눈높이 내리기 · 올리기</span><kbd>1~4</kbd><span>걷기: 아이 · 앉음 · 내 키 · 위에서</span>
+    <kbd>C</kbd><span>3D 위에 댓글</span><kbd>H</kbd><span>작업 기록</span><kbd>Alt + 끌기</kbd><span>정렬선 잠시 끄기</span>
+    <kbd>Delete</kbd><span>삭제</span><kbd>Esc</kbd><span>그리기 취소 · 선택 해제</span><kbd>Enter</kbd><span>그리기 끝</span><kbd>F1</kbd><span>이 창</span>
+  </div>
+  <button class="btn" data-close>닫기</button>
+</div></dialog>
+
+<dialog id="expDlg"><div class="dlg">
+  <h3>내보내기</h3>
+  <div class="lbl">파일 형식</div>
+  <div class="fmts">
+    <button class="fmt" data-fmt="pdf"><b>PDF</b><small>평면도 + 3D 2장</small></button>
+    <button class="fmt" data-fmt="jpg"><b>JPEG</b><small>3D 고화질 1920px</small></button>
+    <button class="fmt" data-fmt="small"><b>저용량 이미지</b><small>3D 960px · 메신저용</small></button>
+    <button class="fmt" data-fmt="plan"><b>평면도 JPEG</b><small>흰 바탕 도면</small></button>
+    <button class="fmt" data-fmt="dxf"><b>CAD (DXF)</b><small>레이어별 · 오토캐드</small></button>
+    <button class="fmt" data-fmt="csv"><b>기물 목록</b><small>엑셀 CSV</small></button>
+    <button class="fmt" data-fmt="mp4"><b>영상</b><small>한 바퀴 도는 3D · MP4</small></button>
+    <button class="fmt" data-fmt="obj"><b>3D 모델 (OBJ)</b><small>렌더 프로그램 · 블렌더용</small></button>
+    <button class="fmt" data-fmt="hq"><b>실사 렌더</b><small>그림자 · 2560px</small></button>
+    <button class="fmt" data-fmt="pano"><b>360° 사진</b><small>구글 포토 · 페이스북에서 돌려 보기</small></button>
+    <button class="fmt" data-fmt="panohtml"><b>360° 보기 페이지</b><small>HTML 하나로 돌려 보기</small></button>
+    <button class="fmt" data-fmt="xlsx"><b>견적 엑셀</b><small>물량 · 단가 · 합계</small></button>
+    <button class="fmt" data-fmt="json"><b>프로젝트 파일</b><small>백업 · 공유</small></button>
+  </div>
+  <label class="chk" id="expLinkedRow" hidden><input type="checkbox" id="expLinked" checked> 연결된 층도 함께 내보내기</label>
+  <div class="lbl">보낼 곳</div>
+  <div class="row wrap"><button class="btn pri" data-dest="drive">구글 드라이브</button><button class="btn pri" data-dest="naver">네이버 메일</button><button class="btn" data-dest="device">이 기기에 저장</button></div>
+  <p class="hint" id="expStatus" role="status"></p>
+  <button class="btn" data-close>닫기</button>
+</div></dialog>
+
+<dialog id="myDlg"><form class="dlg" id="myForm">
+  <h3>내 기물 등록</h3>
+  <div class="g3"><label class="fld"><span>이름</span><input id="mfName" name="name" required placeholder="예: 우성 45박스"></label><label class="fld"><span>태그</span><input id="mfTag" name="tag" placeholder="예: 메인 냉장"></label>
+  <label class="fld"><span>모양</span><select id="mfShape" name="shape"><option value="box">기본 박스</option><option value="fridge">냉장고</option><option value="tfridge">테이블 냉장고</option><option value="work2">작업대</option><option value="sink">싱크</option><option value="fryer">튀김기</option><option value="range">레인지</option><option value="rack">랙 · 선반</option><option value="table">테이블</option><option value="chair">의자</option><option value="sofa">소파</option><option value="plant">식물</option></select></label></div>
+  <div class="g3"><label class="fld"><span>가로 W</span><input id="mfW" name="w" type="number" value="1200"></label><label class="fld"><span>깊이 D</span><input id="mfD" name="d" type="number" value="700"></label><label class="fld"><span>높이 H</span><input id="mfH" name="h" type="number" value="850"></label></div>
+  <div class="g3"><label class="fld"><span>설치 높이</span><input id="mfE" name="elev" type="number" value="0"></label><label class="fld"><span>레이어</span><select id="mfL" name="layer"><option value="floor">바닥 설치 (1단)</option><option value="upper">2단 설치</option><option value="ceil">천장 공사</option><option value="deco">인테리어</option></select></label><label class="fld"><span>색</span><input id="mfC" name="color" type="color" value="#c9ced4"></label></div>
+  <div class="row wrap"><label class="chk"><input type="checkbox" name="drain"> 배수 필요</label><label class="chk"><input type="checkbox" name="gas"> 가스</label><label class="chk"><input type="checkbox" name="hood"> 후드 필요</label><label class="fld" style="flex-direction:row;align-items:center;gap:6px"><span>kW</span><input id="mfKw" name="kw" type="number" step="0.1" value="0" style="width:70px"></label></div>
+  <div class="row wrap" style="align-items:center"><label class="btn">평면 이미지 (선택)<input type="file" id="myImg" accept="image/*" hidden></label><span class="hint" id="myImgName">선택 안 함</span></div>
+  <div class="row"><button class="btn pri" type="submit">저장</button><button class="btn" type="button" data-close>닫기</button></div>
+</form></dialog>
+
+
+
+<dialog id="phDlg" class="wide"><div class="dlg">
+  <div class="row" style="align-items:center"><h3 style="flex:1">매장 사진 → 도면</h3><button class="btn danger" id="phDel">이 사진 지우기</button><button class="btn" data-close>닫기</button></div>
+  <div class="phthumbs" id="phThumbs"></div>
+  <p class="hint" id="phHint"></p>
+  <div id="phMain" class="phmain"></div>
+  <div id="phAiRow" class="row wrap" hidden style="align-items:center"><label class="fld" style="flex-direction:row;align-items:center;gap:8px"><span>이 사진은</span><select id="phSide"><option value="N">북쪽 벽</option><option value="E">동쪽 벽</option><option value="S">남쪽 벽</option><option value="W">서쪽 벽</option></select></label><button class="btn pri" id="phAi">AI로 기물 찾아 넣기</button></div>
+  <div id="phPicker" class="phpicker" hidden><div class="row"><input class="search" id="phQ" type="search" placeholder="무엇인가요? (예: 냉장고, 의자)" aria-label="기물 이름"><button class="btn" id="phCancel">취소</button></div><div class="cats" id="phList"></div></div>
+</div></dialog>
+<dialog id="levelDlg"><div class="dlg">
+  <h3>층 · 공간 추가</h3>
+  <p class="hint" id="lvBase"></p>
+  <div id="lvStep1" class="dlg" style="padding:0">
+    <p>새 층의 도면이나 사진을 올릴까요?</p>
+    <div class="row wrap"><label class="btn pri">도면 · 사진 올리기<input type="file" id="lvPlanFile" accept="image/*" hidden></label><button class="btn" id="lvNoPlan">도면 없이 추가</button></div>
+  </div>
+  <div id="lvStep2" class="dlg" style="padding:0" hidden>
+    <div id="lvPlanRow" class="row wrap" hidden style="align-items:center"><img id="lvPlanPrev" alt="올린 도면" class="lvprev"><label class="chk"><input type="checkbox" id="lvAiWalls"> AI로 벽 읽어서 그리기 (실험)</label></div>
+    <div class="g3"><label class="fld"><span>이름</span><input id="lvNm"></label><label class="fld"><span>층고 mm</span><input id="lvH" type="number" value="3300"></label><label class="fld"><span>바닥 재질</span><select id="lvFloorMat"></select></label></div>
+    <label class="fld"><span>외벽</span><select id="lvWalls"><option value="none">없음 · 바닥판만 두고 시작</option><option value="outer">있음 · 아래층 외벽 그대로 세우기</option></select></label>
+    <p class="hint">내부 벽 · 방 · 기물은 비어 있는 상태로 시작합니다. 위쪽 층 이름 옆 ▾에서 층을 오갈 수 있어요.</p>
+    <div class="row"><button class="btn pri" id="lvGo">추가하기</button><button class="btn" data-close>취소</button></div>
+  </div>
+</div></dialog>
+<div class="splitfab glass" id="splitFab" hidden><button aria-label="벽 나누기" title="벽 나누기"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h7M14 12h7"/><path d="M12 3v18" stroke-dasharray="3 3"/></svg></button></div>
+<div class="splitpop glass" id="splitPop" hidden>
+  <div class="qrow"><b style="flex:1">벽 나누기</b><small id="spLen" class="qk"></small><button class="qb" id="spX" aria-label="닫기">✕</button></div>
+  <div class="qrow"><button class="qb" data-spn="2">2등분</button><button class="qb" data-spn="3">3등분</button><button class="qb" data-spn="4">4등분</button></div>
+  <div class="qrow"><label class="qf"><span>비율</span><input id="spRatio2" value="1:1" style="width:90px"></label><button class="qb on" id="spRatio">비율로 나누기</button></div>
+  <div class="qrow"><label class="qf"><span>시작에서</span><input id="spAt" type="number" style="width:90px"> mm</label><button class="qb on" id="spAtGo">여기서 나누기</button></div>
+</div>
+<div class="layerpop glass" id="layerPop" hidden></div>
+<dialog id="aiDlg"><div class="dlg">
+  <h3>사진에서 기물 찾기</h3>
+  <p class="hint">사진마다 10~60초 걸려요. 찾은 물건은 도면에 개별 개체로 들어갑니다.</p>
+  <ol id="aiLog" class="ailog"></ol>
+  <button class="btn" data-close>닫기</button>
+</div></dialog>
+
+<div class="cmdk" id="cmdk" hidden><div class="cmdbox glass" role="dialog" aria-label="검색"><div class="cmdin"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg><input id="cmdQ" type="text" placeholder="기능 · 기물 · 도면 안 오브젝트 검색 (초성도 돼요: ㄴㅈㄱ)" aria-label="검색어" autocomplete="off"><kbd>Esc</kbd></div><ul id="cmdList" role="listbox"></ul><p class="cmdfoot">↑↓ 고르기 · Enter 실행 · 기물은 화면 가운데에 놓여요</p></div></div>
+<div class="cmtpop glass" id="cmtPop" hidden></div>
+
+<dialog id="hqDlg" class="wide"><div class="dlg">
+  <div class="row" style="align-items:center"><h3 style="flex:1">실사 렌더</h3><button class="btn" data-close>닫기</button></div>
+  <p class="hint">햇빛 그림자 · 부드러운 빛 · 톤 매핑을 여러 장 겹쳐 계산해요. 앱 안에서 바로 되고, 더 사실적인 결과가 필요하면 OBJ로 내보내 블렌더 · D5 · 트윈모션에서 렌더하세요.</p>
+  <div class="hqrow"><label class="fld"><span>시점</span><select id="hqScene"></select></label>
+    <label class="fld"><span>크기</span><select id="hqRes"><option value="1920x1080">FHD 1920×1080</option><option value="2560x1440" selected>QHD 2560×1440</option><option value="3840x2160">4K 3840×2160</option><option value="2400x1697">A4 가로 2400×1697</option></select></label>
+    <label class="fld"><span>품질</span><select id="hqN"><option value="8">빠르게 (8장)</option><option value="24" selected>보통 (24장)</option><option value="64">최고 (64장)</option></select></label>
+    <label class="fld"><span>시간대</span><select id="hqTime"><option value="now">지금 햇빛 설정</option><option value="morning">아침</option><option value="noon">한낮</option><option value="after">오후</option><option value="dusk">노을</option></select></label>
+    <label class="chk"><input type="checkbox" id="hqCut"> 벽 낮춰 보기</label></div>
+  <div class="hqbar"><span id="hqBar"></span></div>
+  <canvas id="hqPrev" class="hqprev" width="960" height="540"></canvas>
+  <p class="hint" id="hqStatus" role="status"></p>
+  <div class="row wrap"><button class="btn pri" id="hqGo">렌더 시작</button><button class="btn" id="hqSave" disabled>JPG 저장</button><button class="btn" id="hqSavePng" disabled>PNG 저장</button></div>
+</div></dialog>
+
+<dialog id="cmpDlg" class="full"><div class="dlg">
+  <div class="row wrap" style="align-items:center"><h3 style="flex:1">안 비교</h3>
+    <select id="cmpA" class="tg2" aria-label="왼쪽 안"></select><span class="muted">vs</span><select id="cmpB" class="tg2" aria-label="오른쪽 안"></select>
+    <div class="seg" role="group" aria-label="비교 방식"><button data-cmpm="side">나란히</button><button data-cmpm="swipe">겹쳐서</button></div>
+    <div class="seg" role="group" aria-label="화면"><button data-cmpv="3d">3D</button><button data-cmpv="plan">평면도</button></div>
+    <button class="btn pri" id="cmpUse">오른쪽 안으로 바꾸기</button><button class="btn" data-close>닫기</button></div>
+  <div class="cmpbox" id="cmpBox"></div>
+  <div id="cmpStats"></div>
+</div></dialog>
+
+<dialog id="bomDlg" class="wide"><div class="dlg">
+  <div class="row wrap" style="align-items:center"><h3 style="flex:1">자재 · 물량 · 견적표</h3><button class="btn pri" id="bomXlsx">엑셀 (.xlsx)</button><button class="btn" id="bomCsv">CSV</button><button class="btn" data-close>닫기</button></div>
+  <p class="hint" id="bomInfo"></p>
+  <div class="bomwrap"><table class="bom"><thead><tr><th>항목</th><th>규격</th><th>수량</th><th>단위</th><th>단가 (원)</th><th>금액</th></tr></thead><tbody id="bomBody"></tbody><tfoot id="bomFoot"></tfoot></table></div>
+  <p class="hint">물량은 도면 기준 추정치예요. 벽은 외벽 한 면 · 칸막이 양면, 문 · 창 면적을 뺐어요. 발주 전 현장 실측으로 확인하세요.</p>
+</div></dialog>
+
+<dialog id="dxfDlg" class="wide"><div class="dlg">
+  <div class="row" style="align-items:center"><h3 style="flex:1">DXF 도면 불러오기</h3><button class="btn" data-close>닫기</button></div>
+  <div class="row wrap" style="align-items:center"><label class="btn pri">DXF 파일 고르기<input type="file" id="dxfFile" accept=".dxf,.dwg" hidden></label>
+    <label class="fld" style="flex-direction:row;align-items:center;gap:6px"><span>단위</span><select id="dxfUnit"><option value="auto">자동</option><option value="1">mm</option><option value="10">cm</option><option value="1000">m</option><option value="25.4">inch</option></select></label>
+    <label class="chk"><input type="checkbox" id="dxfMerge" checked> 두 줄 벽을 벽 하나로</label><label class="chk"><input type="checkbox" id="dxfRest"> 남는 한 줄도 벽으로</label><label class="chk"><input type="checkbox" id="dxfReplace" checked> 지금 벽 지우고 바꾸기</label></div>
+  <div class="lbl">벽으로 쓸 레이어</div><div class="qmats" id="dxfLayers"></div>
+  <canvas id="dxfCv" class="dxfcv" width="900" height="460"></canvas>
+  <p class="hint" id="dxfInfo" role="status"></p>
+  <div class="row"><button class="btn pri" id="dxfOk" disabled>벽으로 불러오기</button></div>
+</div></dialog>
+
+<dialog id="mdDlg"><div class="dlg">
+  <h3>내 3D 모델 올리기</h3>
+  <p class="hint">제조사 · 3D 웨어하우스 등에서 받은 GLB · OBJ를 내 기물로 저장해요. 크기는 mm로 맞추고, 너무 복잡하면 자동으로 단순하게 줄여요.</p>
+  <label class="btn pri">파일 고르기 (GLB · OBJ · MTL)<input type="file" id="mdFile" accept=".glb,.obj,.mtl" multiple hidden></label>
+  <div class="mdprev"><img id="mdPrev" alt="위에서 본 모습"></div>
+  <p class="hint" id="mdInfo" role="status"></p>
+  <div class="g3"><label class="fld"><span>이름</span><input id="mdName"></label><label class="fld"><span>파일 단위</span><select id="mdUnit"><option value="1">mm</option><option value="10">cm</option><option value="1000">m</option><option value="25.4">inch</option></select></label>
+    <label class="fld"><span>레이어</span><select id="mdLayer"><option value="floor">바닥 설치</option><option value="deco">인테리어</option><option value="upper">벽 · 상부</option><option value="ceil">천장</option></select></label></div>
+  <div class="row"><button class="btn pri" id="mdOk" disabled>내 기물로 저장 · 배치</button><button class="btn" data-close>닫기</button></div>
+</div></dialog>
+
+<dialog id="autoDlg" class="wide"><div class="dlg">
+  <div class="row" style="align-items:center"><h3 style="flex:1">주방 자동 배치 제안</h3><button class="btn" data-close>닫기</button></div>
+  <p class="hint">냉장 → 작업 → 화기 → 보온 → 세척 흐름대로 벽을 따라 놓고, 화기 위에 후드를 달고, 문 앞은 비워요. 일자 · ㄱ자 · 11자 · ㄷ자 중 맞는 안 3개를 보여 줘요.</p>
+  <div class="hqrow"><label class="fld"><span>X</span><input id="auX" type="number"></label><label class="fld"><span>Y</span><input id="auY" type="number"></label><label class="fld"><span>가로 W</span><input id="auW" type="number"></label><label class="fld"><span>세로 D</span><input id="auD" type="number"></label><label class="fld"><span>통로 폭</span><input id="auAisle" type="number"></label>
+    <label class="fld"><span>메뉴</span><select id="auMenu"><option value="chicken">치킨 · 튀김</option><option value="korean">한식 · 국물</option><option value="cafe">카페 · 디저트</option><option value="snack">분식</option></select></label></div>
+  <p class="hint">영역: <b id="auSrc"></b> (바닥 구역을 선택하고 열면 그 구역에 배치해요)</p>
+  <div class="aulist" id="auList"></div>
+  <div class="row"><button class="btn pri" id="auGo">배치안 만들기</button></div>
+  <div class="aures" id="auRes"></div>
+</div></dialog>
+
+<dialog id="shareDlg"><div class="dlg">
+  <h3>링크 공유</h3>
+  <div id="shNeed"><p>링크 공유는 동기화 서버(Supabase)에 로그인해야 쓸 수 있어요. 받는 사람은 로그인 없이 링크만 열면 돼요.</p><button class="btn pri" id="shLogin">로그인 · 서버 연결</button></div>
+  <div id="shBody" class="dlg" style="padding:0">
+    <label class="fld"><span>앱 웹 주소 (3D-RENDER.html을 올린 주소)</span><input id="shBase" placeholder="https://내아이디.github.io/3d-render/"></label>
+    <label class="chk"><input type="checkbox" id="shAllow" checked> 받는 사람이 3D 위에 댓글 남기기 허용</label>
+    <div class="row"><button class="btn pri" id="shGo">링크 만들기 · 최신으로</button><button class="btn" id="shPull">받은 댓글 가져오기</button></div>
+    <div class="row"><input class="search" id="shLink" readonly aria-label="공유 링크"><button class="btn" id="shCopy">복사</button></div>
+  </div>
+  <p class="hint" id="shStatus" role="status"></p>
+  <button class="btn" data-close>닫기</button>
+</div></dialog>
+<div class="adview glass" id="adView" hidden><b>관리자 보기</b><span id="adViewName"></span><button class="btn pri" id="adViewExit">내 작업으로 돌아가기</button></div>
+<dialog id="adminDlg" class="full"><div class="dlg">
+  <div class="row wrap" style="align-items:center"><h3 style="flex:1">관리자</h3>
+    <div class="seg" role="group" aria-label="관리 화면"><button data-adt="users">사용자</button><button data-adt="acts">작업 기록</button><button data-adt="projs">프로젝트</button></div>
+    <button class="btn" id="adReload">새로고침</button><button class="btn" data-close>닫기</button></div>
+  <p class="hint" id="adStatus" role="status"></p>
+  <div class="adbody" id="adBody"></div>
+  <p class="hint">차단하면 그 사람은 다음 동기화부터 서버에 저장 · 작업 기록을 올릴 수 없어요(이미 기기에 있는 작업은 남아요). 로그인 자체를 막으려면 Supabase → Authentication → Users → 사용자 → Ban user를 쓰세요.</p>
+</div></dialog>
+<div class="toast" id="toast" hidden></div>
+<script>/*SAMPLE*/</script>
+<script>/*APP*/</script>

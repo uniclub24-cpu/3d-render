@@ -1,0 +1,6 @@
+{
+  "appId": "com.mystore.threedrender",
+  "appName": "3D RENDER",
+  "webDir": "www",
+  "server": { "androidScheme": "https" }
+}
