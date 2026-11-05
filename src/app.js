@@ -444,6 +444,7 @@ function draw2d() {
   for (let x = Math.floor(wx0 / step) * step; x < wx1; x += step) { cx.strokeStyle = x % 5000 === 0 ? getCss('--grid2') : getCss('--grid'); cx.beginPath(); cx.moveTo(toS(x, 0)[0] + .5, 0); cx.lineTo(toS(x, 0)[0] + .5, r.height); cx.stroke(); }
   for (let y = Math.floor(wy0 / step) * step; y < wy1; y += step) { cx.strokeStyle = y % 5000 === 0 ? getCss('--grid2') : getCss('--grid'); cx.beginPath(); cx.moveTo(0, toS(0, y)[1] + .5); cx.lineTo(r.width, toS(0, y)[1] + .5); cx.stroke(); }
   if (bgImg && P.bg) { cx.globalAlpha = P.bg.opacity ?? .5; const [sx, sy] = toS(P.bg.x || 0, P.bg.y || 0), sw = P.bg.wmm * V.s; cx.drawImage(bgImg, sx, sy, sw, sw * bgImg.height / bgImg.width); cx.globalAlpha = 1; }
+  if (window.ROOMS_ON) drawRooms2d();
   // 바닥 구역
   for (const it of P.items) if (!it.hidden && libGet(it.type).shape === 'zone' && vis[spec(it).layer]) poly(corners(it), hexA(it.finish?.color || spec(it).color, .45), getCss('--line'), 1, [6, 4]);
   // 아래층 윤곽
@@ -463,7 +464,7 @@ function draw2d() {
     cx.strokeStyle = getCss('--canvas'); cx.lineWidth = Math.max(3, wallT(g.w) * V.s) + 2; cx.lineCap = 'butt';
     cx.beginPath(); cx.moveTo(...toS(...g.a)); cx.lineTo(...toS(...g.b)); cx.stroke();
     cx.strokeStyle = isSel ? getCss('--accent') : '#4fc3c9'; cx.lineWidth = 2;
-    if (o.type === 'slide' || o.type === 'auto') {
+    if (/^(slide|auto|auto2|slide2)$/.test(o.type)) {
       const m = [(g.a[0] + g.b[0]) / 2, (g.a[1] + g.b[1]) / 2];
       for (const [p, q, k] of [[g.a, m, -1], [m, g.b, 1]]) { const off = k * wallT(g.w) * .18, ext = o.w * .08 * k; cx.beginPath(); cx.moveTo(...toS(p[0] + g.nx * off - g.ux * ext, p[1] + g.ny * off - g.uy * ext)); cx.lineTo(...toS(q[0] + g.nx * off + g.ux * ext, q[1] + g.ny * off + g.uy * ext)); cx.stroke(); }
     } else if (o.type === 'pass' || o.type === 'slidepass') {
@@ -473,11 +474,12 @@ function draw2d() {
       const m = [(g.a[0] + g.b[0]) / 2, (g.a[1] + g.b[1]) / 2], [mx, my] = toS(...m), rr = o.w / 2 * V.s, ang = Math.atan2(g.uy, g.ux);
       cx.setLineDash([4, 4]); for (const k of [-1, 1]) { const off = k * wallT(g.w) / 2; cx.beginPath(); cx.moveTo(...toS(g.a[0] + g.nx * off, g.a[1] + g.ny * off)); cx.lineTo(...toS(g.b[0] + g.nx * off, g.b[1] + g.ny * off)); cx.stroke(); }
       cx.beginPath(); cx.arc(mx, my, rr, ang, ang + Math.PI); cx.stroke(); cx.setLineDash([]);
+    } else if (typeof DOOR2D !== 'undefined' && DOOR2D[o.type]) { DOOR2D[o.type](o, g);
     } else if (o.type === 'window' || o.type === 'full') {
       for (const k of [-1, 1]) { const off = k * P.wallT * .25; cx.beginPath(); cx.moveTo(...toS(g.a[0] + g.nx * off, g.a[1] + g.ny * off)); cx.lineTo(...toS(g.b[0] + g.nx * off, g.b[1] + g.ny * off)); cx.stroke(); }
     } else {
-      const leaves = o.type === 'door1' ? [[g.a, 1]] : [[g.a, 1], [g.b, -1]];
-      const lw = o.type === 'door1' ? o.w : o.w / 2;
+      const one = /^(door1|glass1|out1)$/.test(o.type), leaves = one ? [[g.a, 1]] : [[g.a, 1], [g.b, -1]];
+      const lw = one ? o.w : o.w / 2;
       for (const [p, sgn] of leaves) {
         const ex = p[0] + g.nx * lw, ey = p[1] + g.ny * lw;
         cx.beginPath(); cx.moveTo(...toS(...p)); cx.lineTo(...toS(ex, ey)); cx.stroke();
@@ -1027,6 +1029,7 @@ function buildWalls() {
         else if (o.type === 'slide') { const lw = (o.b - o.a - 2 * fr) * 0.54; box(T, o.a + fr, o.a + fr + lw, 0, glassTop, -t + 10, -t + 40, fc); box(T, o.b - fr - lw, o.b - fr, 0, glassTop, t - 40, t - 10, fc); box(T, o.a + fr + 80, o.a + fr + lw - 80, 300, glassTop - 120, -t + 8, -t + 42, '#a9d6ec', 'plain', .4); box(T, o.b - fr - lw + 80, o.b - fr - 80, 300, glassTop - 120, t - 42, t - 8, '#a9d6ec', 'plain', .4); }
         else if (o.type === 'slidepass') { const lw = (o.b - o.a - 2 * fr) * 0.54; box(T, o.a + fr, o.a + fr + lw, glassBot, glassTop, -12, -2, '#a9d6ec', 'plain', .4); box(T, o.b - fr - lw, o.b - fr, glassBot, glassTop, 2, 12, '#a9d6ec', 'plain', .4); box(T, o.a - 60, o.b + 60, o.sill - 30, o.sill, -t - 220, t + 220, '#c9ced4', 'steel'); }
         else if (o.type === 'pass') { box(T, o.a - 60, o.b + 60, o.sill - 30, o.sill, -t - 220, t + 220, '#c9ced4', 'steel'); }
+        else if (typeof DOOR3D !== 'undefined' && DOOR3D[o.type]) DOOR3D[o.type](T, o, fr, glassTop, t, fc);
         else if (o.type === 'door1' || o.type === 'door2') {
           const n = o.type === 'door1' ? 1 : 2, lw = (o.b - o.a - 2 * fr) / n;
           for (let i = 0; i < n; i++) { const a0 = o.a + fr + lw * i; box(T, a0 + 5, a0 + lw - 5, 0, glassTop, -25, 25, fc); box(T, a0 + 90, a0 + lw - 90, 300, glassTop - 120, -27, 27, '#a9d6ec', 'plain', .4); const hx = i ? a0 + 70 : a0 + lw - 90; box(T, hx, hx + 20, 900, 1500, 25, 55, '#b0b4ba'); }
@@ -1040,11 +1043,7 @@ function buildWalls() {
 function buildScene() {
   G = {}; ensureLevels(); YOFF = 0; FADE = false;
   const b = bounds();
-  if (!NOENV) {
-    box(xf(0, 0, 0), b[0] - 20000, b[2] + 20000, -60, -40, b[1] - 20000, b[3] + 20000, '#9a9c98', 'concrete');
-    box(xf(0, 0, 0), b[0] - 20000, b[2] + 20000, -40, -20, b[1] - 9000, b[1] - 3500, '#4a4c50', 'concrete');
-    if ($('#outside').checked) { const rnd = (i) => ((i * 9301 + 49297) % 233280) / 233280; for (let i = 0; i < 9; i++) { const x = b[0] - 6000 + i * 3200, hh = 6000 + rnd(i) * 9000; box(xf(0, 0, 0), x, x + 2800, 0, hh, b[1] - 16000, b[1] - 10000, ['#c9c3b8', '#a9b4bd', '#d8d2c6', '#8f99a3'][i % 4], 'concrete'); sph(xf(0, 0, 0), x + 1400, 3200, b[1] - 3000, 1100, 1500, 1100, '#5d7f45'); cyl(xf(0, 0, 0), x + 1400, b[1] - 3000, 90, 0, 2200, '#5a4a3a', 'plain', 8); } }
-  }
+  if (!NOENV) buildEnv(b);
   const aE = curElev();
   if ((P.showLinked !== false || EXPORTALL) && P.levels.length > 1) for (const Lv of P.levels) {
     if (Lv.id === P.levelId || !Lv.data) continue; if (Lv.elev > aE && cam.cut && !EXPORTALL) continue;
@@ -1508,7 +1507,7 @@ $('#homeBtn').onclick = showHome;
 let pendingNew = null, stdMode = 'new';
 $('#newForm').addEventListener('submit', (e) => {
   e.preventDefault(); const f = new FormData(e.target);
-  pendingNew = { photos: { N: $('#phN').files[0], E: $('#phE').files[0], S: $('#phS').files[0], W: $('#phWw').files[0] }, name: f.get('name'), ceil: +f.get('ceil') || 2700, soffit: +f.get('soffit') || 2400, start: f.get('start'), w: +f.get('w') || 8000, d: +f.get('d') || 12000 };
+  pendingNew = { photos: { N: $('#phN').files[0], E: $('#phE').files[0], S: $('#phS').files[0], W: $('#phWw').files[0] }, name: String(f.get('name') || '').trim() || '새 매장 ' + new Date().toLocaleDateString('ko-KR'), ceil: +f.get('ceil') || 2700, soffit: +f.get('soffit') || 2400, start: f.get('start'), w: +f.get('w') || 8000, d: +f.get('d') || 12000 };
   $('#projDlg').close(); openStd('new');
 });
 function openStd(mode) {
@@ -1539,8 +1538,8 @@ function createPending(s) {
   if (o.start === 'photos' && o.photos && Object.values(o.photos).some(Boolean)) aiPopulate(o.photos);
   if (o.start === 'empty') { setTool('wall'); toast('벽 도구: 손그림 모드로 대충 그려도 반듯하게 다듬어요'); }
 }
-$('#stdGo').onclick = () => { const s = readStd(); store.set('drs_std', s); $('#stdDlg').close(); if (stdMode === 'new') createPending(s); else { P.std = s; P.wallT = s.wallT; P.aisle = s.aisle; commit(); dirty3d = true; renderLib(); toast('규격을 바꿨어요 · 새로 놓는 기물부터 적용'); } };
-$('#stdSkip').onclick = () => { $('#stdDlg').close(); createPending({ ...STD0, ...JSON.parse(JSON.stringify(store.get('drs_std', STD0))) }); };
+$('#stdGo').onclick = () => { const s = readStd(); try { store.set('drs_std', s); } catch (er) {} $('#stdDlg').close(); if (stdMode === 'new') { try { createPending(s); } catch (er) { console.error(er); toast('새 프로젝트를 만들지 못했어요: ' + (er.message || er)); } } else { P.std = s; P.wallT = s.wallT; P.aisle = s.aisle; commit(); dirty3d = true; renderLib(); toast('규격을 바꿨어요 · 새로 놓는 기물부터 적용'); } };
+$('#stdSkip').onclick = () => { $('#stdDlg').close(); try { createPending({ ...STD0, ...JSON.parse(JSON.stringify(store.get('drs_std', STD0))) }); } catch (er) { console.error(er); toast('새 프로젝트를 만들지 못했어요: ' + (er.message || er)); } };
 $('#importFile').addEventListener('change', (e) => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { try { const p = JSON.parse(rd.result); if (!p.walls || !p.items) throw 0; p.id = p.id || uid('p'); openProject(p); saveProject(true); $('#projDlg').close(); toast('프로젝트를 불러왔어요'); } catch (er) { toast('도면 스튜디오 프로젝트 파일(.json)이 아니에요'); } }; rd.readAsText(f); });
 
 /* ---------- 내보내기: PDF · JPEG · 저용량 · CAD · CSV · 프로젝트 ---------- */

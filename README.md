@@ -39,6 +39,11 @@
 - 남긴 댓글은 **링크 공유 → 받은 댓글 가져오기**로 내 프로젝트에 들어옵니다.
 - 이미 Supabase를 쓰고 있었다면 `supabase/schema.sql`을 한 번 더 Run 해서 `shares` 표를 만들어 주세요.
 
+## v9: 배경 · 출입문 · Realistic Render
+- 3D 위 **배경** 버튼: 기본 거리 · 프라자상권 · 아파트상가 · 메인상권 · 공원 앞 상가 · 없음, 매장 정면 방향, 주변 건물 · 유리 · 아파트 · 도로 · 보도 · 나무 색.
+- 출입구를 고르면 도구 막대에 **문 종류**: 외도어 · 양개도어 · 강화유리 여닫이/양개 · 자동문(편개/양개) · 미닫이 · 양미닫이 · 폴딩도어 · 셔터 · 아치 · 통창.
+- **Realistic Render**: 실사 렌더 창 또는 내보내기 → zip(scene.glb + render.py + render.bat). 블렌더(무료) 설치 후 render.bat 더블클릭 → render.png · scene.blend.
+
 ## 관리자 (v8)
 - `www/config.js`의 `adminEmail`로 로그인하면 위쪽에 **관리자** 버튼이 생겨요: 사용자 목록 · 작업 기록 · 모든 프로젝트 보기 · 차단.
 - 서버 권한은 `supabase/schema.sql`(v8 부분)이 지켜요. 관리자 이메일을 바꾸려면 SQL Editor에서

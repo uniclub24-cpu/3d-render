@@ -563,7 +563,32 @@ body.nocomment [data-cmt] { display: none !important; }
 .adview { position: fixed; left: 50%; transform: translateX(-50%); top: calc(54px + env(safe-area-inset-top, 0px)); z-index: 60; border-radius: 999px; padding: 6px 6px 6px 16px; display: flex; gap: 10px; align-items: center; max-width: calc(100vw - 24px); }
 .adview span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
+.envpop, .doorpop { position: absolute; z-index: 18; border-radius: 20px; padding: 12px; display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100% - 24px)); box-sizing: border-box; }
+.envpop { left: 12px; top: 96px; max-height: calc(100% - 110px); overflow: auto; }
+.dphead { display: flex; flex-direction: column; gap: 2px; } .dphead .muted { font-size: 11px; }
+.envgrid, .dpgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.dpgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dpc { border: 0; background: var(--fill); color: var(--fg); border-radius: 12px; padding: 8px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; line-height: 1.2; text-align: center; }
+.dpc:hover { background: var(--fill2); } .dpc.on { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); font-weight: 600; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.dpc .thumb { width: 30px; height: 30px; } .dpc svg { width: 28px; height: 28px; }
+.envrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.envrow select { background: var(--fill); border: 0; border-radius: 8px; padding: 5px 8px; color: var(--fg); }
+.envcols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.envcols label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.envcols input { width: 28px; height: 24px; border: 0; padding: 0; background: none; flex: none; }
+.realbox { background: var(--fill); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.realbox p { margin: 4px 0 0; }
+@media (max-width: 899px), (max-height: 540px) { .envpop { top: 8px; left: 8px; } .dpgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+.pspos{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-radius:12px;background:var(--panel2,rgba(127,127,127,.08));margin:6px 0}.pspos span{flex:1;min-width:180px;font-size:13px}
+.psscope{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:2px 10px;margin-bottom:8px}.psscope .chk{font-size:13px}
+.psfab{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:30;border:0;border-radius:999px;padding:8px 16px;font:600 13px system-ui;color:var(--fg);cursor:pointer}
+.pkbar{position:absolute;left:50%;top:62px;transform:translateX(-50%);z-index:40;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;padding:10px 14px;border-radius:16px;max-width:calc(100% - 32px);font-size:13px}
+.lvsub{display:flex;flex-direction:column;gap:2px;padding:2px 0 6px 14px}.lvsub .lvgo{text-align:left;font-size:13px}.lvsub .lvgo.on{color:var(--accent);font-weight:700}.lvsub small{opacity:.6;margin-left:4px}
+.valtip{position:absolute;z-index:60;pointer-events:none;background:var(--fg);color:var(--bg);font:600 12px system-ui;padding:4px 9px;border-radius:8px;white-space:nowrap}
+.rotpop{position:absolute;z-index:55;width:290px;padding:12px;border-radius:14px;display:flex;flex-direction:column;gap:8px}
+.envlv{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0}.envlv span{font-weight:600;font-size:13px}.envlv small{width:100%;font-size:11px}
+.pin.backpin{font-size:9px;padding:1px 5px;background:rgba(60,55,50,.78);color:#fff;transform:translate(0,-100%)}
 </style>
 
 
@@ -633,6 +658,7 @@ body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
     <canvas id="ov3c" aria-hidden="true"></canvas>
     <div id="ov3d"></div>
     <div class="walkhud glass" id="walkHud" hidden></div>
+    <div class="envpop glass" id="envPop" hidden></div>
     <div class="joy" id="joy" aria-label="걷기 조이스틱" role="application"><span id="joyK"></span></div>
     <button class="eyeexit glass" id="eyeExit" aria-label="도구 다시 보기" title="도구 다시 보기 (Esc)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.6-7 10-7c2 0 3.7.7 5.1 1.6M22 12s-3.6 7-10 7c-2 0-3.7-.7-5.1-1.6"/><path d="M4 20L20 4"/></svg></button>
     <div class="bar">
@@ -642,6 +668,7 @@ body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
       <button class="tg" id="spinBtn" aria-pressed="false">돌리기</button>
       <button class="tg" id="walkBtn" title="1인칭 걷기 (G)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><path d="M12 7v6l-3 8M12 13l3 8M8 10l4-2 4 2"/></svg>걷기</button>
       <button class="tg" data-cmt aria-pressed="false" title="3D 위에 댓글 (C)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>댓글</button>
+      <button class="tg" id="envBtn" title="배경 넣기 (상권)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18M5 21V9h5v12M10 21V4h6v17M16 21v-8h4v8"/></svg>배경</button>
       <button class="tg" id="hqBtn" title="실사 렌더"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.6 5.6L20 9.5l-4 4 1 6-5-2.8L7 19.5l1-6-4-4 5.4-.9z"/></svg>실사</button>
       <details class="pop"><summary class="tg">보기 옵션</summary><div class="popin">
         <label><input type="checkbox" id="cutWalls" checked> 벽 낮춰 보기</label>
@@ -683,6 +710,7 @@ body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
   <div class="mini glass" id="mini" hidden><canvas id="miniC" aria-label="미니맵 · 눌러서 이동"></canvas><button class="minigrip" id="miniGrip" aria-label="미니맵 크기 조절" title="끌어서 크기 조절"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10V4h6M4 4l7 7"/></svg></button><button class="minix" id="miniX" aria-label="미니맵 닫기">✕</button></div>
   <button class="minion glass" id="miniOn" hidden aria-label="미니맵 열기" title="미니맵"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><rect x="12" y="11" width="6" height="5" rx="1"/></svg></button>
   <div class="histpop glass" id="histPop" hidden></div>
+  <div class="doorpop glass" id="doorPop" hidden></div>
 </section>
 
 <aside class="right" aria-label="속성">
@@ -718,7 +746,7 @@ body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
     </div>
     <details class="newbox" id="newBox"><summary hidden>새 프로젝트</summary>
   <form id="newForm" class="dlg" style="padding:12px 0 0">
-    <label class="fld"><span>이름</span><input id="nfName" name="name" placeholder="예: 강남점 치킨펍" required></label>
+    <label class="fld"><span>이름</span><input id="nfName" name="name" placeholder="예: 강남점 치킨펍 (비우면 자동 이름)"></label>
     <div class="g3"><label class="fld"><span>천장 마감 높이</span><input id="nfCeil" name="ceil" type="number" value="2700"></label><label class="fld"><span>천장 가벽 높이</span><input id="nfSoffit" name="soffit" type="number" value="2400"></label><span></span></div>
     <div class="opts">
       <label class="opt"><input type="radio" name="start" value="rect" checked><span><b>사각 매장</b><br><small>가로·세로만 넣고 시작</small></span></label>
@@ -792,6 +820,7 @@ body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
     <button class="fmt" data-fmt="csv"><b>기물 목록</b><small>엑셀 CSV</small></button>
     <button class="fmt" data-fmt="mp4"><b>영상</b><small>한 바퀴 도는 3D · MP4</small></button>
     <button class="fmt" data-fmt="obj"><b>3D 모델 (OBJ)</b><small>렌더 프로그램 · 블렌더용</small></button>
+    <button class="fmt" data-fmt="real"><b>Realistic Render</b><small>블렌더 실사 패키지 (.zip)</small></button>
     <button class="fmt" data-fmt="hq"><b>실사 렌더</b><small>그림자 · 2560px</small></button>
     <button class="fmt" data-fmt="pano"><b>360° 사진</b><small>구글 포토 · 페이스북에서 돌려 보기</small></button>
     <button class="fmt" data-fmt="panohtml"><b>360° 보기 페이지</b><small>HTML 하나로 돌려 보기</small></button>
@@ -860,7 +889,7 @@ body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
 <div class="cmtpop glass" id="cmtPop" hidden></div>
 
 <dialog id="hqDlg" class="wide"><div class="dlg">
-  <div class="row" style="align-items:center"><h3 style="flex:1">실사 렌더</h3><button class="btn" data-close>닫기</button></div>
+  <div class="row" style="align-items:center"><h3 style="flex:1">실사 렌더</h3><span class="muted" style="font-size:12px">앱 안 빠른 렌더 · 블렌더 Realistic Render</span><button class="btn" data-close>닫기</button></div>
   <p class="hint">햇빛 그림자 · 부드러운 빛 · 톤 매핑을 여러 장 겹쳐 계산해요. 앱 안에서 바로 되고, 더 사실적인 결과가 필요하면 OBJ로 내보내 블렌더 · D5 · 트윈모션에서 렌더하세요.</p>
   <div class="hqrow"><label class="fld"><span>시점</span><select id="hqScene"></select></label>
     <label class="fld"><span>크기</span><select id="hqRes"><option value="1920x1080">FHD 1920×1080</option><option value="2560x1440" selected>QHD 2560×1440</option><option value="3840x2160">4K 3840×2160</option><option value="2400x1697">A4 가로 2400×1697</option></select></label>
@@ -870,6 +899,9 @@ body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
   <div class="hqbar"><span id="hqBar"></span></div>
   <canvas id="hqPrev" class="hqprev" width="960" height="540"></canvas>
   <p class="hint" id="hqStatus" role="status"></p>
+  <div class="realbox"><div><b>Realistic Render (블렌더 · 사진 같은 렌더)</b><p class="hint">지금 장면을 블렌더용 패키지(.zip)로 내보내요. 압축을 풀고 render.bat을 더블클릭하면 블렌더 Cycles가 빛을 계산해 render.png를 만들어요. 위의 시점 · 크기 · 시간대 · 벽 낮춰 보기 설정을 그대로 써요.</p></div>
+    <div class="row wrap" style="align-items:center"><label class="fld" style="flex-direction:row;align-items:center;gap:6px"><span>품질</span><select id="realN"><option value="128">빠름 (128)</option><option value="256" selected>보통 (256)</option><option value="1024">최고 (1024)</option></select></label><button class="btn pri" id="realGo">Realistic Render 패키지 받기</button></div>
+    <p class="hint" id="realStatus" role="status"></p></div>
   <div class="row wrap"><button class="btn pri" id="hqGo">렌더 시작</button><button class="btn" id="hqSave" disabled>JPG 저장</button><button class="btn" id="hqSavePng" disabled>PNG 저장</button></div>
 </div></dialog>
 
@@ -921,6 +953,22 @@ body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
   <div class="aulist" id="auList"></div>
   <div class="row"><button class="btn pri" id="auGo">배치안 만들기</button></div>
   <div class="aures" id="auRes"></div>
+</div></dialog>
+
+<dialog id="presetDlg" class="wide"><div class="dlg">
+  <div class="row" style="align-items:center"><h3 style="flex:1">프리셋 적용</h3><button class="btn" id="psSkip">빈 도면으로 시작</button></div>
+  <p class="hint" id="psInfo"></p>
+  <div class="hqrow"><label class="fld"><span>프리셋</span><select id="psKind"><option value="hall">페리카나 홀 타입</option><option value="delivery">페리카나 배달 타입</option></select></label>
+    <label class="fld"><span>주변 배경</span><select id="psEnv"><option value="keep">그대로</option><option value="plaza">프라자상권</option><option value="apt">아파트상가</option><option value="main">메인상권</option><option value="park">공원앞 상가</option></select></label>
+    <label class="fld"><span>주방 비율 <b id="psRatioV"></b></span><input id="psRatio" type="range" min="20" max="70" step="1"></label></div>
+  <div class="pspos"><span id="psPos"></span><button class="btn" id="psPick">도면에서 출입구 · 주방 위치 잡기</button></div>
+  <div class="row" style="align-items:center"><div class="lbl" style="flex:1">적용 범위 (체크한 것만 넣고, 다시 적용할 때도 체크한 것만 바꿔요)</div><button class="qb" id="psAll">전체 선택 · 해제</button></div>
+  <div class="psscope" id="psScope"></div>
+  <div class="lbl">주방 기물 수량 (매뉴얼 기본값 · 공간이 모자라면 작은 규격 → 우선순위 낮은 것부터 뺌)</div>
+  <div class="aulist" id="psCounts"></div>
+  <div class="row wrap"><label class="chk"><input type="checkbox" id="psWin" checked> 출입구 쪽 통창 + 창가 바테이블</label><label class="chk" id="psClearRow"><input type="checkbox" id="psClear"> 프리셋이 아닌 기물·벽도 지우고 적용</label></div>
+  <p class="hint" id="psSrc"></p>
+  <div class="row"><button class="btn pri" id="psGo">저장된 프리셋 자동 적용</button><button class="btn" id="psAgain" hidden>↻ 다시 적용 (랜덤 배치)</button></div>
 </div></dialog>
 
 <dialog id="shareDlg"><div class="dlg">
