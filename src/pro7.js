@@ -33,7 +33,7 @@ const PRESETS = {
       ['fridge45', 1300, 800, 1900, 1, 'cold', 1, '⑨ 4구 냉장냉동고'], ['showcase', 650, 585, 1850, 2, 'cold', 3, '⑩ 음료냉장고'], ['work', 1200, 600, 850, 2, 'prep', 2, '① 일반 작업대'], ['work2', 1500, 600, 850, 1, 'prep', 2, '② 작업대'],
       ['fryer2', 900, 600, 1000, 1, 'hot', 1, '③ 2구 튀김기'], ['fryer1', 600, 600, 1000, 1, 'hot', 1, '④ 1구 튀김기'], ['work', 700, 600, 850, 1, 'hot', 2, '⑤ 작업대'], ['range3', 900, 600, 850, 1, 'hot', 1, '⑥ 3구 테이블렌지'],
       ['work', 900, 700, 850, 1, 'wash', 2, '⑦ 작업대'], ['sink2', 900, 700, 850, 1, 'wash', 1, '⑧ 싱크대'], ['purifier', 350, 450, 1200, 1, 'store', 3, '⑪ 정수기'], ['beer', 450, 550, 900, 1, 'store', 3, '⑫ 생맥주 머신'],
-      ['rack', 1000, 450, 1800, 1, 'store', 4, '⑬ 경량랙'], ['rack', 1400, 450, 1800, 1, 'store', 4, '⑬ 경량랙'],
+      ['rack', 1000, 450, 1800, 1, 'store', 4, '⑬ 경량랙'], ['rack', 1400, 450, 1800, 1, 'store', 4, '⑬ 경량랙'], ['dishwasher', 650, 650, 1800, 0, 'wash', 1, '식기세척기 (선택)'],
     ] },
 };
 const ALT = { fryer2: ['fryer1', 600], tfridge: ['tfridge', 900], work2: ['work', 1200], work: ['work', 600], fridge45: ['fridge25', 700], sink2: ['sink1', 600], rack: ['rack', 900] };
@@ -85,10 +85,11 @@ function applyPreset(opt) {
   const doorP = snapSide(R, opt.door || defaultDoor(R)), ds = sideNear(R, doorP); let ks = opt.kit ? sideNear(R, opt.kit) : OPP[ds];
   if (ks === ds) { ks = OPP[ds]; rep.note = '주방과 출입구가 같은 벽이라 주방을 맞은편으로 옮겼어요'; }
   const K = presetFrame(OPP[ks], R), { W, D, T, toW, fromW, rotFor, sideOf } = K, add = [];
-  const put = (pz, type, u, v, face, o = {}) => { const L = libGet(type), [x, y] = toW(u, v), it = { id: uid('i'), type, x: Math.round(x), y: Math.round(y), w: Math.round(o.w || L.w), d: Math.round(o.d || L.d), rot: rotFor(face), pz }; for (const k of ['h', 'elev', 'color', 'mat', 'tag', 'finish']) if (o[k] != null) it[k] = o[k]; add.push(it); if (!o.mark) rep.placed++; return it; };
+  const put = (pz, type, u, v, face, o = {}) => { const L = libGet(type), [x, y] = toW(u, v), it = { id: uid('i'), type, x: Math.round(x), y: Math.round(y), w: Math.round(o.w || L.w), d: Math.round(o.d || L.d), rot: rotFor(/chair$/.test(type) ? { front: 'back', back: 'front', left: 'right', right: 'left' }[face] : face), pz }; /* 의자: 등받이가 테이블 반대쪽 */ for (const k of ['h', 'elev', 'color', 'mat', 'tag', 'finish']) if (o[k] != null) it[k] = o[k]; add.push(it); if (!o.mark) rep.placed++; return it; };
   const kd = clamp(Math.round(D * opt.ratio / 50) * 50, 2600, Math.max(2600, D - 3000)), pv = D - kd;
   let [du, dv] = fromW(...doorP); const dsF = dv < 300 ? 'front' : du < 300 ? 'left' : 'right', [dt, dw, dh] = pr.door;
   if (dsF === 'front') du = clamp(du, dw / 2 + 300, W - dw / 2 - 300); else dv = clamp(dv, dw / 2 + 300, Math.max(dw / 2 + 300, pv - dw / 2 - 300));
+  const freeSides = ['L', 'R'].filter((q) => !((q === 'L' && dsF === 'left') || (q === 'R' && dsF === 'right'))), bs = pick(freeSides), bu = (x) => (bs === 'L' ? x : W - x), bIn = bs === 'L' ? 'right' : 'left', bOut = bs === 'L' ? 'left' : 'right';
   // 0. 정리 (다시 적용: 고른 범위의 프리셋 기물만 지우고 다시 놓기)
   if (opt.clear) { P.items = P.items.filter((it) => libGet(it.type).shape === 'mark' && !it.pz); P.floorPat = null; }
   else P.items = P.items.filter((it) => !(it.pz && on(it.pz)));
@@ -107,7 +108,7 @@ function applyPreset(opt) {
     P.walls.splice(P.walls.indexOf(w), 1, a, b);
   }
   if (on('finish')) for (const w of P.walls) { const s = sideOf(w); if (!s) continue; const mv = fromW((w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2)[1];
-    w.finish = s === 'back' || mv > pv ? fin('kitchenWall') : s === 'front' ? fin('hallWall') : fin('panel'); }
+    w.finish = s === 'back' || mv > pv ? fin('kitchenWall') : (s === 'left' && bs === 'L') || (s === 'right' && bs === 'R') ? fin('panel') : fin('hallWall'); }
   if (on('finish')) { P.floor = fin('hallFloor'); P.ceiling = { ...(P.ceiling || {}), on: true, color: PELI.fin.ceiling, opacity: (P.ceiling && P.ceiling.opacity) || 0.45 }; }
   // 공간 (홀 · 주방) — 바닥 그룹
   { const old = (P.rooms || []).filter((r) => r.pz), keep = (k) => old.find((r) => r.kind === k); P.rooms = (P.rooms || []).filter((r) => !r.pz);
@@ -121,7 +122,7 @@ function applyPreset(opt) {
   let cu = W / 2 + pick([0, 0, -1, 1]) * W * 0.12; cu = clamp(cu, cw / 2 + 250, W - cw / 2 - 250); if (Math.abs(cu - kdU) < cw / 2 + 560) cu = kdSide === 'L' ? Math.max(cu, kdU + cw / 2 + 560) : Math.min(cu, kdU - cw / 2 - 560); cu = clamp(cu, cw / 2 + 150, W - cw / 2 - 150);
   const pa = toW(0, pv), pb = toW(W, pv), part = { id: uid('w'), pz: 'part', x1: Math.round(pa[0]), y1: Math.round(pa[1]), x2: Math.round(pb[0]), y2: Math.round(pb[1]), t: 100, finish: fin('partition') }; P.walls.push(part);
   P.openings.push({ id: uid('o'), pz: 'pass', wall: part.id, t: Math.round(cu), type: 'pass', w: cw, h: 1000, sill: 1050, frame: '#bababa' });
-  P.openings.push({ id: uid('o'), pz: 'kdoor', wall: part.id, t: Math.round(kdU), type: pr.id === 'hall' ? 'door1' : 'door2', w: 900, h: 2100, sill: 0, frame: '#bababa' });
+  P.openings.push({ id: uid('o'), pz: 'kdoor', wall: part.id, t: Math.round(kdU), type: 'opening', w: 1000, h: 2100, sill: 0, frame: '#bababa' }); /* 주방↔홀 출입구는 문 없이 */
   if (on('deco')) for (let k = 1; k < Math.floor(W / 1100); k++) { const u = k * W / Math.floor(W / 1100); if (Math.abs(u - cu) < cw / 2 + 80 || Math.abs(u - kdU) < 520) continue; put('deco', 'metalframe', u, pv - 95, 'front', { h: P.ceilingH, tag: 'MT-01 금속 프레임' }); }
   // 출입문 (게이트) · 통창 · 간판
   const gp = toW(du, dsF === 'front' ? 0 : dv), gpOut = dsF === 'front' ? [du, -T] : dsF === 'left' ? [-T, dv] : [W + T, dv], gw0 = toW(...gpOut);
@@ -133,42 +134,92 @@ function applyPreset(opt) {
     Object.assign(gate, { pz: 'gate', wall: w.id, t: Math.round(gt), type: dt, w: Math.min(dw, L - 600), h: dh, sill: 0, frame: PELI.fin.gate[1] });
     if (opt.windows && !P.openings.some((o) => o.wall === w.id && o.pz !== 'win' && /full|window/.test(o.type)))
       for (const [s0, s1] of [[400, gt - dw / 2 - 350], [gt + dw / 2 + 350, L - 400]]) if (s1 - s0 >= 1200) P.openings.push({ id: uid('o'), pz: 'win', wall: w.id, t: Math.round((s0 + s1) / 2), type: 'full', w: Math.round(s1 - s0), h: 2300, sill: 200, frame: '#9aa0a6' });
-    if (on('sign')) { const sw = L >= 8400 ? 8000 : L >= 6400 ? 6000 : 4000, sl = Math.min(sw, L - 200), sc = clamp(gt, sl / 2 + 100, L - sl / 2 - 100), ux = (w.x2 - w.x1) / L, uy = (w.y2 - w.y1) / L, mid = [w.x1 + ux * sc, w.y1 + uy * sc], c = toW(W / 2, D / 2);
-      let nx = -uy, ny = ux; if ((c[0] - mid[0]) * nx + (c[1] - mid[1]) * ny > 0) { nx = -nx; ny = -ny; } const off = wallT(w) / 2 + 170;
-      add.push({ id: uid('i'), pz: 'sign', type: 'mainsign', x: Math.round(mid[0] + nx * off), y: Math.round(mid[1] + ny * off), w: sl, d: 300, rot: Math.round(((Math.atan2(-nx, ny) * 180 / Math.PI) % 360 + 360) % 360), elev: Math.max(2550, dh + 350), tag: `메인간판 ${sw / 1000}M` }); }
+    if (on('sign')) { const img = pr.id === 'hall' ? 'facadeH' : 'facadeD', Lb = libGet(img), fh = Lb.h, fw = Math.min(L, Math.round(fh * Lb.aspect * 1.25)), sc = clamp(gt, fw / 2, L - fw / 2), ux = (w.x2 - w.x1) / L, uy = (w.y2 - w.y1) / L, mid = [w.x1 + ux * sc, w.y1 + uy * sc], c = toW(W / 2, D / 2);
+      let nx = -uy, ny = ux; if ((c[0] - mid[0]) * nx + (c[1] - mid[1]) * ny > 0) { nx = -nx; ny = -ny; } const off = wallT(w) / 2 + 30;
+      add.push({ id: uid('i'), pz: 'sign', type: img, x: Math.round(mid[0] + nx * off), y: Math.round(mid[1] + ny * off), w: fw, d: 20, h: fh, rot: Math.round(((Math.atan2(-nx, ny) * 180 / Math.PI) % 360 + 360) % 360), elev: 0, tag: pr.id === 'hall' ? '파사드 · 윈도우 시트 (홀 타입)' : '파사드 · 윈도우 시트 (배달 타입)' }); }
   }
   void gp;
-  // 2. 필수 주방 기물 (못 들어가면 작은 규격 → 그래도 안 되면 빼고 알려 줌)
-  const placed = [], order = { cold: 0, prep: 1, hot: 2, wash: 3, store: 4 };
+  // 출입구는 최대 2개 (주 출입구 + 보조 출입구)
+  let subUV = null;
+  { const ext = new Set(exteriorWalls().map((w) => w.id)), isDoor = (o) => o.pz !== 'win' && o.pz !== 'gate' && ext.has(o.wall) && /door|auto|slide|glass|fold|shutter|opening|arch/.test(o.type);
+    const extra = P.openings.filter(isDoor); let sub = extra.find((o) => o.pz === 'sub') || extra[0] || null; const drop = extra.filter((o) => o !== sub);
+    if (drop.length) { P.openings = P.openings.filter((o) => !drop.includes(o)); rep.note += (rep.note ? ' · ' : '') + `출입구가 많아 ${drop.length}개를 뺐어요 (주 + 보조 최대 2개)`; }
+    if (!opt.sub && sub && sub.pz === 'sub') { P.openings = P.openings.filter((o) => o !== sub); sub = null; }
+    if (opt.sub && !sub) { const sideU = bs === 'L' ? W : 0, useFront = (bs === 'L' && dsF === 'right') || (bs === 'R' && dsF === 'left'), uv = useFront ? [du > W / 2 ? 700 : W - 700, 0] : [sideU, Math.max(1200, pv - 800)], out = useFront ? [uv[0], -T] : [sideU === 0 ? -T : W + T, uv[1]], ow = toW(...out);
+      let best = null; for (const w of exteriorWalls()) { const [d, t] = distPtSeg(ow[0], ow[1], w); if (!best || d < best.d) best = { d, t, w }; }
+      if (best) { const L = Math.hypot(best.w.x2 - best.w.x1, best.w.y2 - best.w.y1); sub = { id: uid('o'), pz: 'sub', wall: best.w.id, t: Math.round(clamp(best.t * L, 650, L - 650)), type: 'door1', w: 900, h: 2100, sill: 0, frame: PELI.fin.gate[1] }; P.openings.push(sub); } }
+    if (sub) { sub.pz = sub.pz || 'sub'; const g = openingGeom(sub); if (g) subUV = fromW((g.a[0] + g.b[0]) / 2, (g.a[1] + g.b[1]) / 2); } }
+  // 2. 필수 주방 기물 — 주방 매뉴얼 규칙
+  //   화기(간택기·튀김기)는 한 줄에 붙여서(가스 최적화) · 식기세척기는 싱크대 바로 옆 · 주방 6평 이상에 싱크 2대면 떨어뜨리기
+  //   싱크·작업대·테이블냉장고·식세기 투입부 높이 통일 · 음료냉장고 앞은 문 열림 공간 비우기 · 작업대/테이블냉장고 위 스테인리스 선반
+  const placed = [], hallKeep = [], KH = opt.kh || 850;
   if (on('kitchen')) {
     const ov = opt.counts || {}, list = [];
     for (const [type, w, d, h, q, role, prio, name] of pr.kitchen) { const n = ov[name] != null ? ov[name] : q; for (let i = 0; i < n; i++) list.push({ type, w, d, h, role, prio, name }); }
+    for (const it of list) { if (/^(sink\d|work2?|tfridge)$/.test(it.type)) it.h = KH; if (it.type === 'dishwasher') it.name = `식기세척기 (투입부 H${KH})`; }
+    const kArea = W * kd / 1e6, sinks = list.filter((i) => /^sink/.test(i.type)), dish = list.filter((i) => i.type === 'dishwasher'), split = sinks.length >= 2 && kArea >= 19.83;
+    const hotB = list.filter((i) => libGet(i.type).hood), hotSide = list.filter((i) => i.role === 'hot' && !libGet(i.type).hood);
+    if (rnd() < 0.5) hotB.reverse();
+    const washA = split ? [sinks.find((x) => x.type === 'sink2') || sinks[0]] : [...sinks], washB = split ? sinks.filter((x) => !washA.includes(x)) : [];
+    washA.push(...dish); // 식기세척기는 싱크대 바로 옆
+    const cold = list.filter((i) => i.role === 'cold' && i.type !== 'showcase'), shows = list.filter((i) => i.type === 'showcase'), prep = list.filter((i) => i.role === 'prep'), store = list.filter((i) => i.role === 'store');
     const back = pick([1, -1]), bL = kdSide === 'L' ? pv + 1100 : pv + 150, bR = kdSide === 'R' ? pv + 1100 : pv + 150;
     const runs = [
-      { face: 'front', a: back > 0 ? 0 : W, pos: back > 0 ? 0 : W, dir: back, room: (r) => (r.dir > 0 ? W - r.pos : r.pos), at: (s, it, r) => [s + r.dir * it.w / 2, D - it.d / 2] },
-      { face: 'left', a: D - 800, pos: D - 800, dir: -1, room: (r) => r.pos - bR, at: (s, it) => [W - it.d / 2, s - it.w / 2] },
-      { face: 'right', a: D - 800, pos: D - 800, dir: -1, room: (r) => r.pos - bL, at: (s, it) => [it.d / 2, s - it.w / 2] },
-    ];
-    const sw = rnd() < 0.5, pref = { cold: [2, 0, 1], prep: [0, 2, 1], hot: [0, 1, 2], wash: [1, 0, 2], store: [2, 1, 0] };
-    if (sw) for (const k in pref) pref[k] = pref[k].map((i) => (i === 1 ? 2 : i === 2 ? 1 : 0));
-    for (const it0 of list.sort((a, b) => a.prio - b.prio || order[a.role] - order[b.role])) {
-      let it = { ...it0 }, ok = false;
-      for (let tries = 0; tries < 2 && !ok; tries++) {
-        for (const ri of pref[it.role]) { const r = runs[ri]; if (it.w <= r.room(r)) { const s = r.pos; r.pos += r.dir * it.w; const [u, v] = r.at(s, it, r); placed.push({ it, u, v, face: r.face, ri }); ok = true; break; } }
-        if (!ok && ALT[it.type] && tries === 0) { const [t2, w2] = ALT[it.type]; if (w2 < it.w || t2 !== it.type) { it = { ...it, type: t2, w: w2, name: it.name + ' (작은 규격)' }; continue; } } break;
-      }
-      if (!ok) rep.miss.push(it0.name);
-    }
-    const rev = rnd() < 0.35; // 가끔은 세척 → 냉장 순서
-    for (let ri = 0; ri < 3; ri++) { const r = runs[ri], row = placed.filter((p) => p.ri === ri).sort((a, b) => (rev ? -1 : 1) * (order[a.it.role] - order[b.it.role])); let s = r.a; for (const p of row) { const [u, v] = r.at(s, p.it, r); p.u = u; p.v = v; s += r.dir * p.it.w; } }
+      { face: 'front', len: W, uv: (s, it) => [back > 0 ? s + it.w / 2 : W - s - it.w / 2, D - it.d / 2] },
+      { face: 'left', len: D - 800 - bR, uv: (s, it) => [W - it.d / 2, D - 800 - s - it.w / 2] },
+      { face: 'right', len: D - 800 - bL, uv: (s, it) => [it.d / 2, D - 800 - s - it.w / 2] },
+    ].map((r, i) => ({ ...r, ri: i, lo: 0, hi: Math.max(0, r.len) }));
+    const room = (r) => r.hi - r.lo;
+    const putBlock = (items, r, end) => { const tw = items.reduce((a, x) => a + x.w, 0); if (!items.length || tw > room(r)) return false; const seq = end === 'hi' ? [...items].reverse() : items;
+      for (const it of seq) { let st; if (end === 'hi') { r.hi -= it.w; st = r.hi; } else { st = r.lo; r.lo += it.w; } const [u, v] = r.uv(st, it); placed.push({ it, u, v, face: r.face, ri: r.ri, end, s: st }); } return true; };
+    const tryBlock = (items, order, end = 'lo') => { for (const ri of order) if (putBlock(items, runs[ri], end)) return ri; return -1; };
+    const shrink = (it) => { const a = ALT[it.type]; return a && a[1] < it.w ? { ...it, type: a[0], w: a[1], name: it.name + ' (작은 규격)' } : null; };
+    const single = (it, order, end = 'lo') => { let x = it; for (let k = 0; k < 2 && x; k++) { const r = tryBlock([x], order, end); if (r >= 0) return r; x = shrink(x); } rep.miss.push(it.name); return -1; };
+    const byRoom = (ex = []) => [0, 1, 2].filter((i) => !ex.includes(i)).sort((a, b) => room(runs[b]) - room(runs[a]));
+    // ① 화기 묶음 (간택기 + 튀김기 붙여서)
+    let hotRun = hotB.length ? tryBlock(hotB, [0, ...byRoom([0])]) : -1;
+    if (hotB.length && hotRun < 0) { const sm = hotB.map((x) => shrink(x) || x); hotRun = tryBlock(sm, byRoom()); if (hotRun < 0) { rep.miss.push('화기 묶음이 한 줄에 안 들어가 따로 놓았어요'); hotB.forEach((x) => single(x, byRoom())); } }
+    for (const x of hotSide) single(x, hotRun >= 0 ? [hotRun, ...byRoom([hotRun])] : byRoom());
+    // ② 세척 묶음 (싱크 + 식기세척기) — 화기와 다른 줄 우선
+    let aRun = washA.length ? tryBlock(washA, byRoom([hotRun])) : -1; if (washA.length && aRun < 0 && hotRun >= 0) aRun = tryBlock(washA, [hotRun], 'hi');
+    if (washA.length && aRun < 0) washA.forEach((x) => single(x, byRoom()));
+    if (washB.length) { const other = byRoom([aRun]); let r = tryBlock(washB, other); if (r < 0 && aRun >= 0) r = tryBlock(washB, [aRun], placed.find((p) => p.it === washA[0] && p.ri === aRun)?.end === 'hi' ? 'lo' : 'hi'); if (r < 0) washB.forEach((x) => single(x, byRoom())); }
+    // ③ 냉장 → 작업 → 보관
+    for (const x of cold) single(x, byRoom([hotRun]).concat(hotRun >= 0 ? [hotRun] : []), 'hi');
+    for (const x of prep) single(x, hotRun >= 0 ? [hotRun, ...byRoom([hotRun])] : byRoom());
+    for (const x of store) single(x, byRoom(), 'hi');
+    // ④ 음료냉장고: 앞쪽에 가로폭만큼 문 열림 공간이 비어 있어야 함
+    const foot = (p) => { const w = p.it.w, d = p.it.d; return p.ri === 0 ? [p.u - w / 2, p.v - d / 2, p.u + w / 2, p.v + d / 2] : [p.u - d / 2, p.v - w / 2, p.u + d / 2, p.v + w / 2]; };
+    const swing = (p) => { const w = p.it.w, d = p.it.d; return p.ri === 0 ? [p.u - w / 2, p.v - d / 2 - w, p.u + w / 2, p.v - d / 2] : p.ri === 1 ? [p.u - d / 2 - w, p.v - w / 2, p.u - d / 2, p.v + w / 2] : [p.u + d / 2, p.v - w / 2, p.u + d / 2 + w, p.v + w / 2]; };
+    const hit = (a, b) => a[0] < b[2] - 5 && a[2] > b[0] + 5 && a[1] < b[3] - 5 && a[3] > b[1] + 5;
+    const swingOK = (p) => { const z = swing(p); if (z[1] < pv + 60 || z[0] < 0 || z[2] > W) return false; return placed.every((q) => q === p || (!hit(z, foot(q)) && !(q.it.type === 'showcase' && hit(foot(p), swing(q))))); };
+    let hallSc = 0;
+    for (const x of shows) { let ok = false;
+      for (const ri of byRoom([hotRun]).concat(hotRun >= 0 ? [hotRun] : [])) { for (const end of ['hi', 'lo']) { const r = runs[ri], keep = { lo: r.lo, hi: r.hi }; if (!putBlock([x], r, end)) continue; const p = placed[placed.length - 1]; if (swingOK(p)) { ok = true; break; } placed.pop(); r.lo = keep.lo; r.hi = keep.hi; } if (ok) break; }
+      if (!ok) hallSc++; }
+    // 홀로 뺀 음료냉장고: 칸막이 홀 쪽, 카운터 · 주방 출입구 피해서 · 앞은 비워 둠
+    if (hallSc) { const busy = [[cu - cw / 2 - 150, cu + cw / 2 + 150], [kdU - 650, kdU + 650]]; let n = 0;
+      for (let u = 1000; u + 1000 < W && n < hallSc; u += 100) { const a = u - 325, b = u + 325; if (busy.some(([p, q]) => b > p && a < q)) continue; const vv = pv - 50 - 585 / 2;
+        add.push({ ...{}, id: uid('i'), pz: 'hall_sc', type: 'showcase', x: Math.round(toW(u, vv)[0]), y: Math.round(toW(u, vv)[1]), w: 650, d: 585, h: 1850, rot: rotFor('front'), tag: '음료냉장고 (홀 · 앞 650 비움)' }); rep.placed++;
+        hallKeep.push([a, vv - 585 / 2 - 650 - 300, b, pv]); busy.push([a - 10, b + 10]); n++; u += 640; }
+      if (n < hallSc) rep.miss.push(`음료냉장고 ${hallSc - n}대`); else rep.note += (rep.note ? ' · ' : '') + `음료냉장고 ${n}대는 문 열림 공간 때문에 홀 칸막이 쪽에 놓았어요`; }
+    for (const r of runs) { const gap = r.hi - r.lo; if (gap > 0 && gap < 100) for (const p of placed) if (p.ri === r.ri && p.end === 'hi') { p.s -= gap; [p.u, p.v] = r.uv(p.s, p.it); } } // 줄 사이 작은 틈은 붙이기
+    // 놓기 · 선반 · 후드 · 가스
     const hot = [];
-    for (const p of placed) { put('kitchen', p.it.type, p.u, p.v, p.face, { w: p.it.w, d: p.it.d, h: p.it.h, tag: p.it.name.replace(/^[①-⑮]\s*/, '') }); if (libGet(p.it.type).hood) hot.push(p); if (libGet(p.it.type).drain) p.drainAt = p.face === 'front' ? [p.u, p.v - p.it.d / 2 - 300] : p.face === 'left' ? [p.u - p.it.d / 2 - 300, p.v] : [p.u + p.it.d / 2 + 300, p.v]; }
+    for (const p of placed) { const t = p.it.type; put('kitchen', t, p.u, p.v, p.face, { w: p.it.w, d: p.it.d, h: p.it.h, tag: p.it.name.replace(/^[①-⑮]\s*/, '') }); if (libGet(t).hood) hot.push(p);
+      if (/^(work2?|tfridge)$/.test(t)) { const sp = p.ri === 0 ? [p.u, D - 175] : p.ri === 1 ? [W - 175, p.v] : [175, p.v]; put('kitchen', 'shelf', sp[0], sp[1], p.face, { w: p.it.w, d: 350, h: 40, elev: 1500, color: '#c9ced4', mat: 'steel', tag: '붙박이 선반 (스테인리스)' }); } }
     for (let ri = 0; ri < 3; ri++) { const g = hot.filter((p) => p.ri === ri); if (!g.length) continue; const along = (p) => (ri === 0 ? p.u : p.v), lo = Math.max(ri === 0 ? 0 : pv + 70, Math.min(...g.map((p) => along(p) - p.it.w / 2)) - 150), hi = Math.min(ri === 0 ? W : D - 900, Math.max(...g.map((p) => along(p) + p.it.w / 2)) + 150), c = (lo + hi) / 2;
       if (ri === 0) put('kitchen', 'hood', c, D - 450, 'front', { w: Math.round(hi - lo), d: 900, tag: '후드' }); else put('kitchen', 'hood', ri === 1 ? W - 450 : 450, c, ri === 1 ? 'left' : 'right', { w: Math.round(hi - lo), d: 900, tag: '후드' });
-      const gp2 = ri === 0 ? [c, D - 60] : [ri === 1 ? W - 60 : 60, c]; put('kitchen', 'gasvalve', gp2[0], gp2[1], 'front', { tag: '가스 밸브', mark: 1 }); }
-    const drains = placed.filter((p) => p.drainAt).map((p) => p.drainAt), nd = ov.drains != null ? ov.drains : Math.max(2, drains.length);
-    for (let i = 0; i < nd; i++) { const at = drains[i] || [W * (i + 1) / (nd + 1), pv + kd / 2]; put('kitchen', 'drain', at[0], at[1], 'front', { tag: '배수구', mark: 1 }); }
-    for (const p of placed.filter((q) => q.drainAt).slice(0, 2)) put('kitchen', 'water', p.u, p.v, 'front', { tag: '급수', mark: 1 });
+      const gp2 = ri === 0 ? [c, D - 60] : [ri === 1 ? W - 60 : 60, c]; put('kitchen', 'gasvalve', gp2[0], gp2[1], 'front', { tag: '가스 밸브 (화기 묶음)', mark: 1 }); }
+    // ⑤ 배수 (일자형 트렌치 · 사각 트렌치): 싱크에서 멀지 않게, 가능하면 주방 바닥 가운데 쪽
+    const kc = [W / 2, pv + kd / 2], groups = [washA, washB].map((b) => placed.find((p) => b.includes(p.it) && /^sink/.test(p.it.type))).filter(Boolean);
+    const spots = groups.map((p) => { const sp = p.ri === 0 ? [p.u, p.v - p.it.d / 2 - 150] : p.ri === 1 ? [p.u - p.it.d / 2 - 150, p.v] : [p.u + p.it.d / 2 + 150, p.v], L = Math.hypot(sp[0] - kc[0], sp[1] - kc[1]), t = L > 1200 ? 1 - 1200 / L : 0; return { at: [kc[0] + (sp[0] - kc[0]) * t, kc[1] + (sp[1] - kc[1]) * t], face: p.face }; });
+    const nd = ov.drains != null ? ov.drains : Math.max(1, spots.length);
+    for (let i = 0; i < nd; i++) { const s0 = spots[i] || { at: [kc[0] + (i - (nd - 1) / 2) * 1200, kc[1]], face: 'front' };
+      if ((opt.drainType || 'trench') === 'trench') put('kitchen', 'trench', s0.at[0], s0.at[1], s0.face, { w: clamp(Math.round(W * .22 / 100) * 100, 1200, 1800), d: 200, tag: '일자형 트렌치 · 트랩', mark: 1 });
+      else put('kitchen', 'drain', s0.at[0], s0.at[1], 'front', { w: 300, d: 300, tag: '사각 트렌치 300 · 트랩', mark: 1 }); }
+    for (const p of placed.filter((q) => /^sink|dishwasher/.test(q.it.type))) put('kitchen', 'water', p.u, p.v, 'front', { tag: '급수', mark: 1 });
+    if (split) rep.note += (rep.note ? ' · ' : '') + '주방 6평 이상 · 싱크 2대라 떨어뜨려 놓았어요';
   }
   // 3. 카운터 · 메뉴보드 · 메뉴 띠 · 펜던트
   if (on('counter')) put('counter', 'counter', cu, pv - 420, 'front', { w: cw, d: 700, h: 1050, color: PELI.fin.counter[1], mat: 'gloss', tag: pr.id === 'hall' ? 'FU-01 카운터' : 'FU-04 카운터테이블' });
@@ -181,10 +232,12 @@ function applyPreset(opt) {
     const kx = Math.max(1, Math.round(W / 2200)); for (let i = 0; i < kx; i++) put('lightBase', 'downlight', W * (i + .5) / kx, pv + kd / 2, 'front', { w: 600, d: 600, color: '#f4f6f8', tag: 'LT-03 LED 평판등' }); }
   if (on('ac')) { const nac = Math.max(1, Math.ceil(hallA / 35)); for (let i = 0; i < nac; i++) put('ac', 'ac_cassette', W * (i + .5) / nac, pv * .45, 'front', { tag: '천장형 에어컨' }); }
   // 5. 붙박이 쪽 (출입구 없는 옆벽, 랜덤) · 반사경 · 네온
-  const freeSides = ['L', 'R'].filter((s) => !((s === 'L' && dsF === 'left') || (s === 'R' && dsF === 'right'))), bs = pick(freeSides), bu = (x) => (bs === 'L' ? x : W - x), bIn = bs === 'L' ? 'right' : 'left', bOut = bs === 'L' ? 'left' : 'right';
   const v0 = opt.windows && dsF === 'front' ? 1600 : 900, v1 = pv - 700 - 1100;
-  if (on('mirror')) { const wallLen = pv - 1200, nm = clamp(Math.floor(wallLen / 1100) + pick([-1, 0, 0, 1]), pr.id === 'hall' ? 2 : 1, 6); for (let i = 0; i < nm; i++) put('mirror', 'domemirror', bu(70), 900 + (wallLen - 300) * (i + .5) / nm, bIn, { tag: 'DP-01 돔 반사경' }); }
-  if (on('lightDeco') && !((bs === 'L' && dsF === 'right') || (bs === 'R' && dsF === 'left'))) put('lightDeco', 'neonband', W - bu(25), pv / 2, bOut, { w: Math.round(pv * .75), tag: '장식 띠장 (네온)' });
+  const nv0 = pr.id === 'hall' ? v0 : 600, nv1 = pr.id === 'hall' ? Math.max(v0 + 1500, v1) : pv - 600, mcol = Math.min(pv - 500, nv1 + 475);
+  if (on('mirror')) { const nm = clamp(Math.floor(((P.ceilingH || 2700) - 600) / 530), 2, 4); for (let i = 0; i < nm; i++) put('mirror', 'domemirror', bu(70), mcol, bIn, { elev: 500 + i * 530, tag: 'DP-01 돔 반사경' }); }
+  if (on('lightDeco')) { const len = nv1 - nv0, vc = (nv0 + nv1) / 2, sw = clamp(Math.round(len * .42), 1200, 2100), sh = Math.round(sw * libGet('neonsign').h / libGet('neonsign').w), ey = 1650;
+    if (len > sw + 400) { put('lightDeco', 'neonsign', bu(25), vc, bIn, { w: sw, h: sh, elev: ey, tag: '네온사인 (조명형 아크릴)' });
+      for (const [a0, a1] of [[nv0, vc - sw / 2 - 40], [vc + sw / 2 + 40, on('mirror') ? Math.min(nv1 + 200, mcol - 320) : nv1 + 200]]) if (a1 - a0 > 300) put('lightDeco', 'neonstripe', bu(15), (a0 + a1) / 2, bIn, { w: Math.round(a1 - a0), elev: Math.round(ey + sh / 2 - 35), tag: '장식용 아크릴 띠장' }); } }
   // 6. 테이블 · 의자 (통로 900 · 출입구 앞 비우기)
   const aisle = std().aisle || 900, gw = dw / 2 + 700, ch = PELI.chairs;
   if (on('builtin') && opt.windows) {
@@ -200,15 +253,16 @@ function applyPreset(opt) {
       const sideBar = opt.windows && dsF !== 'front' ? 1350 : 0, uA = bs === 'L' ? 600 + 700 + 520 + aisle : 300 + (dsF === 'left' ? sideBar : 0), uB = bs === 'R' ? W - (600 + 700 + 520 + aisle) : W - 300 - (dsF === 'right' ? sideBar : 0);
       const vert = rnd() < 0.4, tw = vert ? 700 : 1200, td = vert ? 1200 : 700, pu = vert ? 700 + 900 + aisle * .6 : 1200 + aisle, pvv = vert ? 1200 + aisle : 700 + 900 + aisle * .6, mode = pick(['alt', 'row', 'mint', 'alt']), mods = [];
       const dU = dsF === 'front' ? du : dsF === 'left' ? 0 : W, dV = dsF === 'front' ? 0 : dv;
-      for (let v = v0 + (vert ? 600 : 650); v + td / 2 + (vert ? 0 : 600) <= v1 + 300; v += pvv) for (let u = uA + (vert ? 950 : 600); u + (vert ? 950 : 600) <= uB; u += pu) { if (Math.hypot(u - dU, v - dV) < 1700) continue; mods.push([u, v]); }
+      for (let v = v0 + (vert ? 600 : 650); v + td / 2 + (vert ? 0 : 600) <= v1 + 300; v += pvv) for (let u = uA + (vert ? 950 : 600); u + (vert ? 950 : 600) <= uB; u += pu) { if (Math.hypot(u - dU, v - dV) < 1700 || (subUV && Math.hypot(u - subUV[0], v - subUV[1]) < 1400) || hallKeep.some((z) => u + 950 > z[0] && u - 950 < z[2] && v + 950 > z[1] && v - 950 < z[3])) continue; mods.push([u, v]); }
       mods.forEach(([u, v], i) => { const row = Math.round((v - v0) / pvv), c = mode === 'mint' ? ch.CH01 : mode === 'row' ? (row % 2 ? ch.CH03 : ch.CH01) : (i % 2 ? ch.CH03 : ch.CH01);
         put('tables', 't4', u, v, vert ? 'right' : 'front', { w: 1200, d: 700, color: PELI.fin.table, mat: 'gloss', tag: 'TB-01 이동테이블' });
         const seats = vert ? [[-600, -300, 'right'], [-600, 300, 'right'], [600, -300, 'left'], [600, 300, 'left']] : [[-300, -600, 'back'], [300, -600, 'back'], [-300, 600, 'front'], [300, 600, 'front']];
         for (const [a, b, f] of seats) { put('tables', c[0], u + a, v + b, f, { color: c[1], tag: c[2].split(' ')[0] }); rep.seats++; } });
     }
   } else if (on('tables')) put('tables', 't2', bu(W * .25), pv * .55, 'front', { w: 700, d: 700, color: PELI.fin.table, tag: '대기 테이블' });
-  P.items.push(...add);
-  P.preset = { id: pr.id, name: pr.name, src: pr.src, at: Date.now(), ratio: opt.ratio, opt: { kind: opt.kind, ratio: opt.ratio, door: opt.door || doorP, kit: opt.kit || null, scope: opt.scope || null, counts: opt.counts, windows: opt.windows } };
+  P.items.push(...add.map((it) => (it.pz === 'hall_sc' ? { ...it, pz: 'kitchen' } : it)));
+  P.preset = { id: pr.id, name: pr.name, src: pr.src, at: Date.now(), ratio: opt.ratio, opt: { kind: opt.kind, ratio: opt.ratio, door: opt.door || doorP, kit: opt.kit || null, scope: opt.scope || null, counts: opt.counts, windows: opt.windows, kh: opt.kh, drainType: opt.drainType, sub: opt.sub } };
+  { const sc = add.filter((it) => it.type === 'showcase' && it.pz === 'hall_sc'); if (sc.length) P.items = P.items.filter((it) => !(it.type === 'metalframe' && sc.some((q) => Math.hypot(q.x - it.x, q.y - it.y) < q.w / 2 + 120))); }
   return rep;
 }
 
@@ -223,18 +277,18 @@ function openPreset(fromNew) {
   psPos = o && !fromNew ? { door: o.door, kit: o.kit } : { door: null, kit: null };
   $('#psKind').value = o && !fromNew ? o.kind : py < 12 ? 'delivery' : 'hall'; psKindChange(); if (o && !fromNew) { $('#psRatio').value = Math.round(o.ratio * 100); $('#psRatioV').textContent = $('#psRatio').value + '%'; }
   $('#psScope').innerHTML = PSCOPE.map(([k, n]) => `<label class="chk"><input type="checkbox" data-pss="${k}" ${!o || !o.scope || o.scope.includes(k) || fromNew ? 'checked' : ''}> ${n}</label>`).join('');
-  $('#psClear').checked = !!fromNew; $('#psClearRow').hidden = !!fromNew; $('#psAgain').hidden = !(P.preset && P.preset.opt) || !!fromNew; $('#psPos').textContent = psPosText(); $('#presetDlg').showModal();
+  $('#psKH').value = (o && !fromNew && o.kh) || 850; $('#psDrain').value = (o && !fromNew && o.drainType) || 'trench'; $('#psSub').checked = o && !fromNew && o.sub != null ? o.sub : $('#psKind').value === 'hall'; $('#psClear').checked = !!fromNew; $('#psClearRow').hidden = !!fromNew; $('#psAgain').hidden = !(P.preset && P.preset.opt) || !!fromNew; $('#psPos').textContent = psPosText(); $('#presetDlg').showModal();
 }
 function psKindChange() {
   const pr = PRESETS[$('#psKind').value], R = presetRect(), py = R ? (R[2] - R[0]) * (R[3] - R[1]) / 1e6 / 3.3058 : 30; $('#psRatio').value = Math.round((pr.ratio + (pr.id === 'hall' && py < 20 ? 0.07 : 0)) * 100); $('#psRatioV').textContent = $('#psRatio').value + '%';
   const groups = new Map(); for (const [type, w, d, h, q, role, prio, name] of pr.kitchen) if (prio <= 3) groups.set(name, { q, type });
-  $('#psCounts').innerHTML = [...groups.entries()].map(([n, g]) => `<label class="aurow on"><span>${esc(n.replace(/^[①-⑮]\s*/, ''))}</span><input type="number" min="0" max="6" value="${g.q}" data-psn="${esc(n)}"></label>`).join('') + `<label class="aurow on"><span>배수구</span><input type="number" min="0" max="8" value="3" data-psd></label>`;
+  $('#psCounts').innerHTML = [...groups.entries()].map(([n, g]) => `<label class="aurow on"><span>${esc(n.replace(/^[①-⑮]\s*/, ''))}</span><input type="number" min="0" max="6" value="${g.q}" data-psn="${esc(n)}"></label>`).join('') + `<label class="aurow on"><span>배수 (트렌치)</span><input type="number" min="0" max="8" placeholder="자동" data-psd></label>`;
   $('#psSrc').textContent = `${pr.src} · 바닥 TL-01/02 2톤 · 주방 TL-03/04 · 게이트 PT-02 · 벽패널 LT-01 · 카운터 LT-02`;
 }
 function psRead() {
-  const counts = {}; $$('[data-psn]').forEach((i) => (counts[i.dataset.psn] = clamp(+i.value || 0, 0, 6))); const dr = $('[data-psd]'); if (dr) counts.drains = clamp(+dr.value || 0, 0, 8);
+  const counts = {}; $$('[data-psn]').forEach((i) => (counts[i.dataset.psn] = clamp(+i.value || 0, 0, 6))); const dr = $('[data-psd]'); if (dr && dr.value !== '') counts.drains = clamp(+dr.value || 0, 0, 8);
   const scope = $$('[data-pss]').filter((i) => i.checked).map((i) => i.dataset.pss);
-  return { kind: $('#psKind').value, ratio: +$('#psRatio').value / 100, door: psPos.door, kit: psPos.kit, scope: scope.length === PSCOPE.length ? null : scope, counts, windows: $('#psWin').checked };
+  return { kind: $('#psKind').value, ratio: +$('#psRatio').value / 100, door: psPos.door, kit: psPos.kit, scope: scope.length === PSCOPE.length ? null : scope, counts, windows: $('#psWin').checked, kh: clamp(+$('#psKH').value || 850, 700, 1000), drainType: $('#psDrain').value, sub: $('#psSub').checked };
 }
 function presetDone(rep, name, again) {
   commit(); dirty3d = true; draw2d(); renderAgain();

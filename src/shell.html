@@ -966,6 +966,9 @@ body.adminview #varWrap, body.adminview #shareDlg { display: none !important; }
   <div class="psscope" id="psScope"></div>
   <div class="lbl">주방 기물 수량 (매뉴얼 기본값 · 공간이 모자라면 작은 규격 → 우선순위 낮은 것부터 뺌)</div>
   <div class="aulist" id="psCounts"></div>
+  <div class="hqrow"><label class="fld"><span>작업 높이 (싱크 · 작업대 · 테이블냉장고 · 식세기 투입부)</span><input id="psKH" type="number" min="700" max="1000" step="10" value="850"></label>
+    <label class="fld"><span>배수 형태</span><select id="psDrain"><option value="trench">일자형 트렌치</option><option value="square">사각 트렌치</option></select></label></div>
+  <div class="row wrap"><label class="chk"><input type="checkbox" id="psSub"> 보조 출입구 (출입구는 주 + 보조 최대 2개)</label></div>
   <div class="row wrap"><label class="chk"><input type="checkbox" id="psWin" checked> 출입구 쪽 통창 + 창가 바테이블</label><label class="chk" id="psClearRow"><input type="checkbox" id="psClear"> 프리셋이 아닌 기물·벽도 지우고 적용</label></div>
   <p class="hint" id="psSrc"></p>
   <div class="row"><button class="btn pri" id="psGo">저장된 프리셋 자동 적용</button><button class="btn" id="psAgain" hidden>↻ 다시 적용 (랜덤 배치)</button></div>
