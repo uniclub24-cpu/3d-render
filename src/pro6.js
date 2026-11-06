@@ -261,6 +261,14 @@ PRE = {'steel': (0.28, 0.85, 0), 'epoxy': (0.18, 0, 0), 'tile': (0.25, 0, 0), 't
        'plywood': (0.55, 0, 0), 'plastic': (0.35, 0, 0), 'concrete': (0.85, 0, 0), 'grass': (0.95, 0, 0), 'turf': (0.95, 0, 0), 'brick': (0.8, 0, 0), 'frost': (0.35, 0, 1), 'plain': (0.5, 0, 0)}
 def texfac(nt, key):
     tc = nt.nodes.new('ShaderNodeTexCoord'); src = tc.outputs['Object']
+    if key.startswith('ux_'):
+        fp = os.path.join(HERE, 'textures', key + '.jpg')
+        if os.path.exists(fp):
+            sz = max(0.05, float(P.get('textures', {}).get(key, 0.6)))
+            mp = nt.nodes.new('ShaderNodeMapping'); nt.links.new(src, mp.inputs['Vector']); mp.inputs['Scale'].default_value = (1 / sz, 1 / sz, 1 / sz)
+            t = nt.nodes.new('ShaderNodeTexImage'); t.image = bpy.data.images.load(fp); t.projection = 'BOX'; t.projection_blend = 0.15
+            nt.links.new(mp.outputs['Vector'], t.inputs['Vector']); return t.outputs['Color']
+        return None
     if key in ('tile', 'tilew', 'brick'):
         t = nt.nodes.new('ShaderNodeTexBrick'); nt.links.new(src, t.inputs['Vector'])
         sz = 0.6 if key == 'tile' else (0.3 if key == 'tilew' else 0.24)
@@ -334,7 +342,9 @@ async function realPackage(o) {
   const keepCut = cam.cut; cam.cut = C.cut != null ? C.cut : cam.cut;
   let r; try { r = realGLB(C, W, H); } finally { cam.cut = keepCut; dirty3d = true; }
   const sceneJson = { width: W, height: H, samples: N, sun_dir: Ld, sun_color: t.c, sun_strength: 3.5 * (rs.bright || 1), sky_strength: .35, exposure: 0, out: 'render.png', lights: realLights(), project: P.name, made: new Date().toISOString() };
-  const z = zipFiles([{ name: 'scene.glb', data: r.glb }, { name: 'scene.json', data: JSON.stringify(sceneJson, null, 1) }, { name: 'render.py', data: RENDER_PY }, { name: 'render.bat', data: RENDER_BAT }, { name: 'render.command', data: RENDER_CMD }, { name: 'README_실사렌더.txt', data: README_REAL }]);
+  const txf = [], txs = {}; for (const k of Object.keys(typeof TEXCV === 'object' ? TEXCV : {})) { if (!k.startsWith('ux_')) continue; const b = await new Promise((res) => TEXCV[k].toBlob(res, 'image/jpeg', .9)); txf.push({ name: 'textures/' + k + '.jpg', data: new Uint8Array(await b.arrayBuffer()) }); txs[k] = (TILE[k] || 600) / 1000; }
+  sceneJson.textures = txs;
+  const z = zipFiles([...txf, { name: 'scene.glb', data: r.glb }, { name: 'scene.json', data: JSON.stringify(sceneJson, null, 1) }, { name: 'render.py', data: RENDER_PY }, { name: 'render.bat', data: RENDER_BAT }, { name: 'render.command', data: RENDER_CMD }, { name: 'README_실사렌더.txt', data: README_REAL }]);
   return { name: `${(P.name || 'plan').replace(/[\\/:*?"<>|]/g, '_')}_RealisticRender.zip`, blob: new Blob([await z.arrayBuffer()], { type: 'application/zip' }), parts: r.parts };
 }
 async function runReal() {

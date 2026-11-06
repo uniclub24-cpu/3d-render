@@ -856,10 +856,15 @@ function recenter(dur = 900) { const b = bounds(); anim = { t0: performance.now(
 function cam3dDefault() { const b = bounds(); cam.tx = (b[0] + b[2]) / 2; cam.tz = (b[1] + b[3]) / 2; cam.ty = curElev(); cam.dist = fitDist(aspect3d()); cam.yaw = -0.9; cam.pitch = 0.75; cam.cut = true; if (typeof syncGoal === 'function') syncGoal(); }
 function initGL() {
   if (!gl) { $('#v3d').innerHTML = '<p class="nogl">이 기기에서 3D를 켤 수 없어요 (WebGL 미지원)</p>'; return; }
-  const vs = `attribute vec3 p;attribute vec3 n;attribute vec3 c;attribute vec2 u;uniform mat4 M;varying vec3 vn;varying vec3 vc;varying vec2 vu;varying float vy;
-  void main(){gl_Position=M*vec4(p,1.);vn=n;vc=c;vu=u;vy=p.y;}`;
-  const fs = `precision mediump float;varying vec3 vn;varying vec3 vc;varying vec2 vu;varying float vy;uniform sampler2D T;uniform float useT;uniform float A;uniform vec3 L;uniform float K;
-  void main(){vec3 nn=normalize(vn);float d=max(dot(nn,L),0.);float h=.5+.5*nn.y;vec3 col=vc;if(useT>.5)col*=texture2D(T,vu).rgb;
+  const vs = `attribute vec3 p;attribute vec3 n;attribute vec3 c;attribute vec2 u;uniform mat4 M;varying vec3 vn;varying vec3 vc;varying vec2 vu;varying float vy;varying vec3 vw;
+  void main(){gl_Position=M*vec4(p,1.);vn=n;vc=c;vu=u;vy=p.y;vw=p;}`;
+  const fs = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+  precision highp float;
+  #else
+  precision mediump float;
+  #endif
+  varying vec3 vn;varying vec3 vc;varying vec2 vu;varying float vy;varying vec3 vw;uniform sampler2D T;uniform float useT;uniform float A;uniform vec3 L;uniform float K;uniform vec4 CLP;uniform float CLON;
+  void main(){if(CLON>.5&&dot(CLP.xyz,vw)>CLP.w)discard;vec3 nn=normalize(vn);float d=max(dot(nn,L),0.);float h=.5+.5*nn.y;vec3 col=vc;if(useT>.5)col*=texture2D(T,vu).rgb;
   vec3 o=col*K*(.42+.18*h+.5*d);gl_FragColor=vec4(o,A);}`;
   const sh = (t, s) => { const x = gl.createShader(t); gl.shaderSource(x, s); gl.compileShader(x); return x; };
   prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(prog);

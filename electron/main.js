@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, Menu } = require('electron');
 const path = require('path');
 // 자동 업데이트: 열 때마다 GitHub Pages의 최신 화면을 먼저 불러오고, 인터넷이 없거나 실패하면 설치된 화면을 연다.
 const REMOTE = 'https://uniclub24-cpu.github.io/3d-render/';
@@ -27,5 +27,6 @@ function createWindow() {
   // 구글 드라이브 · 네이버 메일 링크는 기본 브라우저로 연다
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
 }
-app.whenReady().then(createWindow);
+// 기본 메뉴(Ctrl+R 새로고침 · Ctrl+W 닫기)를 끄고 단축키는 앱 화면이 받는다
+app.whenReady().then(() => { Menu.setApplicationMenu(null); createWindow(); });
 app.on('window-all-closed', () => app.quit());

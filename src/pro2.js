@@ -170,21 +170,21 @@ function hqInit() {
   if (HQ) return HQ;
   const mk = (vs, fs) => { const sh = (t, s) => { const x = gl.createShader(t); gl.shaderSource(x, s); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x)); return x; }; const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p); return p; };
   const hp = gl.getShaderPrecisionFormat && gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT), prec = hp && hp.precision > 0 ? 'highp' : 'mediump';
-  const S = mk('attribute vec3 p;uniform mat4 S;varying float dz;void main(){vec4 q=S*vec4(p,1.);gl_Position=q;dz=q.z/q.w*.5+.5;}',
-    `precision ${prec} float;varying float dz;void main(){vec4 e=fract(vec4(1.,255.,65025.,16581375.)*dz);e-=e.yzww*vec4(1./255.,1./255.,1./255.,0.);gl_FragColor=e;}`);
+  const S = mk('attribute vec3 p;uniform mat4 S;varying float dz;varying vec3 vw;void main(){vec4 q=S*vec4(p,1.);gl_Position=q;dz=q.z/q.w*.5+.5;vw=p;}',
+    `precision ${prec} float;varying float dz;varying vec3 vw;uniform vec4 CLP;uniform float CLON;void main(){if(CLON>.5&&dot(CLP.xyz,vw)>CLP.w)discard;vec4 e=fract(vec4(1.,255.,65025.,16581375.)*dz);e-=e.yzww*vec4(1./255.,1./255.,1./255.,0.);gl_FragColor=e;}`);
   const M = mk('attribute vec3 p;attribute vec3 n;attribute vec3 c;attribute vec2 u;uniform mat4 M;uniform mat4 S;varying vec3 vn,vc,vw;varying vec2 vu;varying vec4 vs;void main(){gl_Position=M*vec4(p,1.);vn=n;vc=c;vu=u;vw=p;vs=S*vec4(p,1.);}',
-    `precision ${prec} float;varying vec3 vn,vc,vw;varying vec2 vu;varying vec4 vs;uniform sampler2D T,SM;uniform float useT,A,K,tx,amb,sunK,y0;uniform vec3 L,E,sunC;
+    `precision ${prec} float;varying vec3 vn,vc,vw;varying vec2 vu;varying vec4 vs;uniform sampler2D T,SM;uniform float useT,A,K,tx,amb,sunK,y0,CLON;uniform vec3 L,E,sunC;uniform vec4 CLP;
     float up(vec4 c){return dot(c,vec4(1.,1./255.,1./65025.,1./16581375.));}
-    void main(){vec3 nn=normalize(vn);vec3 V=normalize(E-vw);if(dot(nn,V)<0.)nn=-nn;
+    void main(){if(CLON>.5&&dot(CLP.xyz,vw)>CLP.w)discard;vec3 nn=normalize(vn);vec3 V=normalize(E-vw);if(dot(nn,V)<0.)nn=-nn;
       vec3 sc=vs.xyz/vs.w*.5+.5;float nl=dot(nn,L),b=.0009+.0025*(1.-abs(nl)),sh=0.;
       for(int i=-2;i<=2;i++)for(int j=-2;j<=2;j++){sh+=sc.z-b>up(texture2D(SM,sc.xy+vec2(float(i),float(j))*tx))?0.:1.;}sh/=25.;
       if(sc.x<0.||sc.x>1.||sc.y<0.||sc.y>1.||sc.z>1.)sh=1.;
-      vec3 col=vc;if(useT>.5)col*=texture2D(T,vu).rgb;
+      vec3 col=pow(vc,vec3(2.2));if(useT>.5)col*=pow(texture2D(T,vu).rgb,vec3(2.2));
       float h=.5+.5*nn.y;vec3 sky=mix(vec3(.50,.47,.44),vec3(.86,.90,1.),h);
-      float ao=mix(.72,1.,clamp((vw.y-y0)/650.,0.,1.))*mix(.92,1.,h);
-      vec3 Hh=normalize(L+V);float spec=pow(max(dot(nn,Hh),0.),48.)*sh*step(0.,nl)*.22;
-      vec3 o=(col*(amb*sky*ao+sunK*max(nl,0.)*sh*sunC)+spec*sunC)*K;
-      o=(o*(2.51*o+.03))/(o*(2.43*o+.59)+.14);gl_FragColor=vec4(pow(clamp(o,0.,1.),vec3(.92)),A);}`);
+      float ao=mix(.45,1.,smoothstep(0.,900.,vw.y-y0))*mix(.8,1.,h);
+      vec3 Hh=normalize(L+V);float fr=pow(1.-max(dot(nn,V),0.),5.);float spec=pow(max(dot(nn,Hh),0.),96.)*sh*step(0.,nl)*.5;vec3 Rr=reflect(-V,nn);
+      vec3 o=(col*(amb*pow(sky,vec3(2.2))*ao*.9+sunK*max(nl,0.)*sh*sunC*1.15)+spec*sunC+fr*.12*mix(vec3(.25),vec3(.75,.82,.95),.5+.5*Rr.y)*ao)*K*.8;
+      o=(o*(2.51*o+.03))/(o*(2.43*o+.59)+.14);gl_FragColor=vec4(pow(clamp(o,0.,1.),vec3(1./2.2)),A);}`);
   HQ = { S, M };
   return HQ;
 }
