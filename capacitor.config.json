@@ -6,5 +6,18 @@
     "androidScheme": "https",
     "url": "https://uniclub24-cpu.github.io/3d-render/",
     "errorPath": "index.html"
+  },
+  "backgroundColor": "#121826",
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2500,
+      "launchAutoHide": true,
+      "launchFadeOutDuration": 300,
+      "backgroundColor": "#121826",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false,
+      "splashFullScreen": false,
+      "splashImmersive": false
+    }
   }
 }

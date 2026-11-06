@@ -106,3 +106,14 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.admin_users() from public, anon;
 grant execute on function public.admin_users() to authenticated;
+
+-- v17: 내 AI 키 보관 (본인만 읽고 쓰기 · 관리자도 못 봄). 같은 계정으로 로그인한 PC·폰이 자동으로 같은 키를 씀
+create table if not exists public.user_secrets (
+  user_id uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  ai_key text,
+  updated_at timestamptz not null default now()
+);
+alter table public.user_secrets enable row level security;
+drop policy if exists "own secrets" on public.user_secrets;
+create policy "own secrets" on public.user_secrets for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);

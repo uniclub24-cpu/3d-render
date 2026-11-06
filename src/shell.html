@@ -609,9 +609,35 @@ body.compact.cpR .right{display:flex;flex-direction:column;position:fixed;right:
 .sdotc{width:18px;height:18px;border-radius:50%;flex:none;margin-top:4px;cursor:pointer;position:relative;overflow:hidden;border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}.sdotc input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .airadd{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}.airadd select{padding:4px;border-radius:8px}
 .simpanel.min>*:not(.sph){display:none}.simpanel .sph b{cursor:pointer}.simpanel .sph b::after{content:' ▾';opacity:.5}
+
+/* v17 · 시작 로딩 화면 (설치형 앱) · PDF 불러오기 · BYR 로고 */
+.bootsplash { display: none; }
+.appboot .bootsplash { display: block; position: fixed; inset: 0; z-index: 2147483000; background: linear-gradient(#0f1526, #1b2132); transition: opacity .5s ease; }
+.bootsplash.out { opacity: 0; pointer-events: none; }
+.bsbox { position: absolute; inset: 0; margin: auto; width: min(100vw, calc(100vh * 1080 / 1920)); aspect-ratio: 1080 / 1920; max-height: 100vh; background: url(splash-p.jpg) center / 100% 100% no-repeat; }
+.bsbar { position: absolute; left: 9.8%; right: 9.8%; top: 72.9%; height: 3px; border-radius: 2px; overflow: hidden; background: rgba(255,255,255,.08); }
+.bsbar i { position: absolute; inset: 0; width: 38%; background: linear-gradient(90deg, transparent, #7cc4ff, #ffffff, #7cc4ff, transparent); animation: bsrun 1.25s ease-in-out infinite; }
+@keyframes bsrun { 0% { transform: translateX(-110%); } 100% { transform: translateX(290%); } }
+@media (orientation: landscape) { .bsbox { width: min(100vw, calc(100vh * 2752 / 1536)); aspect-ratio: 2752 / 1536; background-image: url(splash-l.jpg); } .bsbar { left: 31.7%; right: 31.7%; top: 91.6%; } }
+@media (prefers-reduced-motion: reduce) { .bsbar i { animation-duration: 3s; } }
+.brand img.byr { border-radius: 22%; display: block; }
+.pdfcv { width: 100%; height: min(56vh, 560px); border-radius: 10px; background: #fff; display: block; touch-action: none; }
+.pdfpages { display: flex; flex-wrap: wrap; gap: 6px; }
+.pdfpages .chip { display: inline-flex; align-items: center; gap: 4px; }
+.pdfpages .chip button { border: 0; background: none; padding: 0; }
+.pdfopts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 640px) { .pdfopts { grid-template-columns: 1fr 1fr; } }
+.pdflegend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.pdflegend i { display: inline-block; width: 12px; height: 4px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.pdfask { border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); border-radius: 12px; padding: 12px; display: grid; gap: 6px; }
+.pdfask small { color: var(--muted); }
+#pdfInfo b.bad { color: var(--bad); }
+input.warnfld { outline: 2px solid color-mix(in srgb, var(--warn) 70%, transparent); }
 </style>
 
 
+<div id="bootSplash" class="bootsplash" aria-hidden="true"><div class="bsbox"><div class="bsbar"><i></i></div></div></div>
+<script>(function(){try{var C=window.Capacitor,n=C&&(C.isNativePlatform?C.isNativePlatform():(C.platform&&C.platform!=='web'));if(n||/[?&]splash=1/.test(location.search))document.documentElement.classList.add('appboot');}catch(e){}})();</script>
 <div class="app">
 <header class="top">
   <button class="ic" id="homeBtn" aria-label="홈 · 프로젝트 목록" title="홈"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg></button>
@@ -809,7 +835,9 @@ body.compact.cpR .right{display:flex;flex-direction:column;position:fixed;right:
     </div>
   </form>
   <div id="syncOn" class="row wrap"><button class="btn pri" id="sNow">지금 동기화</button><label class="chk"><input type="checkbox" id="sAuto"> 자동 동기화</label><button class="btn" id="sOut">로그아웃</button></div>
-  <label class="fld"><span>AI 인식 키 (설치형 앱에서 사진 인식용 · Anthropic API 키)</span><input id="sAi" type="password" autocomplete="off" placeholder="Claude 안에서 열면 없어도 돼요"></label>
+  <label class="fld"><span>AI 인식 키 (사진 · PDF 도면 인식용 · 내 Anthropic API 키)</span><input id="sAi" type="password" autocomplete="off" placeholder="Claude 안에서 열면 없어도 돼요"></label>
+  <label class="chk" id="sAiAcctRow" hidden><input type="checkbox" id="sAiAcct" checked> 내 계정에 저장 · 같은 계정으로 로그인한 PC · 폰에서 자동으로 써요</label>
+  <p class="hint" id="sAiState"></p>
   <p class="hint" id="syncMsg" role="status"></p>
   <button class="btn" data-close>닫기</button>
 </div></dialog>
@@ -940,6 +968,29 @@ body.compact.cpR .right{display:flex;flex-direction:column;position:fixed;right:
   <p class="hint" id="bomInfo"></p>
   <div class="bomwrap"><table class="bom"><thead><tr><th>항목</th><th>규격</th><th>수량</th><th>단위</th><th>단가 (원)</th><th>금액</th></tr></thead><tbody id="bomBody"></tbody><tfoot id="bomFoot"></tfoot></table></div>
   <p class="hint">물량은 도면 기준 추정치예요. 벽은 외벽 한 면 · 칸막이 양면, 문 · 창 면적을 뺐어요. 발주 전 현장 실측으로 확인하세요.</p>
+</div></dialog>
+
+<dialog id="pdfDlg" class="wide"><div class="dlg">
+  <div class="row" style="align-items:center"><h3 style="flex:1">PDF · 도면 이미지 불러오기</h3><button class="btn" data-close>닫기</button></div>
+  <div class="row wrap" style="align-items:center"><label class="btn pri">PDF · 도면 사진 고르기<input type="file" id="pdfFile" accept=".pdf,application/pdf,image/*" hidden></label><span class="hint" id="pdfName"></span></div>
+  <div class="pdfpages" id="pdfPages"></div>
+  <canvas id="pdfCv" class="pdfcv" width="900" height="560" aria-label="도면 미리보기"></canvas>
+  <div class="pdflegend"><span><i style="background:#1ebe5a"></i>벽</span><span><i style="background:#ff9f0a"></i>문</span><span><i style="background:#2aa8ff"></i>창</span><span><i style="background:#006eff"></i>기둥</span><span><i style="background:#b05cff"></i>기물 (AI)</span><span><i style="background:#18c1b0"></i>배수 · 배관 → 바닥 아래</span><span><i style="background:#ff3b30"></i>못 읽음</span><span><i style="background:#7d5cff"></i>도면 영역</span></div>
+  <p class="hint" id="pdfInfo" role="status"></p>
+  <div class="g3 pdfopts">
+    <label class="fld"><span>건물 가로 길이 (mm · 벽 바깥 기준)</span><input id="pdfWmm" type="number" step="10" min="100"></label>
+    <label class="fld"><span>벽 높이 (도면에 없을 때)</span><input id="pdfH" type="number" value="2700" step="10" min="2000"></label>
+    <label class="fld"><span>벽 재료 (도면에 없을 때)</span><select id="pdfMat"><option value="concrete">시멘트 벽 (콘크리트)</option><option value="gypsum">석고보드</option><option value="brick">벽돌</option><option value="paint">페인트 마감</option></select></label>
+  </div>
+  <div class="row wrap" id="pdfCalRow" hidden style="align-items:center"><span>두 점 사이 실제 길이</span><input id="pdfCalMm" type="number" step="10" placeholder="예: 27000" style="width:140px"><span>mm</span><button class="btn pri" id="pdfCalOk">맞추기</button></div>
+  <div class="row wrap" style="align-items:center"><button class="btn" id="pdfCal">두 점 찍어 치수 맞추기</button><button class="btn" id="pdfArea">도면 영역 다시 잡기</button><button class="btn" id="pdfRot">90° 돌리기</button></div>
+  <div class="row wrap" style="align-items:center">
+    <label class="chk"><input type="checkbox" id="pdfAi"> AI로 문 · 기물 · 배수 · 치수까지 읽기 <small class="hint" id="pdfAiState"></small></label>
+    <label class="chk"><input type="checkbox" id="pdfCols" checked> 기둥 넣기</label>
+    <label class="chk"><input type="checkbox" id="pdfBg" checked> 도면을 바닥 배경에 깔기</label>
+    <label class="chk"><input type="checkbox" id="pdfReplace" checked> 지금 층 비우고 넣기</label></div>
+  <div class="pdfask" id="pdfAsk" hidden role="alertdialog" aria-labelledby="pdfAskT"><b id="pdfAskT">일부 오브젝트를 읽을 수 없습니다. 확인 된 작업만 수행 할까요?</b><small id="pdfAskSub"></small><div class="row"><button class="btn pri" id="pdfAskYes">예 · 확인된 것만 넣기</button><button class="btn" id="pdfAskNo">아니요</button></div></div>
+  <div class="row"><button class="btn pri" id="pdfOk" disabled>도면에 넣기</button></div>
 </div></dialog>
 
 <dialog id="dxfDlg" class="wide"><div class="dlg">

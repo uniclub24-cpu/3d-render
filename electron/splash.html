@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>3D RENDER</title>
+<style>
+html,body{margin:0;height:100%;background:#121826;overflow:hidden;-webkit-app-region:drag;user-select:none}
+.box{position:absolute;inset:0;margin:auto;width:min(100vw,calc(100vh*2752/1536));aspect-ratio:2752/1536;background:url(splash.jpg) center/100% 100% no-repeat}
+.bar{position:absolute;left:31.7%;right:31.7%;top:91.6%;height:3px;border-radius:2px;overflow:hidden;background:rgba(255,255,255,.08)}
+.bar i{position:absolute;inset:0;width:38%;background:linear-gradient(90deg,transparent,#7cc4ff,#fff,#7cc4ff,transparent);animation:run 1.25s ease-in-out infinite}
+@keyframes run{0%{transform:translateX(-110%)}100%{transform:translateX(290%)}}
+</style></head>
+<body><div class="box"><div class="bar"><i></i></div></div></body></html>
