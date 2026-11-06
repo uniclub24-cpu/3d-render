@@ -123,7 +123,7 @@ function applyPreset(opt) {
   const pa = toW(0, pv), pb = toW(W, pv), part = { id: uid('w'), pz: 'part', x1: Math.round(pa[0]), y1: Math.round(pa[1]), x2: Math.round(pb[0]), y2: Math.round(pb[1]), t: 100, finish: fin('partition') }; P.walls.push(part);
   P.openings.push({ id: uid('o'), pz: 'pass', wall: part.id, t: Math.round(cu), type: 'pass', w: cw, h: 1000, sill: 1050, frame: '#bababa' });
   P.openings.push({ id: uid('o'), pz: 'kdoor', wall: part.id, t: Math.round(kdU), type: 'opening', w: 1000, h: 2100, sill: 0, frame: '#bababa' }); /* 주방↔홀 출입구는 문 없이 */
-  if (on('deco')) for (let k = 1; k < Math.floor(W / 1100); k++) { const u = k * W / Math.floor(W / 1100); if (Math.abs(u - cu) < cw / 2 + 80 || Math.abs(u - kdU) < 520) continue; put('deco', 'metalframe', u, pv - 95, 'front', { h: P.ceilingH, tag: 'MT-01 금속 프레임' }); }
+  if (on('deco') && rnd() < 0.55) for (let k = 1; k < Math.floor(W / 1100); k++) { const u = k * W / Math.floor(W / 1100); if (Math.abs(u - cu) < cw / 2 + 80 || Math.abs(u - kdU) < 520) continue; put('deco', 'metalframe', u, pv - 95, 'front', { h: P.ceilingH, tag: 'MT-01 금속 프레임' }); }
   // 출입문 (게이트) · 통창 · 간판
   const gp = toW(du, dsF === 'front' ? 0 : dv), gpOut = dsF === 'front' ? [du, -T] : dsF === 'left' ? [-T, dv] : [W + T, dv], gw0 = toW(...gpOut);
   let gwall = null, gt = 0; for (const w of exteriorWalls()) { const [d, t] = distPtSeg(gw0[0], gw0[1], w); if (!gwall || d < gwall.d) gwall = { d, t, w }; }
@@ -141,8 +141,8 @@ function applyPreset(opt) {
     if (opt.windows && !P.openings.some((o) => o.wall === w.id && o.pz !== 'win' && /full|window/.test(o.type)))
       for (const [s0, s1, low] of [[100, gt - gw2 - 60, true], [gt + gw2 + 60, L - 100, false]]) { const len = s1 - s0; if (len < 700) continue; const n = Math.max(1, Math.round(len / FAC.pw)), pw = len / n, list = (low ? rightS : !rightS) ? FAC.L : FAC.R;
         for (let i = 0; i < n; i++) { const t = low ? s1 - pw * (i + .5) : s0 + pw * (i + .5), o = { id: uid('o'), pz: 'win', wall: w.id, t: Math.round(t), type: 'window', w: Math.round(pw - 55), h: SH, sill: 0, frame: '#9aa0a6', fw: 20 }; P.openings.push(o);
-          if (on('sign')) add.push({ id: uid('i'), pz: 'sign', type: 'winsheet', dk: list[i] || FAC.plain, win: o.id, x: 0, y: 0, w: o.w, d: 12, rot: 0, tag: `윈도우 시트 ${list[i] ? (low ? '좌' : '우') + (i + 1) : '(무지)'}` }); } }
-    if (on('sign') && FAC.door) add.push({ id: uid('i'), pz: 'sign', type: 'doorsheet', dk: FAC.door, win: gate.id, x: 0, y: 0, w: gate.w, d: 12, rot: 0, tag: pr.id === 'hall' ? '레드 양개 출입문 (트랜섬 포함)' : '레드 출입문 (DELIVERY · TAKE OUT)' });
+          if (on('sheet')) add.push({ id: uid('i'), pz: 'sheet', type: 'winsheet', dk: list[i] || FAC.plain, win: o.id, x: 0, y: 0, w: o.w, d: 12, rot: 0, tag: `윈도우 시트 ${list[i] ? (low ? '좌' : '우') + (i + 1) : '(무지)'}` }); } }
+    if (on('sheet') && FAC.door) add.push({ id: uid('i'), pz: 'sheet', type: 'doorsheet', dk: FAC.door, win: gate.id, x: 0, y: 0, w: gate.w, d: 12, rot: 0, tag: pr.id === 'hall' ? '레드 양개 출입문 (트랜섬 포함)' : '레드 출입문 (DELIVERY · TAKE OUT)' });
     if (on('sign')) { const Dk = DECALS[FAC.sign], ar = Dk.w / Dk.h, sw0 = pr.id === 'hall' ? (L >= 8050 ? 8050 : L >= 6400 ? 6000 : 4000) : 4500, sl = Math.min(sw0, L - 100), sc = clamp(gt, sl / 2 + 50, L - sl / 2 - 50), off = wallT(w) / 2 + 100;
       add.push({ id: uid('i'), pz: 'sign', type: 'pelisign', dk: FAC.sign, x: Math.round(w.x1 + ux * sc + nx * off), y: Math.round(w.y1 + uy * sc + ny * off), w: sl, d: 150, h: Math.round(sl / ar), lockAR: ar, rot, elev: SH, wallLink: w.id, tag: `페리카나 간판 ${(sl / 1000).toFixed(1)}M (LED 파나플렉스)` }); }
     w.L0 = L;
@@ -254,20 +254,22 @@ function applyPreset(opt) {
       for (const [a0, a1] of [[nv0, vc - sw / 2 - 40], [vc + sw / 2 + 40, on('mirror') ? Math.min(nv1 + 200, mcol - 320) : nv1 + 200]]) if (a1 - a0 > 300) put('lightDeco', 'neonstripe', bu(15), (a0 + a1) / 2, bIn, { w: Math.round(a1 - a0), elev: Math.round(ey + sh / 2 - 35), tag: '장식용 아크릴 띠장' }); } }
   // 6. 테이블 · 의자 (통로 900 · 출입구 앞 비우기)
   const aisle = std().aisle || 900, gw = dw / 2 + 700, ch = PELI.chairs;
-  if (on('builtin') && opt.windows) {
+  let tleft = opt.maxT != null ? opt.maxT : autoTables(R);
+  if (on('builtin') && opt.windows && opt.bar !== false) {
     const segs = dsF === 'front' ? [[150, du - gw], [du + gw, W - 150]] : [[300, dv - gw], [dv + gw, pv - 1300]];
     for (const [s0, s1] of segs) { if (s1 - s0 < 1000) continue; const tg = pr.id === 'hall' ? 'FU-03 바테이블' : 'FU-05 바테이블';
-      if (dsF === 'front') { put('builtin', 'tbar', (s0 + s1) / 2, 450, 'front', { w: Math.round(s1 - s0), d: 400, h: 1050, color: PELI.fin.table, tag: tg }); for (let u = s0 + 300; u + 300 <= s1; u += 600) { put('builtin', ch.CH04[0], u, 950, 'front', { color: ch.CH04[1], tag: 'CH-04 바체어' }); rep.seats++; } }
-      else { const L0 = dsF === 'left', f = L0 ? 'left' : 'right', uu = (x) => (L0 ? x : W - x); put('builtin', 'tbar', uu(450), (s0 + s1) / 2, f, { w: Math.round(s1 - s0), d: 400, h: 1050, color: PELI.fin.table, tag: tg }); for (let v = s0 + 300; v + 300 <= s1; v += 600) { put('builtin', ch.CH04[0], uu(950), v, f, { color: ch.CH04[1], tag: 'CH-04 바체어' }); rep.seats++; } } }
+      if (dsF === 'front') { put('builtin', 'tbar', (s0 + s1) / 2, 450, 'front', { w: Math.round(s1 - s0), d: 400, h: 1050, color: PELI.fin.table, tag: tg }); for (let u = s0 + 300; u + 300 <= s1; u += 700) { put('builtin', ch.CH04[0], u, 950, 'front', { color: ch.CH04[1], tag: 'CH-04 바체어' }); rep.seats++; } }
+      else { const L0 = dsF === 'left', f = L0 ? 'left' : 'right', uu = (x) => (L0 ? x : W - x); put('builtin', 'tbar', uu(450), (s0 + s1) / 2, f, { w: Math.round(s1 - s0), d: 400, h: 1050, color: PELI.fin.table, tag: tg }); for (let v = s0 + 300; v + 300 <= s1; v += 700) { put('builtin', ch.CH04[0], uu(950), v, f, { color: ch.CH04[1], tag: 'CH-04 바체어' }); rep.seats++; } } }
   }
   if (pr.id === 'hall') {
     if (on('builtin') && v1 - v0 > 1500) { put('builtin', 'banquette', bu(300), (v0 + v1) / 2, bIn, { w: Math.round(v1 - v0), d: 600, color: PELI.fin.cushion, tag: 'FU-02 붙박이 의자' });
-      for (let v = v0 + 700; v + 600 <= v1; v += 1900) { put('builtin', 't4', bu(950), v, bIn, { w: 1200, d: 700, color: PELI.fin.table, mat: 'gloss', tag: 'TB-01 이동테이블' }); for (const dd of [-300, 300]) { put('builtin', ch.CH02[0], bu(1560), v + dd, bOut, { color: ch.CH02[1], tag: 'CH-02' }); rep.seats++; } rep.seats += 2; } }
+      for (let v = v0 + 700; v + 600 <= v1 && tleft > 0; v += 1900) { tleft--; put('builtin', 't4', bu(950), v, bIn, { w: 1200, d: 700, color: PELI.fin.table, mat: 'gloss', tag: 'TB-01 이동테이블' }); for (const dd of [-300, 300]) { put('builtin', ch.CH02[0], bu(1560), v + dd, bOut, { color: ch.CH02[1], tag: 'CH-02' }); rep.seats++; } rep.seats += 2; } }
     if (on('tables')) {
       const sideBar = opt.windows && dsF !== 'front' ? 1350 : 0, uA = bs === 'L' ? 600 + 700 + 520 + aisle : 300 + (dsF === 'left' ? sideBar : 0), uB = bs === 'R' ? W - (600 + 700 + 520 + aisle) : W - 300 - (dsF === 'right' ? sideBar : 0);
       const vert = rnd() < 0.4, tw = vert ? 700 : 1200, td = vert ? 1200 : 700, pu = vert ? 700 + 900 + aisle * .6 : 1200 + aisle, pvv = vert ? 1200 + aisle : 700 + 900 + aisle * .6, mode = pick(['alt', 'row', 'mint', 'alt']), mods = [];
       const dU = dsF === 'front' ? du : dsF === 'left' ? 0 : W, dV = dsF === 'front' ? 0 : dv;
       for (let v = v0 + (vert ? 600 : 650); v + td / 2 + (vert ? 0 : 600) <= v1 + 300; v += pvv) for (let u = uA + (vert ? 950 : 600); u + (vert ? 950 : 600) <= uB; u += pu) { if (Math.hypot(u - dU, v - dV) < 1700 || (subUV && Math.hypot(u - subUV[0], v - subUV[1]) < 1400) || hallKeep.some((z) => u + 950 > z[0] && u - 950 < z[2] && v + 950 > z[1] && v - 950 < z[3])) continue; mods.push([u, v]); }
+      { const keep = Math.max(0, tleft); if (mods.length > keep) { const pickd = []; for (let k = 0; k < keep; k++) pickd.push(mods[Math.floor((k + 0.5) * mods.length / keep)]); mods.splice(0, mods.length, ...pickd); } }
       mods.forEach(([u, v], i) => { const row = Math.round((v - v0) / pvv), c = mode === 'mint' ? ch.CH01 : mode === 'row' ? (row % 2 ? ch.CH03 : ch.CH01) : (i % 2 ? ch.CH03 : ch.CH01);
         put('tables', 't4', u, v, vert ? 'right' : 'front', { w: 1200, d: 700, color: PELI.fin.table, mat: 'gloss', tag: 'TB-01 이동테이블' });
         const seats = vert ? [[-600, -300, 'right'], [-600, 300, 'right'], [600, -300, 'left'], [600, 300, 'left']] : [[-300, -600, 'back'], [300, -600, 'back'], [-300, 600, 'front'], [300, 600, 'front']];

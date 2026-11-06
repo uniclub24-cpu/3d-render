@@ -234,6 +234,12 @@ except Exception as e:
     bg.inputs['Color'].default_value = (0.62, 0.74, 0.9, 1); bg.inputs['Strength'].default_value = 0.8
 
 # 조명 기물
+def kcol(k):
+    t = k / 100.0
+    r = 1.0 if t <= 66 else min(1, max(0, 1.292936 * ((t - 60) ** -0.1332047592)))
+    g = min(1, max(0, (0.39008157 * math.log(t) - 0.63184144) if t <= 66 else 1.129890861 * ((t - 60) ** -0.0755148492)))
+    b = 1.0 if t >= 66 else (0.0 if t <= 19 else min(1, max(0, 0.543206789 * math.log(t - 10) - 1.19625408)))
+    return (r, g, b)
 for i, L in enumerate(P.get('lights', [])):
     p = gl2bl(L['p'])
     if L['kind'] == 'light' and max(L['w'], L['d']) > 0.4:
@@ -241,7 +247,7 @@ for i, L in enumerate(P.get('lights', [])):
     else:
         ld = bpy.data.lights.new('Down%d' % i, 'SPOT' if L['kind'] != 'pendant' else 'POINT'); ld.energy = 35 if L['kind'] != 'pendant' else 25
         if ld.type == 'SPOT': ld.spot_size = math.radians(110); ld.spot_blend = 0.6
-    ld.color = (1.0, 0.92, 0.8); ld.shadow_soft_size = 0.05
+    ld.color = kcol(L.get('k', 3500)); ld.energy *= L.get('pw', 1); ld.shadow_soft_size = 0.05
     ob = bpy.data.objects.new(ld.name, ld); sc.collection.objects.link(ob); ob.location = p; ob.rotation_euler = (0, 0, math.radians(-L.get('rot', 0)))
 
 # 재질: 이름 = 종류~색~투명도
