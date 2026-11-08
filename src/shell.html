@@ -1031,7 +1031,7 @@ input.warnfld { outline: 2px solid color-mix(in srgb, var(--warn) 70%, transpare
   <p class="hint" id="psInfo"></p>
   <div class="hqrow"><label class="fld"><span>프리셋</span><select id="psKind"><option value="hall">페리카나 홀 타입</option><option value="delivery">페리카나 배달 타입</option></select></label>
     <label class="fld"><span>주변 배경</span><select id="psEnv"><option value="keep">그대로</option><option value="plaza">프라자상권</option><option value="apt">아파트상가</option><option value="main">메인상권</option><option value="park">공원앞 상가</option></select></label>
-    <label class="fld"><span>주방 비율 <b id="psRatioV"></b></span><input id="psRatio" type="range" min="20" max="70" step="1"></label></div>
+    <label class="fld"><span>주방 비율 <b id="psRatioV"></b></span><input id="psRatio" type="range" min="20" max="100" step="1"><small class="hint">95% 이상이면 홀 없이 앞쪽 1.2m만 출입 · 픽업 자리로 남기고 모두 주방 (배달 전용)</small></label></div>
   <div class="pspos"><span id="psPos"></span><button class="btn" id="psPick">도면에서 출입구 · 주방 위치 잡기</button></div>
   <div class="row" style="align-items:center"><div class="lbl" style="flex:1">적용 범위 (체크한 것만 넣고, 다시 적용할 때도 체크한 것만 바꿔요)</div><button class="qb" id="psAll">전체 선택 · 해제</button></div>
   <div class="psscope" id="psScope"></div>

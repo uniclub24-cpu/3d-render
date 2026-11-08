@@ -345,7 +345,7 @@ const physical = (it) => { const s = spec(it); return !['mark', 'zone', 'drainpt
 /* ---------- 충돌 · 주방 점검 ---------- */
 function analyze() {
   conflicts = new Map(); checks = [];
-  const phys = P.items.filter((i) => !i.hidden && physical(i));
+  const phys = P.items.filter((i) => !i.hidden && physical(i) && !/^(sheet|sign)$/.test(i.pz || '') && !/sheet|sticker|signbox/.test(i.type));
   const C = phys.map((it) => ({ it, c: corners(it), z0: zOf(it), z1: zOf(it) + spec(it).h, b: aabb(corners(it)) }));
   for (let i = 0; i < C.length; i++) for (let j = i + 1; j < C.length; j++) {
     const a = C[i], b = C[j];
@@ -360,7 +360,7 @@ function analyze() {
     }
   }
   for (const q of C) {
-    if (spec(q.it).layer === 'ceil' || q.it.type === 'column') continue;
+    if (spec(q.it).layer === 'ceil' || q.it.type === 'column' || /^(sheet|sign|facade|neon|deco|mirror|menu|lightDeco)$/.test(q.it.pz || '') || /sheet|sign|sticker|decal|neon|mirror|menuboard|shelf|ac_|louver|fan|metalframe/.test(q.it.type)) continue;
     for (const w of P.walls) {
       if (satOverlap(q.c, wallRect(w), 12)) {
         // 문 · 창 자리는 통과 허용 안 함 → 벽을 뚫고 들어감
