@@ -1030,9 +1030,9 @@ function buildWalls() {
         if (top <= H) box(T, o.a, o.b, top - fr, top, -t - 10, t + 10, fc);
         if (o.sill > 0) box(T, o.a, o.b, o.sill, o.sill + fr, -t - 10, t + 10, fc);
         const glassTop = Math.min(top - fr, H), glassBot = o.sill + (o.sill > 0 ? fr : 0);
-        if (o.type === 'window' || o.type === 'full' || o.type === 'auto') { box(T, o.a + fr, o.b - fr, glassBot, glassTop, -8, 8, '#a9d6ec', 'plain', .32); if (o.type !== 'window') box(T, (o.a + o.b) / 2 - fr / 2, (o.a + o.b) / 2 + fr / 2, glassBot, glassTop, -t, t, fc); }
+        if (o.type === 'window' || o.type === 'full' || o.type === 'auto') { glassBand(T, o, o.a + fr, o.b - fr, glassBot, glassTop, -8, 8, .32); if (o.type !== 'window') box(T, (o.a + o.b) / 2 - fr / 2, (o.a + o.b) / 2 + fr / 2, glassBot, glassTop, -t, t, fc); }
         else if (o.type === 'slide') { const lw = (o.b - o.a - 2 * fr) * 0.54; box(T, o.a + fr, o.a + fr + lw, 0, glassTop, -t + 10, -t + 40, fc); box(T, o.b - fr - lw, o.b - fr, 0, glassTop, t - 40, t - 10, fc); box(T, o.a + fr + 80, o.a + fr + lw - 80, 300, glassTop - 120, -t + 8, -t + 42, '#a9d6ec', 'plain', .4); box(T, o.b - fr - lw + 80, o.b - fr - 80, 300, glassTop - 120, t - 42, t - 8, '#a9d6ec', 'plain', .4); }
-        else if (o.type === 'slidepass') { const lw = (o.b - o.a - 2 * fr) * 0.54; box(T, o.a + fr, o.a + fr + lw, glassBot, glassTop, -12, -2, '#a9d6ec', 'plain', .4); box(T, o.b - fr - lw, o.b - fr, glassBot, glassTop, 2, 12, '#a9d6ec', 'plain', .4); box(T, o.a - 60, o.b + 60, o.sill - 30, o.sill, -t - 220, t + 220, '#c9ced4', 'steel'); }
+        else if (o.type === 'slidepass') { const lw = (o.b - o.a - 2 * fr) * 0.54; glassBand(T, o, o.a + fr, o.a + fr + lw, glassBot, glassTop, -12, -2, .4); glassBand(T, o, o.b - fr - lw, o.b - fr, glassBot, glassTop, 2, 12, .4); box(T, o.a - 60, o.b + 60, o.sill - 30, o.sill, -t - 220, t + 220, '#c9ced4', 'steel'); }
         else if (o.type === 'pass') { box(T, o.a - 60, o.b + 60, o.sill - 30, o.sill, -t - 220, t + 220, '#c9ced4', 'steel'); }
         else if (typeof DOOR3D !== 'undefined' && DOOR3D[o.type]) DOOR3D[o.type](T, o, fr, glassTop, t, fc);
         else if (o.type === 'door1' || o.type === 'door2') {
