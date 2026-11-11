@@ -117,3 +117,14 @@ alter table public.user_secrets enable row level security;
 drop policy if exists "own secrets" on public.user_secrets;
 create policy "own secrets" on public.user_secrets for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- v23: 기물 추가 원본 파일 보관 (Storage · 본인 폴더만 읽고 쓰기). 이 파일 전체를 다시 Run 해도 안전해요
+insert into storage.buckets (id, name, public) values ('models', 'models', false) on conflict (id) do nothing;
+drop policy if exists "models own read" on storage.objects;
+create policy "models own read" on storage.objects for select using (bucket_id = 'models' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "models own add" on storage.objects;
+create policy "models own add" on storage.objects for insert with check (bucket_id = 'models' and (storage.foldername(name))[1] = auth.uid()::text and not public.is_blocked());
+drop policy if exists "models own update" on storage.objects;
+create policy "models own update" on storage.objects for update using (bucket_id = 'models' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "models own delete" on storage.objects;
+create policy "models own delete" on storage.objects for delete using (bucket_id = 'models' and (storage.foldername(name))[1] = auth.uid()::text);
