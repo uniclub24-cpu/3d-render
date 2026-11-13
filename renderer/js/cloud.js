@@ -17,7 +17,8 @@ async function sbAuth(path, body) {
 }
 function take(j) { if (!j.access_token) throw new Error('이메일 확인 후 다시 로그인하세요'); const s = { access: j.access_token, refresh: j.refresh_token, exp: Date.now() + (j.expires_in || 3600) * 1000 - 60000, user: j.user && j.user.id, email: j.user && j.user.email }; store.set('byr.session', s); return s; }
 export async function login(email, password) { const s = take(await sbAuth('token?grant_type=password', { email, password })); await loadAccountKey().catch(() => {}); return s; }
-export function logout() { store.set('byr.session', null); }
+/** 로그아웃: 계정에서 받아 온 AI 키도 이 기기에서 지운다 (직접 넣은 키는 남김) */
+export function logout() { store.set('byr.session', null); if (store.get('byr.aiKeyAcct', false)) { store.set('byr.aiKey', null); store.set('byr.aiKeyAcct', null); } }
 export async function sbFetch(path, opt = {}) {
   let s = session(); if (!s) throw new Error('먼저 로그인하세요');
   if (s.exp && Date.now() > s.exp) s = take(await sbAuth('token?grant_type=refresh_token', { refresh_token: s.refresh }));
@@ -41,9 +42,9 @@ export function setAiProvider(p) { if (PROVIDERS[p]) store.set('byr.aiProvider',
 export const aiModel = (p = aiProvider()) => store.get('byr.aiModel.' + p, '') || PROVIDERS[p].model;
 export function setAiModel(p, m) { store.set('byr.aiModel.' + p, m ? m.trim() : null); }
 export const aiKey = (p = aiProvider()) => store.get(p === 'claude' ? 'byr.aiKey' : 'byr.aiKey.' + p, '') || '';
-export function setAiKey(k, p = aiProvider()) { store.set(p === 'claude' ? 'byr.aiKey' : 'byr.aiKey.' + p, k ? k.trim() : null); }
+export function setAiKey(k, p = aiProvider()) { if (p === 'claude') store.set('byr.aiKeyAcct', null); store.set(p === 'claude' ? 'byr.aiKey' : 'byr.aiKey.' + p, k ? k.trim() : null); }
 /** 기존 앱 "계정에 저장"한 키를 불러온다 (user_secrets, 본인만 읽힘) */
-export async function loadAccountKey() { const s = session(); const j = await (await sbFetch('/rest/v1/user_secrets?select=ai_key&user_id=eq.' + s.user)).json(); const k = j && j[0] && j[0].ai_key; if (k) setAiKey(k, 'claude'); return !!k; }
+export async function loadAccountKey() { const s = session(); const j = await (await sbFetch('/rest/v1/user_secrets?select=ai_key&user_id=eq.' + s.user)).json(); const k = j && j[0] && j[0].ai_key; if (k) { setAiKey(k, 'claude'); store.set('byr.aiKeyAcct', true); } return !!k; }
 export async function saveAccountKey(k) { const s = session(); await sbFetch('/rest/v1/user_secrets', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: s.user, ai_key: k || null, updated_at: new Date().toISOString() }) }); }
 
 /* ---------- Claude 호출 ---------- */

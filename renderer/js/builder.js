@@ -141,7 +141,7 @@ export function buildWalls(level) {
     if (L + e1 > u + 1e-4) solid.push(boxAt(u, L + e1, 0, H, -t / 2, t / 2));
     const g = new THREE.Group(); g.name = '벽'; g.userData.wallId = w.id;
     g.position.set(w.x1 * MM, 0, w.y1 * MM); g.rotation.y = -Math.atan2(w.y2 - w.y1, w.x2 - w.x1);
-    if (solid.length) g.add(meshOf(solid, material(MAT_TEX[w.finish] === 'tile' ? 'tile' : 'plain', w.color)));
+    if (solid.length) { const tex = MAT_TEX[w.finish] || 'plain', glass = tex === 'glass'; g.add(meshOf(solid, glass ? material('glass', w.color || '#bfe3f2', 0.35) : material(tex, w.color), !glass)); } // 마감: 페인트 · 타일 · 목재 · 콘크리트 · 유리(반투명)
     if (frame.length) g.add(meshOf(frame, material('plastic', FRAME)));
     if (leaf.length) g.add(meshOf(leaf, material('plain', '#d9d4ca')));
     if (steel.length) g.add(meshOf(steel, material('steel', '#c9ced4')));

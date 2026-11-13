@@ -8,6 +8,8 @@ const GRID = 50, SNAP_PX = 14, HIT_PX = 12;
 const uid = (p) => p + Math.random().toString(36).slice(2, 9);
 const wlen = (w) => Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
 const OP_LABEL = { door1: '외문', door2: '양문', auto: '자동문', slide: '미닫이', window: '창', full: '통창', pass: '배식구', slidepass: '미닫이 배식구', arch: '아치' };
+/** 문/창 하나를 벽 길이 L 안에 맞춘다 (폭이 넘치면 줄이고 위치를 안쪽으로) */
+export function fitOpening(o, L) { o.w = Math.round(Math.min(o.w, Math.max(200, L - 40))); o.t = Math.round(Math.min(L - o.w / 2, Math.max(o.w / 2, o.t))); }
 export const TOOLS = { select: '고르기 · 끌기', wall: '벽 그리기', door1: '문', window: '창', pass: '배식구', roomRect: '공간 (사각형)', roomPoly: '공간 (선)', erase: '지우기' };
 
 export class Plan2D {
@@ -20,7 +22,7 @@ export class Plan2D {
   }
   get L() { return this.api.level(); }
   redraw() { this.dirty = true; }
-  resize() { const pr = Math.min(2, devicePixelRatio || 1), w = this.cv.clientWidth, h = this.cv.clientHeight; if (!w) return; this.cv.width = w * pr; this.cv.height = h * pr; this.pr = pr; if (!this._fitted && this.L) { this._fitted = true; this.fit(); } this.redraw(); }
+  resize() { const pr = Math.min(2, devicePixelRatio || 1), w = this.cv.clientWidth, h = this.cv.clientHeight; if (!w) return; this.cv.width = w * pr; this.cv.height = h * pr; this.pr = pr; if ((!this._fitted || this._needFit) && this.L) { this._fitted = true; this.fit(); } this.redraw(); }
   setTool(t) { this.tool = t; this.chain = null; this.rpts = null; this.rrect = null; this.cv.style.cursor = t === 'select' ? 'default' : 'crosshair'; this.redraw(); }
   select(sel, quiet) { this.sel = sel; this.redraw(); if (!quiet) this.api.onSelect(sel); }
 
@@ -30,7 +32,7 @@ export class Plan2D {
   evMm(e) { const r = this.cv.getBoundingClientRect(); return this.toMm(e.clientX - r.left, e.clientY - r.top); }
   /** 도면 전체가 보이게 (위 도구줄 · 왼쪽 도구 버튼 자리를 비우고) */
   fit() {
-    const L = this.L; if (!L) return; const b = [Infinity, Infinity, -Infinity, -Infinity], add = (x, y) => { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); };
+    const L = this.L; if (!L) return; if (!this.cv.clientWidth || !this.cv.clientHeight) { this._needFit = true; return; } this._needFit = false; /* 숨겨져 있으면 보일 때 맞춘다 */ const b = [Infinity, Infinity, -Infinity, -Infinity], add = (x, y) => { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); };
     L.walls.forEach((w) => { add(w.x1, w.y1); add(w.x2, w.y2); }); L.items.forEach((i) => add(i.x, i.y)); L.rooms.forEach((r) => r.pts.forEach((p) => add(p[0], p[1])));
     if (!Number.isFinite(b[0])) b.splice(0, 4, 0, 0, 8000, 6000);
     const w = this.cv.clientWidth, h = this.cv.clientHeight, padL = 72, padT = 84, pad = 28;
@@ -175,20 +177,24 @@ export class Plan2D {
   }
   /** 끝점 끌기: 이 점에 붙은 다른 벽 끝도 같이 따라온다 */
   _dragEnds(mates, start) {
-    const orig = mates.map((m) => ({ ...m })), skip = new Set(mates.map((m) => m.w));
+    const orig = mates.map((m) => ({ ...m })), skip = new Set(mates.map((m) => m.w)), ops = this._opSnap(), moved = new Set(mates.filter((m) => m.k === 1).map((m) => m.w.id));
     const other = (m) => (m.k === 1 ? { x: m.w.x2, y: m.w.y2 } : { x: m.w.x1, y: m.w.y1 });
     const set = (x, y) => mates.forEach((m) => { if (m.k === 1) { m.w.x1 = x; m.w.y1 = y; } else { m.w.x2 = x; m.w.y2 = y; } });
-    return { start, move: (p) => { const q = this.snapPoint(p, mates.length === 1 ? other(mates[0]) : null, skip); set(Math.round(q.x), Math.round(q.y)); this._clampOpenings(); this.api.onLive('structure'); },
-      done: (m) => m && this.api.onChange(), cancel: () => { set(orig[0].x, orig[0].y); this.api.onLive('structure'); } };
+    return { start, move: (p) => { const q = this.snapPoint(p, mates.length === 1 ? other(mates[0]) : null, skip); set(Math.round(q.x), Math.round(q.y)); this._fitOps(ops, moved); this.api.onLive('structure'); },
+      done: (m) => m && this.api.onChange(), cancel: () => { set(orig[0].x, orig[0].y); this._fitOps(ops, null); this.api.onLive('structure'); } };
   }
   /** 벽 통째로 옮기기: 붙어 있던 이웃 벽 끝도 늘어나며 따라온다 */
   _dragWall(w, p0, start) {
     const a = { x: w.x1, y: w.y1 }, b = { x: w.x2, y: w.y2 }, near = (q, r) => Math.hypot(q.x - r.x, q.y - r.y) < 1;
-    const mates = this.ends().filter((e) => e.w !== w && (near(e, a) || near(e, b))).map((e) => ({ ...e, at: near(e, a) ? 'a' : 'b' }));
+    const mates = this.ends().filter((e) => e.w !== w && (near(e, a) || near(e, b))).map((e) => ({ ...e, at: near(e, a) ? 'a' : 'b' })), ops = this._opSnap(), moved = new Set(mates.filter((m) => m.k === 1).map((m) => m.w.id));
     const apply = (dx, dy) => { w.x1 = a.x + dx; w.y1 = a.y + dy; w.x2 = b.x + dx; w.y2 = b.y + dy; for (const m of mates) { const s = m.at === 'a' ? a : b; if (m.k === 1) { m.w.x1 = s.x + dx; m.w.y1 = s.y + dy; } else { m.w.x2 = s.x + dx; m.w.y2 = s.y + dy; } } };
-    return { start, move: (p) => { apply(Math.round((p.x - p0.x) / GRID) * GRID, Math.round((p.y - p0.y) / GRID) * GRID); this._clampOpenings(); this.api.onLive('structure'); },
-      done: (m) => m && this.api.onChange(), cancel: () => { apply(0, 0); this.api.onLive('structure'); } };
+    return { start, move: (p) => { apply(Math.round((p.x - p0.x) / GRID) * GRID, Math.round((p.y - p0.y) / GRID) * GRID); this._fitOps(ops, moved); this.api.onLive('structure'); },
+      done: (m) => m && this.api.onChange(), cancel: () => { apply(0, 0); this._fitOps(ops, null); this.api.onLive('structure'); } };
   }
+  /** 끌기 시작할 때 문/창 위치 · 폭을 기억해 둔다 (취소하면 그대로 되돌리기 위해) */
+  _opSnap() { return this.L.openings.map((o) => { const w = this.L.walls.find((q) => q.id === o.wall); return { o, t: o.t, w: o.w, L0: w ? wlen(w) : 0 }; }); }
+  /** 기억한 값에서 다시 계산: 시작점이 움직인 벽은 끝점 기준 거리를 지키고, 벽 안에 들어오게 맞춘다. moved = null 이면 원래대로 */
+  _fitOps(snap, moved) { for (const q of snap) { q.o.t = q.t; q.o.w = q.w; if (!moved) continue; const w = this.L.walls.find((x) => x.id === q.o.wall); if (!w) continue; if (moved.has(w.id)) q.o.t += wlen(w) - q.L0; fitOpening(q.o, wlen(w)); } }
   _clampOpenings() { for (const o of this.L.openings) { const w = this.L.walls.find((q) => q.id === o.wall); if (!w) continue; const L = wlen(w); o.w = Math.min(o.w, Math.max(200, L - 40)); o.t = Math.min(L - o.w / 2, Math.max(o.w / 2, o.t)); } }
 
   /* ---------- 그리기 ---------- */
@@ -255,6 +261,8 @@ export class Plan2D {
     if (this.tool === 'pick' && this.hover) { g.beginPath(); g.arc(this.hover.x, this.hover.y, 10 * px1, 0, Math.PI * 2); g.strokeStyle = '#ff9f0a'; g.lineWidth = 3 * px1; g.stroke(); }
     // 공간만 보기: 바깥을 흐리게
     if (this.focus) { g.save(); g.beginPath(); const a = this.toMm(0, 0), b = this.toMm(W, H); g.rect(a.x, a.y, b.x - a.x, b.y - a.y); this.focus.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]))); g.closePath(); g.fillStyle = 'rgba(247,248,250,0.72)'; g.fill('evenodd'); g.restore(); }
+    // AI 결과 미리보기 (주황 점선)
+    if (this.preview) { g.save(); g.strokeStyle = '#ff7a00'; g.lineWidth = 4 * px1; g.setLineDash([10 * px1, 6 * px1]); for (const w of this.preview.walls) { g.beginPath(); g.moveTo(w.x1, w.y1); g.lineTo(w.x2, w.y2); g.stroke(); } g.setLineDash([]); g.fillStyle = '#ff7a00'; for (const o of this.preview.openings) { g.beginPath(); g.arc(o.x, o.y, 7 * px1, 0, Math.PI * 2); g.fill(); } g.restore(); }
     // 선택한 벽: 끝점 손잡이 + 길이
     const sw = this.sel && this.sel.kind === 'wall' && L.walls.find((w) => w.id === this.sel.id);
     if (sw) { for (const [x, y] of [[sw.x1, sw.y1], [sw.x2, sw.y2]]) { g.beginPath(); g.arc(x, y, 9 * px1, 0, Math.PI * 2); g.fillStyle = '#fff'; g.fill(); g.lineWidth = 2.5 * px1; g.strokeStyle = '#2f7df6'; g.stroke(); } this._dim(sw.x1, sw.y1, sw.x2, sw.y2, sw.t); }

@@ -1,16 +1,16 @@
 // 앱 상태 · 파일 관리(기존 데이터 가져오기 포함) · 태블릿 UI 연결
 import { Engine } from './main.js';
 import { findLegacyProjects, convertLegacy, isNextProject, emptyProject, reportText, defaultLight, FORMAT, migrate } from './legacy.js';
-import { loadAsset, exportGLB, exportOBJ, openFiles, saveFile, extOf, ASSET_EXT, bytesToB64, b64ToBytes } from './io.js';
+import { loadAsset, exportGLB, exportOBJ, openFiles, saveFile, extOf, ASSET_EXT, RES_EXT, bytesToB64, b64ToBytes } from './io.js';
 import { MAT_LABEL } from './materials.js';
 import { STYLES } from './styles3d.js';
-import { Plan2D, KINDS } from './plan2d.js';
+import { Plan2D, KINDS, fitOpening } from './plan2d.js';
 import * as cloud from './cloud.js';
 import * as lib2 from './store.js';
 import * as SL from './slope.js';
 import { ENVTYPES, ENVCOL, ENVLV, envOf, envFront } from './env.js';
 import { bakeParts, applyParts } from './design.js';
-export const APP_VERSION = '2.1';
+export const APP_VERSION = '2.1.1';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -42,7 +42,7 @@ function redo() { if (!S.redo.length) return; S.undo.push(S.last); restore(S.red
 async function setModel(model, fit = true) {
   if (S.model && S.model !== model) await lib2.flush();
   S.model = migrate(model, S.lib); S.undo.length = S.redo.length = 0; S.last = snap(); setFocus(null);
-  await restoreAssets(); S.sel = null; engine.setLevel(level()); applyEnv(); if (fit) { engine.view('iso'); plan.fit(); } plan.select(null, true); syncBar(); renderProps();
+  await restoreAssets(); S.sel = null; engine.setLevel(level()); applyEnv(); loadRender(); if (fit) { engine.view('iso'); plan.fit(); } plan.select(null, true); syncBar(); renderProps();
   try { await lib2.saveLocal(S.model); setSaveState('이 기기에 저장됨'); } catch (e) { console.warn(e); } refreshBad(); if (cloud.session()) lib2.scheduleSync(2000);
 }
 function syncBar() {
@@ -85,8 +85,12 @@ function setPane(p) {
   S.pane = p; store.set('byr.pane', p); $('#stage').className = 'p' + p; $$('[data-pane]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pane === p)));
   requestAnimationFrame(() => { engine.resize(); plan.resize(); });
 }
-function setStyle(name) {
-  engine.setStyle(name); store.set('byr.style', name); plan.redraw();
+/** 렌더 설정(스타일 · 햇빛 · 노출 · 후처리)을 프로젝트에 저장 → 다시 열거나 다른 기기에서도 같게 */
+const RENDER_KEYS = ['ssao', 'ssaoRadius', 'fxaa', 'shadows', 'sunHour', 'sunPower', 'exposure', 'itemLights'];
+function saveRender() { if (!S.model) return; S.model.render = { style: engine.style, ...Object.fromEntries(RENDER_KEYS.map((k) => [k, engine.opt[k]])) }; lib2.autosave(S.model); }
+function loadRender() { const r = S.model && S.model.render; if (!r) return; for (const k of RENDER_KEYS) if (r[k] != null && r[k] !== engine.opt[k]) engine.setOption(k, r[k]); if (r.style && STYLES[r.style] && r.style !== engine.style) setStyle(r.style, true); }
+function setStyle(name, fromModel) {
+  engine.setStyle(name); store.set('byr.style', name); plan.redraw(); if (!fromModel) saveRender();
   $('#styleMenu').innerHTML = Object.entries(STYLES).map(([k, st]) => `<button role="menuitemradio" aria-checked="${k === name}" data-style="${k}"><b>${st.name}</b><small>${st.hint}</small></button>`).join('');
   if (S.propsOpen && !S.sel) renderProps();
 }
@@ -96,31 +100,57 @@ function applyEnv() { const L = level(); engine.setEnv(S.model.env ? envOf(S.mod
 /* ---------- 파일 관리 ---------- */
 // 프로젝트에 넣어 둔 외부 에셋(base64)을 다시 읽어 캐시에 올린다
 async function restoreAssets() {
-  for (const [key, a] of Object.entries(S.model.assets || {})) { if (S.assets.has(key)) continue; try { const r = await loadAsset(a.name, b64ToBytes(a.b64)); S.assets.set(key, r); } catch (e) { console.warn('asset', a.name, e); } }
+  for (const [key, a] of Object.entries(S.model.assets || {})) { if (S.assets.has(key)) continue; try { const res = Object.fromEntries(Object.entries(a.res || {}).map(([n, b]) => [n, b64ToBytes(b)])); const r = await loadAsset(a.name, b64ToBytes(a.b64), res); S.assets.set(key, r); } catch (e) { console.warn('asset', a.name, e); } }
 }
 /** JSON 파일 하나: 새 형식이면 열고, 기존 앱 형식이면 변환해서 연다 */
 async function openJson(name, bytes) {
   let json; try { json = JSON.parse(new TextDecoder().decode(bytes)); } catch (e) { toast(`${name}: JSON 을 읽지 못했어요`); return false; }
-  if (isNextProject(json)) { await setModel(json); toast(`"${json.name}" 을 열었어요`); return true; }
+  if (isNextProject(json)) { const bad = checkModel(json); if (bad) { toast(`${name}: 열 수 없는 프로젝트예요 (${bad}) · 지금 작업은 그대로예요`, 7000); return false; } if (!(await safeOpen(json))) return false; toast(`"${json.name}" 을 열었어요`); return true; }
   const found = findLegacyProjects(json);
   if (!found.length) { toast(`${name}: 프로젝트 데이터를 찾지 못했어요 (기존 앱의 "내보내기 → JSON" 파일인지 확인해 주세요)`); return false; }
-  const { model, report } = convertLegacy(found[0], S.lib);
-  await setModel(model); toast(reportText(report) + (found.length > 1 ? ` · 파일 안 ${found.length}개 중 첫 번째` : ''), 9000);
+  let conv; try { conv = convertLegacy(found[0], S.lib); } catch (e) { console.error(e); toast(`${name}: 변환하지 못했어요 (${e.message || e}) · 지금 작업은 그대로예요`, 7000); return false; }
+  const { model, report } = conv; if (!(await safeOpen(model))) return false; toast(reportText(report) + (found.length > 1 ? ` · 파일 안 ${found.length}개 중 첫 번째` : ''), 9000);
   console.info('[legacy import]', report); return true;
 }
-async function importAsset(name, bytes) {
+/** 새 형식 프로젝트 검사 + 빠진 목록 채우기. 문제가 있으면 이유(문자열) */
+function checkModel(m) {
+  if (!Array.isArray(m.levels) || !m.levels.length) return '층 정보가 없어요';
+  for (const L of m.levels) { if (!L || typeof L !== 'object') return '층 정보가 깨졌어요'; for (const k of ['walls', 'openings', 'items', 'rooms']) { if (L[k] == null) L[k] = []; if (!Array.isArray(L[k])) return `${k} 가 목록이 아니에요`; }
+    if (L.walls.some((w) => ![w.x1, w.y1, w.x2, w.y2].every(Number.isFinite))) return '벽 좌표가 숫자가 아니에요';
+    if (L.items.some((i) => ![i.x, i.y, i.w, i.d, i.h].every(Number.isFinite))) return '기물 좌표 · 크기가 숫자가 아니에요';
+    L.floor ||= { color: '#c9c3b8', finish: 'tile' }; L.ceilingH ||= 2700; }
+  if (!Number.isInteger(m.activeLevel) || !m.levels[m.activeLevel]) m.activeLevel = 0;
+  m.id ||= uid('p'); m.name ||= '이름 없는 프로젝트'; return null;
+}
+/** 열다가 실패하면 지금 프로젝트 · 되돌리기 기록을 그대로 되살린다 */
+async function safeOpen(model) {
+  const prev = S.model && { json: snap(), undo: [...S.undo], redo: [...S.redo] };
+  try { await setModel(model); return true; }
+  catch (e) { console.error(e); if (prev) { S.model = JSON.parse(prev.json); S.last = prev.json; S.undo = prev.undo; S.redo = prev.redo; try { engine.setLevel(level()); applyEnv(); plan.fit(); syncBar(); renderProps(); } catch (e2) { console.error(e2); } } toast('열지 못했어요 (' + (e.message || e) + ') · 지금 작업은 그대로예요', 7000); return false; }
+}
+async function importAsset(name, bytes, resFiles = []) {
   try {
-    const a = await loadAsset(name, bytes); S.assets.set(a.key, a);
-    (S.model.assets ||= {})[a.key] = { name, b64: bytesToB64(bytes) }; // 프로젝트 파일에 함께 저장
+    const res = Object.fromEntries(resFiles.map((f) => [f.name, f.data]));
+    const a = await loadAsset(name, bytes, res); S.assets.set(a.key, a);
+    (S.model.assets ||= {})[a.key] = { name, b64: bytesToB64(bytes), ...(resFiles.length ? { res: Object.fromEntries(resFiles.map((f) => [f.name, bytesToB64(f.data)])) } : {}) }; // 프로젝트 파일에 함께 저장 (연결 파일 포함)
+    if (a.missing.length) toast(`연결 파일 ${a.missing.length}개를 못 찾았어요 (${a.missing.slice(0, 3).join(', ')}) · 같은 폴더의 파일을 함께 골라 다시 가져오세요`, 8000);
     const c = engine.centerOnFloor(), it = { id: uid('i'), type: 'asset', name: name.replace(/\.[^.]+$/, ''), x: c.x, y: c.y, elev: 0, rot: 0, ...a.mm, color: null, mat: null, asset: { key: a.key }, light: null };
     level().items.push(it); engine.rebuildItem(it); engine.select(it.id); commit(); toast(`"${it.name}" 을 가져왔어요 · ${a.mm.w}×${a.mm.d}×${a.mm.h}mm (속성에서 크기를 바꿀 수 있어요)`);
   } catch (e) { console.error(e); toast(`${name}: 3D 파일을 읽지 못했어요 (${e.message || e})`); }
 }
-async function handleFiles(files) { for (const f of files) { const ext = extOf(f.name); if (ext === 'json') await openJson(f.name, f.data); else if (ASSET_EXT.includes(ext)) await importAsset(f.name, f.data); else toast(`${f.name}: 지원하지 않는 형식이에요`); } }
+async function handleFiles(files) {
+  const res = files.filter((f) => RES_EXT.includes(extOf(f.name))); // .bin · 텍스처는 같이 고른 모델의 연결 파일로
+  for (const f of files) { const ext = extOf(f.name); if (ext === 'json') await openJson(f.name, f.data); else if (ASSET_EXT.includes(ext)) await importAsset(f.name, f.data, ext === 'glb' ? [] : res); else if (!RES_EXT.includes(ext)) toast(`${f.name}: 지원하지 않는 형식이에요`); }
+  if (res.length && !files.some((f) => ASSET_EXT.includes(extOf(f.name)))) toast('텍스처 · .bin 은 모델 파일(.gltf · .obj · .fbx)과 함께 골라 주세요');
+}
 const safeName = () => (S.model.name || 'byr').replace(/[\\/:*?"<>|]/g, '_');
 
 const ACT = {
-  new: async () => { await setModel(emptyProject()); toast('새 프로젝트 · 자동 저장돼요'); },
+  new: async () => {
+    const empty = !S.model || (S.model.levels.every((L) => !L.items.length && !L.rooms.length && L.walls.length <= 4) && !S.undo.length);
+    if (!empty && !confirm(`"${S.model.name}" 은 내 프로젝트에 저장돼 있어요.\n새 프로젝트를 시작할까요? (지금 화면의 되돌리기 기록은 없어져요)`)) return;
+    await lib2.flush(); await setModel(emptyProject()); toast('새 프로젝트 · 이전 작업은 "내 프로젝트"에 있어요');
+  },
   library: () => { S.panel = 'library'; S.propsOpen = true; renderProps(); },
   rooms: () => { S.panel = 'rooms'; S.propsOpen = true; renderProps(); },
   bg: () => { S.panel = 'bg'; S.propsOpen = true; renderProps(); },
@@ -128,8 +158,11 @@ const ACT = {
   save: async () => { const p = await saveFile({ title: 'BYR 프로젝트', defaultName: safeName() + '.byr.json', extensions: ['json'], data: JSON.stringify(S.model) }); if (p) toast('저장했어요'); },
   legacy: async () => handleFiles(await openFiles({ title: '기존 앱 JSON', extensions: ['json'], multi: false })),
   sample: async () => { const r = await fetch('./data/legacy-sample.json'); await openJson('샘플', new Uint8Array(await r.arrayBuffer())); },
-  asset: async () => handleFiles(await openFiles({ title: '3D 에셋', extensions: ASSET_EXT, multi: true })),
+  asset: async () => handleFiles(await openFiles({ title: '3D 에셋 (연결된 .bin · 텍스처도 함께 고르세요)', extensions: [...ASSET_EXT, ...RES_EXT], multi: true })),
   glb: async () => { setSel(null); const data = await engine.withRealMaterials(() => exportGLB(engine.world)); const p = await saveFile({ title: 'glTF 바이너리', defaultName: safeName() + '.glb', extensions: ['glb'], data }); if (p) toast(`GLB 로 내보냈어요 (${(data.byteLength / 1e6).toFixed(1)}MB) · Blender · D5 Render · Twinmotion 에서 가져오기`); },
+  glbAll: async () => { // 모든 층을 높이대로 쌓아서 한 파일로
+    setSel(null); const root = engine.buildAll(S.model.levels, (L) => (it) => SL.itemZ(L, it, S.lib)); const data = await exportGLB(root); engine.disposeTree(root);
+    const p = await saveFile({ title: 'glTF 바이너리', defaultName: safeName() + '-전체층.glb', extensions: ['glb'], data }); if (p) toast(`${S.model.levels.length}개 층을 GLB 로 내보냈어요 (${(data.byteLength / 1e6).toFixed(1)}MB)`); },
   obj: async () => { setSel(null); const p = await saveFile({ title: 'Wavefront OBJ', defaultName: safeName() + '.obj', extensions: ['obj'], data: exportOBJ(engine.world) }); if (p) toast('OBJ 로 내보냈어요 (형상만 · 재질은 GLB 를 쓰세요)'); },
   account: () => { S.panel = 'account'; S.propsOpen = true; renderProps(); },
   ai: () => { S.panel = 'ai'; S.propsOpen = true; renderProps(); },
@@ -179,6 +212,7 @@ function renderProps() {
       <p class="hint">기물을 톡 누르면 색 · 크기 · 조명을 바꿀 수 있어요.</p>`;
     $$('[data-go]', body).forEach((b) => (b.onclick = () => ACT[b.dataset.go]()));
     $$('[data-style]', body).forEach((b) => (b.onclick = () => setStyle(b.dataset.style)));
+    $$('[data-o]', body).forEach((i) => (i.onchange = () => saveRender()));
     $$('[data-o]', body).forEach((i) => (i.oninput = () => { const v = i.type === 'checkbox' ? i.checked : +i.value; engine.setOption(i.dataset.o, v); if (i.dataset.o === 'sunHour') $('#vHour').textContent = v + '시'; if (i.dataset.o === 'itemLights') renderProps(); }));
     return;
   }
@@ -447,7 +481,8 @@ function renderWall(body, w) {
       else { const v = +i.value; if (!Number.isFinite(v) || v <= 0) return renderProps();
         if (k === 'len') { const L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1, nl = clamp(v, 100, 100000), nx = Math.round(w.x1 + ((w.x2 - w.x1) / L) * nl), ny = Math.round(w.y1 + ((w.y2 - w.y1) / L) * nl);
           for (const o of level().walls) { if (o === w) continue; if (Math.hypot(o.x1 - w.x2, o.y1 - w.y2) < 1) { o.x1 = nx; o.y1 = ny; } if (Math.hypot(o.x2 - w.x2, o.y2 - w.y2) < 1) { o.x2 = nx; o.y2 = ny; } }
-          w.x2 = nx; w.y2 = ny; }
+          w.x2 = nx; w.y2 = ny; const nl2 = Math.hypot(w.x2 - w.x1, w.y2 - w.y1); for (const o of level().openings) if (o.wall === w.id) fitOpening(o, nl2);
+          for (const o2 of level().walls) for (const op of level().openings) if (op.wall === o2.id && o2 !== w) fitOpening(op, Math.hypot(o2.x2 - o2.x1, o2.y2 - o2.y1)); }
         else w[k] = clamp(v, k === 't' ? 30 : 100, k === 't' ? 1000 : 20000); }
       engine.rebuildStructure(); commit(); renderProps();
     };
@@ -455,7 +490,8 @@ function renderWall(body, w) {
   $$('[data-a]', body).forEach((b) => (b.onclick = () => {
     if (b.dataset.a === 'del') return plan.erase({ kind: 'wall', id: w.id });
     const mx = Math.round((w.x1 + w.x2) / 2), my = Math.round((w.y1 + w.y2) / 2), L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1), n = { ...w, id: uid('w'), x1: mx, y1: my };
-    for (const o of level().openings) if (o.wall === w.id && o.t > L / 2) { o.wall = n.id; o.t -= L / 2; }
+    for (const o of level().openings) if (o.wall === w.id) { // 가운데에 걸친 문/창은 가운데가 있는 쪽 절반에 넣고 그 안에 맞춘다
+      if (o.t > L / 2) { o.wall = n.id; o.t -= L / 2; } fitOpening(o, L / 2); }
     w.x2 = mx; w.y2 = my; level().walls.push(n); engine.rebuildStructure(); commit(); toast('벽을 둘로 나눴어요');
   }));
 }
@@ -520,6 +556,19 @@ function renderAi(body) {
     <p class="hint">${w ? `고른 벽(${Math.round(Math.hypot(w.x2 - w.x1, w.y2 - w.y1)).toLocaleString()}mm)을 방 안에서 정면으로 찍은 사진을 고르세요. 보이는 기물 · 문/창을 그 벽 앞에 놓아요.` : '2D 도면에서 사진에 찍힌 벽을 먼저 톡 눌러 고른 뒤, 다시 이 메뉴를 여세요.'}</p>
     <div class="btns"><button class="btn" id="phGo" ${key && w ? '' : 'disabled'}>벽 사진 고르기</button></div>
     <p class="hint" id="aiMsg"></p>`;
+  // AI 결과 미리보기: 바로 넣지 않고 확인한 뒤 적용
+  const P = S.aiPrev;
+  if (P) {
+    const nm = (t) => (S.lib[t] && S.lib[t].name) || ({ door1: '외문', door2: '양문', window: '창', full: '통창', pass: '배식구', slidepass: '미닫이 배식구', auto: '자동문', slide: '미닫이', arch: '아치' }[t]) || t;
+    body.insertAdjacentHTML('afterbegin', P.kind === 'plan'
+      ? `<div class="sec">AI 결과 미리보기</div><p class="hint">벽 ${P.r.walls.length}개 · 문/창 ${P.r.openings.length}개 · 도면 가로 ${P.r.widthMm.toLocaleString()}mm 기준 · 2D 의 주황 점선이 AI 가 읽은 벽이에요. 기존 벽은 ${P.mode === 'replace' ? '지우고 바꿔요' : '그대로 두고 더해요'}.</p><div class="btns"><button class="btn" data-ap="no">버리기</button><button class="btn pri" data-ap="ok">적용</button></div><hr>`
+      : `<div class="sec">AI 결과 미리보기 · 넣을 것만 고르세요</div><div class="plist">${P.objs.map((o, k) => `<label class="tog">${esc(nm(o.type))} <small class="hint">${Math.round(((+o.x0 + +o.x1) / 2) * 100)}% 위치${o.on_wall ? ' · 벽에 붙음' : o.dist ? ` · 벽에서 ${Math.round(o.dist)}mm` : ''}</small><input type="checkbox" data-po="${k}" ${o.on ? 'checked' : ''}></label>`).join('') || '<p class="hint">찾은 것이 없어요</p>'}</div><div class="btns"><button class="btn" data-ap="no">버리기</button><button class="btn pri" data-ap="ok" ${P.objs.length ? '' : 'disabled'}>적용</button></div><hr>`);
+    $$('[data-po]', body).forEach((c) => (c.onchange = () => (P.objs[+c.dataset.po].on = c.checked)));
+    $$('[data-ap]', body).forEach((b) => (b.onclick = () => {
+      if (b.dataset.ap === 'ok') { if (P.kind === 'plan') { applyPlan(P.r, P.mode); toast(`벽 ${P.r.walls.length}개 · 문/창 ${P.r.openings.length}개를 그렸어요 · 되돌리기로 취소할 수 있어요`); } else { const w = level().walls.find((q) => q.id === P.wall); const n = w ? placeDetected(w, P.objs.filter((o) => o.on)) : 0; toast(`${n}개를 넣었어요 · 위치는 끌어서 다듬으세요`); } }
+      S.aiPrev = null; plan.preview = null; plan.redraw(); renderProps();
+    }));
+  }
   const msg = (t) => ($('#aiMsg').textContent = t);
   $$('[data-pv]', body).forEach((b) => (b.onclick = () => { cloud.setAiProvider(b.dataset.pv); renderProps(); }));
   $('#kModel').onchange = (e) => { cloud.setAiModel(pv, e.target.value === PV.model ? '' : e.target.value); toast('모델을 바꿨어요'); };
@@ -530,14 +579,14 @@ function renderAi(body) {
   $('#pGo').onclick = async () => {
     const f = (await openFiles({ title: '도면 (이미지 · PDF)', extensions: ['png', 'jpg', 'jpeg', 'webp', 'pdf'] }))[0]; if (!f) return;
     msg(`${PV.name} 가 도면을 읽는 중… (30초~1분)`); $('#pGo').disabled = true;
-    try { const r = await cloud.readPlan(await cloud.prepFile(f.name, f.data), +$('#pW').value || 0); applyPlan(r, $('#pMode').value); msg(`벽 ${r.walls.length}개 · 문/창 ${r.openings.length}개를 그렸어요 (도면 가로 ${r.widthMm.toLocaleString()}mm 기준)`); }
+    try { const r = await cloud.readPlan(await cloud.prepFile(f.name, f.data), +$('#pW').value || 0); S.aiPrev = { kind: 'plan', r, mode: $('#pMode').value }; plan.preview = r; if (S.pane === '3d') setPane('split'); plan.redraw(); renderProps(); toast('2D 에 주황 점선으로 미리 보여요 · 확인하고 "적용"을 누르세요', 6000); }
     catch (e) { console.error(e); msg('읽지 못했어요: ' + (e.message || e)); }
     $('#pGo').disabled = false;
   };
   $('#phGo').onclick = async () => {
     const f = (await openFiles({ title: '현장 사진', extensions: ['png', 'jpg', 'jpeg', 'webp'] }))[0]; if (!f || !selWall()) return;
     msg(`${PV.name} 가 사진을 보는 중…`); $('#phGo').disabled = true;
-    try { const wall = selWall(), objs = await cloud.readPhoto(await cloud.prepFile(f.name, f.data), Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1), S.lib); const n = placeDetected(wall, objs); msg(`${n}개를 넣었어요 · 위치는 끌어서 다듬으세요`); }
+    try { const wall = selWall(), objs = await cloud.readPhoto(await cloud.prepFile(f.name, f.data), Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1), S.lib); S.aiPrev = { kind: 'photo', wall: wall.id, objs: objs.map((o) => ({ ...o, on: true })) }; renderProps(); }
     catch (e) { console.error(e); msg('읽지 못했어요: ' + (e.message || e)); }
     $('#phGo').disabled = false;
   };

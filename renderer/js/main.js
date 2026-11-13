@@ -202,6 +202,13 @@ export class Engine {
     for (const p of [this.renderPass, this.ssaoPass, this.stylePass]) p.camera = cam;
     this.controls.update();
   }
+  /** 모든 층을 층 높이(elev)대로 쌓은 Group (내보내기용 · PBR 재질) */
+  buildAll(levels, zOfFor) {
+    const root = new THREE.Group(); root.name = 'BYR 전체 층';
+    for (const L of levels) { for (const r of L.rooms || []) syncDrain(L, r); const g = new THREE.Group(); g.name = L.name || '층'; g.position.y = (L.elev || 0) * MM; g.add(buildFloors(L), buildWalls(L)); const ctx = { ...this.ctx, zOf: zOfFor(L) }; for (const it of L.items) g.add(buildItem(it, ctx)); g.traverse((o) => { if (o.isLight) o.visible = false; }); root.add(g); }
+    root.updateMatrixWorld(true); return root;
+  }
+  disposeTree(o) { disposeTree(o); }
   /** 내보내기처럼 원래 PBR 재질이 필요할 때 */
   async withRealMaterials(fn) { restoreMaterials(this.world); try { return await fn(); } finally { applyStyleMaterials(this.world, this.style); } }
   removeItem(id) { const g = this.itemGroup(id); if (g) { this.items.remove(g); disposeTree(g); } if (this.selId === id) this.select(null); this._limitLights(); }
