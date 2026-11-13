@@ -9,6 +9,7 @@ Build Your Restaurant 의 신규 빌드입니다. 기존 HTML/Vanilla JS 앱은 
 2. 올리면 Actions 가 자동으로 돕니다.
    - `smoke`: 리눅스에서 진짜 Electron 으로 앱을 켜고, 샘플을 불러오고, 스타일 6가지를 바꿔 본 뒤 오류가 없으면 통과.
    - `windows`: 윈도우 포터블 exe 를 만들어 **Artifacts → BYR-Next-windows** 에 올립니다. 내려받아 바로 실행.
+   - `android`: 안드로이드 APK 를 만들어 **Artifacts → BYR-Next-android** 에 올립니다. 화면 파일이 앱 안에 들어 있어 인터넷 없이도 열립니다(AI · 계정 기능만 인터넷 필요). 저장 · 내보내기는 공유 창으로 내 파일 · 드라이브 · 메일에 보냅니다.
 3. 내 PC 에서 직접 돌리고 싶을 때만 아래 "실행"을 따릅니다.
 
 ## 실행

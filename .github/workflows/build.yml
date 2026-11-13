@@ -27,3 +27,22 @@ jobs:
           name: BYR-Next-windows
           path: dist/*.exe
           if-no-files-found: error
+  android:
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - run: npm install
+      - name: 안드로이드 프로젝트 만들기 (renderer 폴더를 앱 안에 넣음 · 인터넷 없이 실행)
+        run: npx cap add android && npx cap sync android
+      - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - run: cp android/app/build/outputs/apk/debug/app-debug.apk BYR-Next.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BYR-Next-android
+          path: BYR-Next.apk
+          if-no-files-found: error

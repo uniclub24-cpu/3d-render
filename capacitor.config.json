@@ -1,0 +1,9 @@
+{
+  "appId": "com.byr.next",
+  "appName": "BYR Next",
+  "webDir": "renderer",
+  "backgroundColor": "#1b1d21",
+  "server": {
+    "androidScheme": "https"
+  }
+}

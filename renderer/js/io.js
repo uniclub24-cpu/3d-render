@@ -47,16 +47,24 @@ export function exportGLB(root) {
 export function exportOBJ(root) { root.updateMatrixWorld(true); return new OBJExporter().parse(root); }
 
 /* ---------- 파일 열기 · 저장 (Electron 이면 대화 상자, 브라우저면 입력창 · 내려받기) ---------- */
+const CAP = () => { const C = window.Capacitor; return C && C.isNativePlatform && C.isNativePlatform() ? C : null; }; // 안드로이드 앱 안인가
 export async function openFiles({ title, extensions, multi = false }) {
   if (window.byr) { const r = await window.byr.openFiles({ title, multi, filters: [{ name: title || '파일', extensions }] }); return r.map((f) => ({ name: f.name, data: new Uint8Array(f.data) })); }
   return new Promise((ok) => {
-    const i = Object.assign(document.createElement('input'), { type: 'file', multiple: multi, accept: extensions.map((e) => '.' + e).join(',') });
+    const i = Object.assign(document.createElement('input'), { type: 'file', multiple: multi, accept: CAP() ? '' : extensions.map((e) => '.' + e).join(',') }); // 안드로이드는 확장자 필터가 파일을 막는 경우가 있어 전체 표시
     i.onchange = async () => ok(await Promise.all([...i.files].map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) }))));
     i.oncancel = () => ok([]); i.click();
   });
 }
 export async function saveFile({ title, defaultName, extensions, data }) {
   if (window.byr) return window.byr.saveFile({ title, defaultName, filters: [{ name: title || '파일', extensions }], data });
+  const C = CAP();
+  if (C && C.Plugins.Filesystem && C.Plugins.Share) { // 안드로이드: 임시 폴더에 쓰고 공유 창 (내 파일 · 드라이브 · 메일로 저장)
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+    const w = await C.Plugins.Filesystem.writeFile({ path: defaultName, data: bytesToB64(bytes), directory: 'CACHE' });
+    try { await C.Plugins.Share.share({ title: defaultName, files: [w.uri], dialogTitle: '저장할 곳을 고르세요' }); } catch (e) { return null; }
+    return defaultName;
+  }
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([data])), download: defaultName });
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); return defaultName;
 }
