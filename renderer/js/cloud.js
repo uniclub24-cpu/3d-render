@@ -18,33 +18,61 @@ async function sbAuth(path, body) {
 function take(j) { if (!j.access_token) throw new Error('이메일 확인 후 다시 로그인하세요'); const s = { access: j.access_token, refresh: j.refresh_token, exp: Date.now() + (j.expires_in || 3600) * 1000 - 60000, user: j.user && j.user.id, email: j.user && j.user.email }; store.set('byr.session', s); return s; }
 export async function login(email, password) { const s = take(await sbAuth('token?grant_type=password', { email, password })); await loadAccountKey().catch(() => {}); return s; }
 export function logout() { store.set('byr.session', null); }
-async function sbFetch(path, opt = {}) {
+export async function sbFetch(path, opt = {}) {
   let s = session(); if (!s) throw new Error('먼저 로그인하세요');
   if (s.exp && Date.now() > s.exp) s = take(await sbAuth('token?grant_type=refresh_token', { refresh_token: s.refresh }));
   const r = await fetch(SB.url + path, { ...opt, headers: { apikey: SB.key, Authorization: 'Bearer ' + s.access, 'Content-Type': 'application/json', ...(opt.headers || {}) } });
-  if (!r.ok) throw new Error('서버 응답 ' + r.status); return r;
+  if (!r.ok && !(opt.allow404 && (r.status === 404 || r.status === 400))) throw new Error('서버 응답 ' + r.status); return r;
 }
 /** 기존 앱이 계정에 올려 둔 프로젝트 목록 */
 export async function listProjects() { const s = session(); return (await sbFetch(`/rest/v1/projects?select=id,name,updated_at&user_id=eq.${s.user}&order=updated_at.desc`)).json(); }
 /** 프로젝트 하나 (기존 앱 형식 그대로: { id, name, data }) */
 export async function fetchProject(id) { const j = await (await sbFetch(`/rest/v1/projects?select=id,name,data&id=eq.${encodeURIComponent(id)}`)).json(); if (!j[0]) throw new Error('프로젝트를 찾지 못했어요'); return j[0]; }
 
-/* ---------- AI 키 ---------- */
-export const aiKey = () => store.get('byr.aiKey', '') || '';
-export function setAiKey(k) { store.set('byr.aiKey', k ? k.trim() : null); }
+/* ---------- AI 연결: 사용자 본인의 Claude · ChatGPT(OpenAI) · Gemini 키 ---------- */
+// claude.ai · ChatGPT · Gemini 앱의 "구독 로그인"은 다른 앱에서 쓸 수 없게 막혀 있어서, 각 회사 개발자 콘솔에서 만든 API 키로 연결한다.
+export const PROVIDERS = {
+  claude: { name: 'Claude (Anthropic)', model: AI_MODEL, keyHint: 'sk-ant-…', where: 'console.anthropic.com → API Keys', pdf: true },
+  openai: { name: 'ChatGPT (OpenAI)', model: 'gpt-6-astra', keyHint: 'sk-…', where: 'platform.openai.com → API keys', pdf: true },
+  gemini: { name: 'Gemini (Google)', model: 'gemini-3.8-flash', keyHint: 'AIza…', where: 'aistudio.google.com → Get API key', pdf: true },
+};
+export const aiProvider = () => (PROVIDERS[store.get('byr.aiProvider', 'claude')] ? store.get('byr.aiProvider', 'claude') : 'claude');
+export function setAiProvider(p) { if (PROVIDERS[p]) store.set('byr.aiProvider', p); }
+export const aiModel = (p = aiProvider()) => store.get('byr.aiModel.' + p, '') || PROVIDERS[p].model;
+export function setAiModel(p, m) { store.set('byr.aiModel.' + p, m ? m.trim() : null); }
+export const aiKey = (p = aiProvider()) => store.get(p === 'claude' ? 'byr.aiKey' : 'byr.aiKey.' + p, '') || '';
+export function setAiKey(k, p = aiProvider()) { store.set(p === 'claude' ? 'byr.aiKey' : 'byr.aiKey.' + p, k ? k.trim() : null); }
 /** 기존 앱 "계정에 저장"한 키를 불러온다 (user_secrets, 본인만 읽힘) */
-export async function loadAccountKey() { const s = session(); const j = await (await sbFetch('/rest/v1/user_secrets?select=ai_key&user_id=eq.' + s.user)).json(); const k = j && j[0] && j[0].ai_key; if (k) setAiKey(k); return !!k; }
+export async function loadAccountKey() { const s = session(); const j = await (await sbFetch('/rest/v1/user_secrets?select=ai_key&user_id=eq.' + s.user)).json(); const k = j && j[0] && j[0].ai_key; if (k) setAiKey(k, 'claude'); return !!k; }
 export async function saveAccountKey(k) { const s = session(); await sbFetch('/rest/v1/user_secrets', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: s.user, ai_key: k || null, updated_at: new Date().toISOString() }) }); }
 
 /* ---------- Claude 호출 ---------- */
 const b64 = (bytes) => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); };
-async function ask(prompt, file, maxTokens = 8000) {
-  const key = aiKey(); if (!key) throw new Error('AI 키가 없어요 · 아래 "AI 키"에 Anthropic 키를 넣거나 계정에 로그인하세요');
-  const src = file.mime === 'application/pdf' ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64(file.bytes) } } : { type: 'image', source: { type: 'base64', media_type: file.mime, data: b64(file.bytes) } };
-  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-    body: JSON.stringify({ model: store.get('byr.aiModel', AI_MODEL), max_tokens: maxTokens, messages: [{ role: 'user', content: [src, { type: 'text', text: prompt }] }] }) });
-  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error((j.error && j.error.message) || 'AI 응답 ' + r.status);
-  const t = (j.content || []).map((c) => c.text || '').join(''); return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1));
+const jsonOf = (t) => { const a = t.indexOf('{'), b = t.lastIndexOf('}'); if (a < 0 || b < a) throw new Error('AI 가 JSON 으로 답하지 않았어요: ' + t.slice(0, 120)); return JSON.parse(t.slice(a, b + 1)); };
+const errOf = (j, r) => (j.error && (j.error.message || j.error.status)) || (typeof j.error === 'string' ? j.error : '') || 'AI 응답 ' + r.status;
+/** 고른 AI 에 그림/PDF + 지시문을 보내 JSON 을 받는다 (제공자마다 요청 모양만 다르고 지시문은 같다) */
+export async function ask(prompt, file, maxTokens = 8000, provider = aiProvider()) {
+  const key = aiKey(provider); if (!key) throw new Error(`${PROVIDERS[provider].name} 키가 없어요 · AI 화면에서 키를 넣어 주세요`);
+  const data = b64(file.bytes), pdf = file.mime === 'application/pdf', model = aiModel(provider);
+  if (provider === 'claude') {
+    const src = pdf ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } } : { type: 'image', source: { type: 'base64', media_type: file.mime, data } };
+    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: 'user', content: [src, { type: 'text', text: prompt }] }] }) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(errOf(j, r));
+    return jsonOf((j.content || []).map((c) => c.text || '').join(''));
+  }
+  if (provider === 'openai') {
+    const src = pdf ? { type: 'input_file', filename: file.name || 'plan.pdf', file_data: 'data:application/pdf;base64,' + data } : { type: 'input_image', image_url: `data:${file.mime};base64,${data}` };
+    const r = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + key },
+      body: JSON.stringify({ model, max_output_tokens: maxTokens, input: [{ role: 'user', content: [src, { type: 'input_text', text: prompt }] }] }) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(errOf(j, r));
+    const t = j.output_text || (j.output || []).flatMap((o) => o.content || []).map((c) => c.text || '').join(''); return jsonOf(t);
+  }
+  // Gemini
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ inline_data: { mime_type: file.mime, data } }, { text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens, responseMimeType: 'application/json' } }) });
+  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(errOf(j, r));
+  return jsonOf(((j.candidates || [])[0]?.content?.parts || []).map((p) => p.text || '').join(''));
 }
 
 /** 이미지는 긴 변 2000px JPEG 로 줄여 보낸다. 가로·세로 픽셀도 돌려준다 */
@@ -53,12 +81,12 @@ export async function prepFile(name, bytes) {
     const txt = new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(bytes.length, 400000)));
     const m = txt.match(/MediaBox\s*\[\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)/); // 첫 쪽 크기 (못 찾으면 A판 가로)
     const aspect = m ? Math.abs(+m[4] - +m[2]) / Math.abs(+m[3] - +m[1]) : 1 / Math.SQRT2;
-    return { mime: 'application/pdf', bytes, aspect };
+    return { mime: 'application/pdf', bytes, aspect, name };
   }
   const bmp = await createImageBitmap(new Blob([bytes])), s = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
   const c = new OffscreenCanvas(Math.round(bmp.width * s), Math.round(bmp.height * s)); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
   const out = new Uint8Array(await (await c.convertToBlob({ type: 'image/jpeg', quality: 0.88 })).arrayBuffer());
-  return { mime: 'image/jpeg', bytes: out, aspect: bmp.height / bmp.width };
+  return { mime: 'image/jpeg', bytes: out, aspect: bmp.height / bmp.width, name };
 }
 
 export const OPDEF = { slidepass: [900, 600, 900], slide: [1800, 2100, 0], pass: [900, 600, 900], arch: [1200, 2400, 0], door1: [900, 2100, 0], door2: [1600, 2300, 0], auto: [1800, 2300, 0], window: [1800, 1500, 900], full: [2400, 2400, 0] };

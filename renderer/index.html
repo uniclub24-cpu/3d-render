@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' blob: data: https://api.anthropic.com https://zxehyxjjiruxgqkthotn.supabase.co">
-<title>BYR Next</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' blob: data: https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://zxehyxjjiruxgqkthotn.supabase.co">
+<title>BYR Next 2.1</title>
 <link rel="stylesheet" href="./styles.css">
 <!-- Three.js 는 전부 로컬(vendor)에서 읽는다. CDN 없음 -->
 <script type="importmap">
@@ -24,6 +24,9 @@
       <button class="ib" data-tool="door1" aria-pressed="false" title="문 넣기 (벽을 톡)" aria-label="문"><svg viewBox="0 0 24 24"><path d="M4 20h16M6 20V6M6 6a14 14 0 0 1 14 14"/></svg></button>
       <button class="ib" data-tool="window" aria-pressed="false" title="창 넣기 (벽을 톡)" aria-label="창"><svg viewBox="0 0 24 24"><path d="M3 9h18M3 15h18M3 12h18M3 9v6M21 9v6"/></svg></button>
       <button class="ib" data-tool="pass" aria-pressed="false" title="배식구 넣기 (벽을 톡)" aria-label="배식구"><svg viewBox="0 0 24 24"><path d="M3 12h3M9 12h3M15 12h3M3 8v8M21 8v8"/></svg></button>
+      <button class="ib" data-tool="roomRect" aria-pressed="false" title="공간 그리기 · 사각형 (끌기)" aria-label="공간 사각형"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1" stroke-dasharray="3 2"/><path d="M9 12h6"/></svg></button>
+      <button class="ib" data-tool="roomPoly" aria-pressed="false" title="공간 그리기 · 선 (꼭짓점을 차례로 · 첫 점을 다시 누르면 닫힘)" aria-label="공간 선"><svg viewBox="0 0 24 24"><path d="M4 18l3-12 9 2 4 9z" stroke-dasharray="3 2"/><circle cx="4" cy="18" r="1.5"/><circle cx="7" cy="6" r="1.5"/><circle cx="16" cy="8" r="1.5"/><circle cx="20" cy="17" r="1.5"/></svg></button>
+      <button class="ib" id="btnRooms" title="공간 목록 (태그 · 공간만 작업)" aria-label="공간 목록"><svg viewBox="0 0 24 24"><path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10"/></svg></button>
       <button class="ib" data-tool="erase" aria-pressed="false" title="지우기 (톡)" aria-label="지우기"><svg viewBox="0 0 24 24"><path d="M8 20h12M5 14l8-8 6 6-7 7H8z"/></svg></button>
       <button class="ib" id="btnFit" title="도면 전체 보기" aria-label="도면 전체 보기"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     </div>
@@ -32,7 +35,7 @@
   <!-- 상단 바: 아이콘 버튼 (모두 44px 이상) -->
   <header id="topbar" role="toolbar" aria-label="도구">
     <button class="ib" id="btnDrawer" aria-label="기물 목록 열기" aria-expanded="false" title="기물 목록"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-    <div class="title"><b id="projName">BYR Next</b><select id="levelSel" aria-label="층" hidden></select></div>
+    <div class="title"><b id="projName">BYR Next</b><small id="saveState" class="savest" aria-live="polite"></small><select id="levelSel" aria-label="층" hidden></select></div>
     <div class="seg" role="group" aria-label="조작 방식">
       <button class="ib" data-mode="select" aria-pressed="true" aria-label="선택" title="선택 (톡 눌러 고르기)"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6z"/></svg></button>
       <button class="ib" data-mode="move" aria-pressed="false" aria-label="이동" title="이동 (기물을 끌어 옮기기)"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></button>
@@ -54,11 +57,16 @@
     <button class="ib" id="btnFile" aria-label="파일 메뉴" aria-haspopup="menu" aria-expanded="false" title="열기 · 저장 · 가져오기 · 내보내기"><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg></button>
   </header>
 
+  <!-- 조정 필요 · 공간만 작업 -->
+  <button id="fitFab" class="pill warn" hidden>조정 필요</button>
+  <div id="focusBar" class="pill" hidden><span id="focusName"></span><button class="btn" id="focusExit">전체 보기</button></div>
+
   <!-- 보기 스타일 메뉴 -->
   <div id="styleMenu" class="menu" role="menu" hidden></div>
 
   <!-- 파일 메뉴 -->
   <div id="fileMenu" class="menu" role="menu" hidden>
+    <button role="menuitem" data-act="library">내 프로젝트 (자동 저장 · 동기화)</button>
     <button role="menuitem" data-act="new">새 프로젝트</button>
     <button role="menuitem" data-act="open">프로젝트 열기 (.byr.json)</button>
     <button role="menuitem" data-act="save">프로젝트 저장</button>
@@ -67,7 +75,9 @@
     <button role="menuitem" data-act="account">기존 앱 계정에서 불러오기 (로그인)</button>
     <button role="menuitem" data-act="sample">기존 앱 샘플 불러오기</button>
     <hr>
-    <button role="menuitem" data-act="ai">AI · 도면 사진/PDF → 벽 · 현장 사진 → 기물</button>
+    <button role="menuitem" data-act="rooms">공간 목록 · 공간만 작업</button>
+    <button role="menuitem" data-act="bg">배경 (주변 거리) · 도면 밑그림</button>
+    <button role="menuitem" data-act="ai">AI (Claude · ChatGPT · Gemini) · 도면 → 벽 · 사진 → 기물</button>
     <button role="menuitem" data-act="asset">3D 에셋 가져오기 (GLB · GLTF · OBJ · FBX)</button>
     <hr>
     <button role="menuitem" data-act="glb">전체 장면 내보내기 · GLB (Blender · D5 · Twinmotion)</button>

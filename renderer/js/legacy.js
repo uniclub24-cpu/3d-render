@@ -9,11 +9,11 @@
 // 새 모델도 같은 mm 값을 그대로 보관하고, Three.js 로 옮길 때만 m 로 바꾼다 (builder.js).
 
 export const FORMAT = 'byr-next';
-export const VERSION = 1;
+export const VERSION = 2; // 2: 단(lift) 높이를 기물 elev 에 넣지 않고 그릴 때 더한다 · 구배 · 배경 · 밑그림
 
 const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
 const uid = (p) => p + Math.random().toString(36).slice(2, 9);
-const LEVEL_KEYS = ['walls', 'openings', 'items', 'rooms', 'ceilingH', 'slabH', 'floor'];
+const LEVEL_KEYS = ['walls', 'openings', 'items', 'rooms', 'ceilingH', 'slabH', 'floor', 'bg'];
 const OPDEF = { slidepass: [900, 600, 900], slide: [1800, 2100, 0], pass: [900, 600, 900], arch: [1200, 2400, 0], door1: [900, 2100, 0], door2: [1600, 2300, 0], auto: [1800, 2300, 0], window: [1800, 1500, 900], full: [2400, 2400, 0] };
 
 /** 파일 내용(JSON 값)에서 기존 프로젝트들을 찾아낸다 */
@@ -58,10 +58,9 @@ export function convertLegacy(P, lib) {
   });
   report.levels = levels.length;
   if ((P.walls || []).some((w) => w.form)) report.notes.push('모양을 바꾼 벽(벽 디자인 수정)은 곧은 벽으로 불러왔어요');
-  if ((P.rooms || []).some((r) => r.slope)) report.notes.push('바닥 구배는 평평하게 불러왔어요 (단 높이는 유지)');
 
   return {
-    model: { format: FORMAT, version: VERSION, id: uid('p'), name: P.name || '이름 없는 프로젝트', source: { app: 'byr-legacy', id: P.id || null, importedAt: new Date().toISOString() }, wallT: base.wallT, levels, activeLevel: Math.max(0, srcLevels.findIndex((l) => l.id === P.levelId)) },
+    model: { format: FORMAT, version: VERSION, id: uid('p'), name: P.name || '이름 없는 프로젝트', env: P.env ? { ...P.env } : undefined, source: { app: 'byr-legacy', id: P.id || null, importedAt: new Date().toISOString() }, wallT: base.wallT, levels, activeLevel: Math.max(0, srcLevels.findIndex((l) => l.id === P.levelId)) },
     report,
   };
 }
@@ -80,8 +79,9 @@ function convertLevel(meta, D, base, lib, report) {
   const rooms = (D.rooms || []).filter((r) => Array.isArray(r.pts) && r.pts.length >= 3).map((r) => ({
     id: r.id || uid('r'), name: r.name || r.kind || '공간', kind: r.kind || '기타', pts: r.pts.map((p) => [num(p[0]), num(p[1])]),
     lift: num(r.lift), color: (r.finish && r.finish.color) || '#c9c3b8', finish: (r.finish && r.finish.type) || 'tile',
+    slope: r.slope && r.slope.deg && Array.isArray(r.slope.drain) ? { deg: num(r.slope.deg), drain: r.slope.drain.map(num), ...(Array.isArray(r.slope.drain2) ? { drain2: r.slope.drain2.map(num) } : {}), ...(r.slope.item ? { item: r.slope.item } : {}) } : null,
   }));
-  const liftAt = (x, y) => { let best = null; for (const r of rooms) if (pointInPoly(x, y, r.pts)) { const a = polyArea(r.pts); if (!best || a < best.a) best = { a, r }; } return best ? best.r.lift : 0; };
+  const _liftAt = (x, y) => { let best = null; for (const r of rooms) if (pointInPoly(x, y, r.pts)) { const a = polyArea(r.pts); if (!best || a < best.a) best = { a, r }; } return best ? best.r.lift : 0; };
 
   const items = [];
   for (const it of D.items || []) {
@@ -100,17 +100,17 @@ function convertLevel(meta, D, base, lib, report) {
     else if (layer === 'ceil') elev = ceilingH - h;
     else if (layer === 'ceiling') elev = slabH - h;
     else elev = 0;
-    if (it.elev == null && layer === 'floor') elev += liftAt(num(it.x), num(it.y)); // 단 올린 공간 위 기물
     const light = L && L.light ? defaultLight(L) : null;
     if (light) report.lights++;
     items.push({
       id: it.id || uid('i'), type: it.type, name: it.tag || (L && L.name) || it.type, x: num(it.x), y: num(it.y), elev, rot: num(it.rot),
       w: num(it.w, L ? L.w : 600), d: num(it.d, L ? L.d : 600), h, color: it.color || null, mat: it.mat || null,
-      parts: Array.isArray(it.parts) ? packParts(it.parts) : null, pb: it.pb || null, light, kw: num(it.kw ?? (L && L.kw)),
+      parts: Array.isArray(it.parts) ? packParts(it.parts) : null, pb: it.pb || null, light, kw: num(it.kw ?? (L && L.kw)), ...(it.onSlope ? { onSlope: true } : {}),
     });
   }
   report.walls += walls.length; report.openings += openings.length; report.rooms += rooms.length; report.items += items.length;
-  return { ...meta, ceilingH, floor: { color: (D.floor && D.floor.color) || '#c9c3b8', finish: (D.floor && D.floor.type) || 'epoxy' }, walls, openings, rooms, items };
+  const bg = D.bg && D.bg.src ? { src: D.bg.src, wmm: num(D.bg.wmm, 10000), x: num(D.bg.x), y: num(D.bg.y), opacity: num(D.bg.opacity, 0.5) } : null;
+  return { ...meta, ceilingH, bg, floor: { color: (D.floor && D.floor.color) || '#c9c3b8', finish: (D.floor && D.floor.type) || 'epoxy' }, walls, openings, rooms, items };
 }
 
 /** 조명 · 열 기물의 기본 광원 */
@@ -140,4 +140,15 @@ export function reportText(r) {
   if (r.unknown.length) s.push(`모양을 모르는 기물 ${r.unknown.length}개는 상자로 표시 (${[...new Set(r.unknown)].slice(0, 3).join(', ')})`);
   if (r.skipped.length) s.push(`건너뜀 ${r.skipped.length}개 (${[...new Set(r.skipped)].slice(0, 2).join(', ')})`);
   return s.concat(r.notes).join(' · ');
+}
+
+/** 예전 BYR Next(형식 1) 프로젝트 → 형식 2: 단 높이를 기물 elev 에서 빼서 그릴 때 더하도록 */
+export function migrate(model, lib) {
+  if ((model.version || 1) >= 2) return model;
+  for (const L of model.levels) for (const it of L.items) {
+    const Lb = lib[it.type]; if (Lb && Lb.layer && !['floor', 'deco', 'plumb'].includes(Lb.layer)) continue;
+    let best = null; for (const r of L.rooms || []) if (r.lift && pointInPoly(it.x, it.y, r.pts)) { const a = polyArea(r.pts); if (!best || a < best.a) best = { a, r }; }
+    if (best && it.elev >= best.r.lift - 1) it.elev = Math.round(it.elev - best.r.lift);
+  }
+  model.version = 2; return model;
 }

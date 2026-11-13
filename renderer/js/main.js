@@ -11,6 +11,9 @@ import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { buildItem, buildWalls, buildFloors, placeItem, levelBounds, MM } from './builder.js';
 import { setEnvMap } from './materials.js';
 import { STYLES, StylePass, applyStyleMaterials, restoreMaterials } from './styles3d.js';
+import { DesignEditor } from './design.js';
+import { buildEnv } from './env.js';
+import { pointInPoly, syncDrain } from './slope.js';
 
 const MAX_ITEM_LIGHTS = 24; // 실시간 광원이 너무 많으면 태블릿에서 느려져서 가까운 것부터 켠다
 
@@ -74,6 +77,7 @@ export class Engine {
     this.composer.addPass(this.renderPass); this.composer.addPass(this.ssaoPass); this.composer.addPass(this.outputPass); this.composer.addPass(this.stylePass); this.composer.addPass(this.fxaaPass);
 
     this._bindPointer();
+    this.design = new DesignEditor(this);
     this.resize(); this.setSun(this.opt.sunHour);
     new ResizeObserver(() => this.resize()).observe(canvas);
     r.setAnimationLoop(() => this._frame());
@@ -84,8 +88,11 @@ export class Engine {
     const el = this.canvas; if (!el.clientWidth) return; const w = Math.max(2, el.clientWidth), h = Math.max(2, el.clientHeight), pr = this.renderer.getPixelRatio();
     this.renderer.setSize(w, h, false); this.composer.setSize(w, h); this.ssaoPass.setSize(w * pr, h * pr); this.stylePass.setSize(w * pr, h * pr);
     this.fxaaPass.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
-    this.persp.aspect = w / h; this.persp.updateProjectionMatrix(); this.aspect = w / h; this._fitOrtho();
+    this.persp.aspect = w / h; this.persp.updateProjectionMatrix(); this.aspect = w / h; this._fitOrtho(); this._applyShift();
   }
+  /** 화면 오른쪽을 패널이 가릴 때 장면 가운데를 왼쪽으로 옮긴다 (px) */
+  setShift(px) { this.shift = px || 0; this._applyShift(); }
+  _applyShift() { const el = this.canvas, w = el.clientWidth, h = el.clientHeight; if (!w) return; for (const c of [this.persp, this.ortho]) { if (this.shift) c.setViewOffset(w, h, this.shift, 0, w, h); else c.clearViewOffset(); } }
   _fitOrtho() { const o = this.ortho, s = this.orthoSize || 8, a = this.aspect || 1; o.left = -s * a; o.right = s * a; o.top = s; o.bottom = -s; o.updateProjectionMatrix(); }
   _frame() {
     if (!this.canvas.clientWidth) return; // 2D 만 볼 때는 3D 를 그리지 않는다
@@ -123,35 +130,59 @@ export class Engine {
     this.level = level; this.selId = null; this.hl = null; this.selBox.visible = false;
     for (const c of [...this.world.children]) { this.world.remove(c); disposeTree(c); }
     this.items = new THREE.Group(); this.items.name = '기물';
+    for (const r of level.rooms || []) syncDrain(level, r);
     this.structure = new THREE.Group(); this.structure.name = '구조';
     this.structure.add(buildFloors(level), buildWalls(level));
     this.world.add(this.structure, this.items);
     for (const it of level.items) this.items.add(buildItem(it, this.ctx));
     applyStyleMaterials(this.world, this.style);
     const b = levelBounds(level); this.bounds = { cx: ((b[0] + b[2]) / 2) * MM, cz: ((b[1] + b[3]) / 2) * MM, r: Math.max(3, (Math.hypot(b[2] - b[0], b[3] - b[1]) / 2) * MM) };
-    this.setSun(this.opt.sunHour); this._limitLights();
+    this.setSun(this.opt.sunHour); this._limitLights(); if (this.envE) this.setEnv(this.envE, this.envMeta); this.applyFocus();
   }
   itemGroup(id) { return this.items.children.find((g) => g.userData.itemId === id) || null; }
   /** 기물 하나를 다시 만든다 (색 · 크기 · 조명 변경 뒤) */
   rebuildItem(it) {
     const old = this.itemGroup(it.id), g = buildItem(it, this.ctx);
-    if (old) { this.items.remove(old); disposeTree(old); } this.items.add(g); applyStyleMaterials(g, this.style);
+    if (old) { this.items.remove(old); disposeTree(old); } this.items.add(g); applyStyleMaterials(g, this.style); if (this.focusPts) this.applyFocus();
     if (this.selId === it.id) this.selBox.setFromObject(g);
     this._limitLights(); return g;
   }
   /** 벽 · 문/창 · 바닥만 다시 만든다 (2D 도면에서 벽을 그리거나 끌 때 바로 3D 에 반영) */
   rebuildStructure() {
-    if (!this.level) return; const old = this.structure;
+    if (!this.level) return; const old = this.structure; for (const r of this.level.rooms || []) syncDrain(this.level, r);
     this.structure = new THREE.Group(); this.structure.name = '구조'; this.structure.add(buildFloors(this.level), buildWalls(this.level));
     applyStyleMaterials(this.structure, this.style);
     if (old) { this.world.remove(old); disposeTree(old); } this.world.add(this.structure);
     const b = levelBounds(this.level); this.bounds = { cx: ((b[0] + b[2]) / 2) * MM, cz: ((b[1] + b[3]) / 2) * MM, r: Math.max(3, (Math.hypot(b[2] - b[0], b[3] - b[1]) / 2) * MM) };
-    this.renderer.shadowMap.needsUpdate = true; if (this.hl) this.highlight(this.hl);
+    this.renderer.shadowMap.needsUpdate = true; if (this.hl) this.highlight(this.hl); this.replaceItems(); this.applyFocus();
+  }
+  /** 배경(상권) 다시 세우기. E = model.env */
+  setEnv(E, meta = {}) {
+    if (this.envGroup) { this.scene.remove(this.envGroup); disposeTree(this.envGroup); this.envGroup = null; }
+    this.envE = E; this.envMeta = meta; if (!E || !this.level) return;
+    this.envGroup = buildEnv(this.level, E, meta); applyStyleMaterials(this.envGroup, this.style); this.scene.add(this.envGroup);
+    this.ground.visible = E.type === 'none' || E.type === 'basic'; this.controls.maxDistance = E.type === 'none' || E.type === 'basic' ? 70 : 260;
+  }
+  /** 공간만 보기: 그 다각형 안의 기물과 닿는 벽만 남긴다 (pts = null 이면 전체) */
+  setFocus(pts) { this.focusPts = pts && pts.length >= 3 ? pts : null; this.applyFocus(); }
+  applyFocus() {
+    const F = this.focusPts, near = (x, y) => !F || pointInPoly(x, y, F) || F.some((p, i) => { const q = F[(i + 1) % F.length], dx = q[0] - p[0], dy = q[1] - p[1], L = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - p[0]) * dx + (y - p[1]) * dy) / L)); return Math.hypot(p[0] + dx * t - x, p[1] + dy * t - y) < 400; });
+    if (!this.level) return;
+    for (const g of this.items.children) { const it = this.level.items.find((q) => q.id === g.userData.itemId); g.visible = !it || near(it.x, it.y); }
+    if (this.structure) for (const g of this.structure.getObjectsByProperty('name', '벽')) { const w = g.userData.wallId && this.level.walls.find((q) => q.id === g.userData.wallId); if (w) g.visible = near((w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2) || (near(w.x1, w.y1) && near(w.x2, w.y2)); }
+    if (this.envGroup) this.envGroup.visible = !F;
+  }
+  /** 다각형(mm)이 화면에 꽉 차게 */
+  frame(pts) {
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]), cx = ((Math.min(...xs) + Math.max(...xs)) / 2) * MM, cz = ((Math.min(...ys) + Math.max(...ys)) / 2) * MM, r = Math.max(2, (Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) / 2) * MM);
+    const t = new THREE.Vector3(cx, 0.6, cz), dir = this.camera.position.clone().sub(this.controls.target).normalize(); this.controls.target.copy(t);
+    if (this.camera.isOrthographicCamera) { this.camera.zoom = 1; this.orthoSize = r * 0.95; this._fitOrtho(); this.camera.position.copy(t).addScaledVector(dir, 40); } else this.camera.position.copy(t).addScaledVector(dir, r * 2.2);
+    this.controls.update(); this._limitLights();
   }
   /** 보기 스타일 바꾸기 — 모델은 그대로라서 어떤 스타일에서도 계속 편집할 수 있다 */
   setStyle(name) {
     const st = STYLES[name]; if (!st) return; this.style = name;
-    applyStyleMaterials(this.world, name);
+    applyStyleMaterials(this.world, name); if (this.envGroup) applyStyleMaterials(this.envGroup, name);
     this.scene.background = new THREE.Color(st.bg); this.ground.material.color.set(st.ground);
     this.ambient.intensity = st.ambient; this.sun.intensity = this.opt.sunPower * st.sun;
     this.renderer.toneMapping = name === 'real' || name === 'clay' ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping; this.renderer.toneMappingExposure = this.opt.exposure * (st.exposure || 1);
@@ -174,7 +205,9 @@ export class Engine {
   /** 내보내기처럼 원래 PBR 재질이 필요할 때 */
   async withRealMaterials(fn) { restoreMaterials(this.world); try { return await fn(); } finally { applyStyleMaterials(this.world, this.style); } }
   removeItem(id) { const g = this.itemGroup(id); if (g) { this.items.remove(g); disposeTree(g); } if (this.selId === id) this.select(null); this._limitLights(); }
-  moveItem(it) { const g = this.itemGroup(it.id); if (g) placeItem(g, it); }
+  moveItem(it) { const g = this.itemGroup(it.id); if (g) placeItem(g, it, this.ctx.zOf ? this.ctx.zOf(it) : it.elev); }
+  /** 바닥 높이(단 · 구배)가 바뀌었을 때 모든 기물 높이 다시 */
+  replaceItems() { if (this.level) for (const it of this.level.items) this.moveItem(it); }
   // 기물 광원은 화면 중심에서 가까운 순서로 MAX_ITEM_LIGHTS 개까지만 켠다
   _limitLights() {
     const L = []; this.items.traverse((o) => { if (o.userData.itemLight) L.push(o); });
@@ -212,26 +245,29 @@ export class Engine {
     ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera); return ray;
   }
   pick(e) {
-    const hit = this._ray(e).intersectObjects(this.items.children, true)[0]; if (!hit) return null;
-    let o = hit.object; while (o && !o.userData.itemId) o = o.parent; return o ? o.userData.itemId : null;
+    for (const hit of this._ray(e).intersectObjects(this.items.children.filter((g) => g.visible), true)) { // 숨긴(공간만 보기) 기물은 건너뜀
+      let o = hit.object; while (o && !o.userData.itemId) o = o.parent; if (o) return o.userData.itemId;
+    }
+    return null;
   }
   _bindPointer() {
     const cv = this.canvas; let down = null, drag = null; const active = new Set();
     // capture 단계에서 먼저 받아, 기물을 끌 때는 OrbitControls 로 넘기지 않는다
     cv.addEventListener('pointerdown', (e) => {
-      active.add(e.pointerId);
+      active.add(e.pointerId); this._touches = active.size; if (this.design && this.design.active) return;
       if (active.size > 1) { if (drag) { drag.cancel(); drag = null; } down = null; return; } // 두 손가락 = 화면 조작
       down = { x: e.clientX, y: e.clientY, id: e.pointerId };
       if (this.mode !== 'move' || e.button > 0) return;
       const id = this.pick(e), it = id && this.level.items.find((q) => q.id === id); if (!it) return;
       if (this.selId !== id) this.select(id);
-      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -it.elev * MM), p0 = new THREE.Vector3();
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(this.ctx.zOf ? this.ctx.zOf(it) : it.elev) * MM), p0 = new THREE.Vector3();
       if (!this._ray(e).ray.intersectPlane(plane, p0)) return;
       e.stopImmediatePropagation(); cv.setPointerCapture(e.pointerId);
       const ox = it.x, oy = it.y;
       drag = { it, moved: false, plane, p0, cancel: () => { it.x = ox; it.y = oy; this.moveItem(it); this.onMove(it); } };
     }, true);
     cv.addEventListener('pointermove', (e) => {
+      if (this.design && this.design.active) return;
       if (!drag || e.pointerId !== down?.id) return; e.stopImmediatePropagation();
       const p = new THREE.Vector3(); if (!this._ray(e).ray.intersectPlane(drag.plane, p)) return;
       const snap = (v) => Math.round(v / 10) * 10, it = drag.it;
@@ -239,7 +275,7 @@ export class Engine {
       this.moveItem(it); this.onMove(it);
     }, true);
     const up = (e) => {
-      active.delete(e.pointerId);
+      active.delete(e.pointerId); this._touches = active.size; if (this.design && this.design.active) { down = null; return; }
       if (drag) { e.stopImmediatePropagation(); const moved = drag.moved; drag = null; if (moved) { this.onChange(); return; } }
       if (down && e.pointerId === down.id && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 7 && e.type === 'pointerup' && this.mode !== 'orbit') this.select(this.pick(e)); // 톡 누르면 선택
       down = null;

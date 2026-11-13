@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { material, floorMaterial, MAT_TEX } from './materials.js';
+import { slopeFrame, slopePieces, slopeH } from './slope.js';
 
 export const MM = 0.001;
 const FRAME = '#2b2d31';
@@ -74,6 +75,7 @@ export function buildItem(it, ctx) {
     const pb = it.pb || (L ? { w: L.w, d: L.d, h: L.h } : { w: it.w, d: it.d, h: it.h });
     const baseColor = L ? L.color : null, baseTex = L ? MAT_TEX[L.mat] || 'plain' : null, newTex = it.mat ? MAT_TEX[it.mat] || 'plain' : null;
     const recolor = (p) => { // 기존 앱 규칙: 기물 기본 색으로 그린 부품만 사용자가 고른 색 · 재질로 바뀐다
+      if (p.own) return { color: p.c || '#b8bcc2', tex: MAT_TEX[p.m] || p.m || 'plain' }; // 디자인 수정에서 부품마다 따로 고른 색 · 재질
       const main = !!baseColor && typeof p.c === 'string' && p.c.toLowerCase() === baseColor.toLowerCase();
       return { color: main && it.color ? it.color : p.c || '#b8bcc2', tex: main && newTex ? newTex : p.m === baseTex && newTex && main ? newTex : p.m || 'plain' };
     };
@@ -83,10 +85,10 @@ export function buildItem(it, ctx) {
     m.position.y = (it.h * MM) / 2; m.castShadow = m.receiveShadow = true; g.add(m);
   }
   if (it.light && it.light.on) g.add(...makeLight(it));
-  placeItem(g, it);
+  placeItem(g, it, ctx.zOf ? ctx.zOf(it) : it.elev);
   return g;
 }
-export function placeItem(g, it) { g.position.set(it.x * MM, it.elev * MM, it.y * MM); g.rotation.y = (-it.rot * Math.PI) / 180; }
+export function placeItem(g, it, z = it.elev) { g.position.set(it.x * MM, z * MM, it.y * MM); g.rotation.y = (-it.rot * Math.PI) / 180; }
 
 // 조명 기물의 광원: 전등은 아래로 비추는 SpotLight, 튀김기 · 레인지 · 스탠드는 PointLight
 function makeLight(it) {
@@ -166,10 +168,34 @@ export function buildFloors(level) {
   slab.receiveShadow = true; slab.name = '바닥판'; root.add(slab);
   // 공간별 바닥 (마감 · 단 높이)
   for (const r of level.rooms) {
+    if (slopeFrame(r)) { root.add(slopedRoom(r)); continue; }
     const shape = new THREE.Shape(r.pts.map((p) => new THREE.Vector2(p[0] * MM, -p[1] * MM)));
     const depth = Math.max(0.004, r.lift * MM + 0.004);
     const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false }); geo.rotateX(-Math.PI / 2);
     const m = new THREE.Mesh(geo, floorMaterial(r.finish, r.color)); m.receiveShadow = true; m.castShadow = r.lift > 20; m.name = r.name; m.userData.roomId = r.id; root.add(m);
   }
   return root;
+}
+
+/** 구배 바닥: 평면 조각마다 위에서 투영한 UV(월드 좌표)라 타일 · 패턴이 끊기지 않고 그대로 이어진다 */
+function slopedRoom(r) {
+  const tri = (pts) => THREE.ShapeUtils.triangulateShape(pts.map((p) => new THREE.Vector2(p[0], p[1])), []);
+  const lift = r.lift || 0, base = 4, pos = [], uv = [];
+  for (const pc of slopePieces(r, tri)) {
+    const P = (q) => [q[0] * MM, (lift + base + pc.h(q[0], q[1])) * MM, q[1] * MM];
+    for (let k = 1; k + 1 < pc.pts.length; k++) {
+      let a = pc.pts[0], b = pc.pts[k], c = pc.pts[k + 1];
+      if ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) > 0) [b, c] = [c, b]; // 위를 보게 (도면 y 가 아래라 반대)
+      for (const q of [a, b, c]) { pos.push(...P(q)); uv.push(q[0] * MM, q[1] * MM); }
+    }
+  }
+  // 단이 있으면 옆면(테두리)도 구배를 따라
+  if (lift > 0) for (let k = 0, j = r.pts.length - 1; k < r.pts.length; j = k++) {
+    const a = r.pts[j], b = r.pts[k], dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz) || 1, n = Math.max(1, Math.ceil(L / 200));
+    for (let q = 0; q < n; q++) { const p0 = [a[0] + (dx * q) / n, a[1] + (dz * q) / n], p1 = [a[0] + (dx * (q + 1)) / n, a[1] + (dz * (q + 1)) / n];
+      const v = [[p0[0], 0, p0[1]], [p1[0], 0, p1[1]], [p1[0], lift + base + slopeH(r, ...p1), p1[1]], [p0[0], lift + base + slopeH(r, ...p0), p0[1]]].map((t) => [t[0] * MM, t[1] * MM, t[2] * MM]);
+      for (const i of [0, 2, 1, 0, 3, 2, 0, 1, 2, 0, 2, 3]) { pos.push(...v[i]); uv.push(v[i][0] + v[i][2], v[i][1]); } }
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals();
+  const m = new THREE.Mesh(g, floorMaterial(r.finish, r.color)); m.receiveShadow = true; m.name = r.name; m.userData.roomId = r.id; return m;
 }

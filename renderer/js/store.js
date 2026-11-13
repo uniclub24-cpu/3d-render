@@ -1,0 +1,101 @@
+// 프로젝트 보관함: 이 기기(IndexedDB) 자동 저장 + 계정 동기화(기존 앱 계정 · Supabase Storage)
+//
+// · 고칠 때마다 1초 뒤 이 기기에 자동 저장 (앱을 닫거나 폰이 정리해도 남음) — 다시 켜면 마지막 프로젝트가 열린다
+// · 로그인돼 있으면 저장 뒤 몇 초 안에 계정으로 올리고, 다른 기기에서 고친 것은 내려받는다
+// · 계정 쪽 저장 위치: Storage 버킷 models / <내 사용자 ID>/byr2/  (본인만 읽고 쓰는 규칙이 이미 걸린 곳)
+//   기존 앱의 projects 표에는 쓰지 않는다 → 기존 앱이 새 형식을 열다 깨지는 일이 없다
+// · 양쪽에서 같은 프로젝트를 동시에 고친 경우: 둘 다 남긴다 ("충돌 사본")
+import { SB, session, sbFetch } from './cloud.js';
+
+const DB = 'byr2', ST = 'projects';
+let dbp = null;
+const db = () => (dbp ||= new Promise((ok, no) => { const r = indexedDB.open(DB, 1); r.onupgradeneeded = () => r.result.createObjectStore(ST, { keyPath: 'id' }); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }));
+const tx = async (mode, fn) => { const d = await db(); return new Promise((ok, no) => { const t = d.transaction(ST, mode), s = t.objectStore(ST); let out; Promise.resolve(fn(s)).then((v) => (out = v)); t.oncomplete = () => ok(out); t.onerror = () => no(t.error); }); };
+const req = (r) => new Promise((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+const ls = { get: (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+
+/* ---------- 이 기기 ---------- */
+export async function getRec(id) { return tx('readonly', (s) => req(s.get(id))); }
+async function putRec(rec) { return tx('readwrite', (s) => req(s.put(rec))); }
+async function delRec(id) { return tx('readwrite', (s) => req(s.delete(id))); }
+async function allRecs() { return tx('readonly', (s) => req(s.getAll())); }
+/** 저장: updated 를 지금으로 (synced 는 그대로 → 올릴 것이 생김) */
+export async function saveLocal(model, opt = {}) {
+  const prev = await getRec(model.id), data = JSON.stringify(model), now = opt.updated || Math.max(Date.now(), prev ? (prev.updated || 0) + 1 : 0);
+  if (prev && !prev.deleted && prev.data === data && !opt.updated) { ls.set('byr.last', model.id); return prev.updated; } // 바뀐 게 없으면 시각도 그대로 (동기화가 서로 주고받지 않게)
+  await putRec({ id: model.id, name: model.name, updated: now, synced: opt.synced ?? (prev ? prev.synced || 0 : 0), dirty: opt.dirty ?? true, deleted: false, data }); // dirty: 마지막 동기화 뒤 이 기기에서 고침
+  ls.set('byr.last', model.id); return now;
+}
+export async function loadLocal(id) { const r = await getRec(id); return r && !r.deleted ? JSON.parse(r.data) : null; }
+export async function listLocal() { return (await allRecs()).filter((r) => !r.deleted).map(({ id, name, updated, synced, dirty, data }) => ({ id, name, updated, synced, dirty: dirty ?? updated > (synced || 0), size: data.length })).sort((a, b) => b.updated - a.updated); }
+/** 지우기: 계정에 올린 적이 있으면 "지움 표시"를 남겨 다음 동기화 때 계정에서도 지운다 */
+export async function removeLocal(id) { const r = await getRec(id); if (!r) return; if (r.synced) await putRec({ ...r, deleted: true, dirty: true, updated: Math.max(Date.now(), (r.updated || 0) + 1), data: '{}' }); else await delRec(id); if (ls.get('byr.last') === id) ls.set('byr.last', null); }
+export const lastId = () => ls.get('byr.last', null);
+
+/* ---------- 자동 저장 ---------- */
+let saveT = 0, pending = null, status = () => {};
+export function onStatus(fn) { status = fn; }
+/** 고칠 때마다 부른다. 1초 동안 더 고치지 않으면 저장 → 로그인돼 있으면 5초 뒤 동기화 */
+export function autosave(model) {
+  pending = model; clearTimeout(saveT); status('저장 대기');
+  saveT = setTimeout(flush, 1000);
+}
+export async function flush() {
+  clearTimeout(saveT); if (!pending) return; const m = pending; pending = null;
+  try { await saveLocal(m); status('이 기기에 저장됨'); if (session()) scheduleSync(5000); } catch (e) { console.error(e); status('저장 실패: ' + (e.message || e)); }
+}
+// 앱을 닫거나 뒤로 보낼 때 바로 저장
+addEventListener('pagehide', () => { flush(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+
+/* ---------- 계정 동기화 ---------- */
+const dir = () => `${session().user}/byr2/`;
+const enc = (p) => p.split('/').map(encodeURIComponent).join('/');
+async function sget(name) { const r = await sbFetch('/storage/v1/object/authenticated/models/' + enc(dir() + name), { allow404: true }); return r.status === 404 || r.status === 400 ? null : r.text(); }
+async function sput(name, text) { await sbFetch('/storage/v1/object/models/' + enc(dir() + name), { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-upsert': 'true' }, body: text }); }
+async function sdel(name) { await sbFetch('/storage/v1/object/models', { method: 'DELETE', body: JSON.stringify({ prefixes: [dir() + name] }) }); }
+let syncT = 0, syncing = null;
+export function scheduleSync(ms = 3000) { clearTimeout(syncT); syncT = setTimeout(() => syncNow().catch(() => {}), ms); }
+/** 양방향 동기화. 결과: { up, down, del, conflict } */
+export function syncNow() { return (syncing ||= doSync().finally(() => (syncing = null))); }
+async function doSync() {
+  if (!session()) return { skipped: true };
+  status('동기화 중…'); await flush();
+  const res = { up: 0, down: 0, del: 0, conflict: 0, changed: [] };
+  try {
+    const txt = await sget('_index.json'); const idx = txt ? JSON.parse(txt) : {}; let idxDirty = false;
+    const recs = await allRecs(), seen = new Set();
+    for (const rec of recs) {
+      seen.add(rec.id); const r = idx[rec.id];
+      const edited = rec.dirty ?? rec.updated > (rec.synced || 0);              // 마지막 동기화 뒤 이 기기에서 고쳤나
+      const changed = !!r && (r.deleted || r.updated !== rec.synced);          // 마지막 동기화 뒤 계정 쪽이 바뀌었나 (시계가 달라도 안전하게 "같은지"로 본다)
+      const up = async () => { await sput(rec.id + '.json', rec.data); idx[rec.id] = { name: rec.name, updated: rec.updated }; idxDirty = true; await putRec({ ...rec, synced: rec.updated, dirty: false }); res.up++; };
+      if (rec.deleted) { // 이 기기에서 지움
+        if (!r || !changed || r.deleted) { if (r && !r.deleted) await sdel(rec.id + '.json').catch(() => {}); idx[rec.id] = { name: rec.name, updated: rec.updated, deleted: true }; idxDirty = true; res.del++; await delRec(rec.id); }
+        else { // 지웠는데 다른 기기에서 그 사이 고침 → 고친 쪽을 살린다
+          const data = await sget(rec.id + '.json'); if (data) { await putRec({ id: rec.id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, data }); res.down++; } }
+        continue;
+      }
+      if (!r) { await up(); continue; }
+      if (!changed) { if (edited) await up(); continue; }
+      if (r.deleted) { if (edited) await up(); else { await delRec(rec.id); res.del++; res.changed.push(rec.id); } continue; }
+      const data = await sget(rec.id + '.json'); if (!data) { if (edited) await up(); continue; }
+      if (edited) { // 양쪽에서 고침 → 이 기기 것을 "충돌 사본"으로 남기고 계정 것을 받는다
+        const mine = JSON.parse(rec.data), cid = 'p' + Math.random().toString(36).slice(2, 9); mine.id = cid; mine.name = `${mine.name} (충돌 사본)`;
+        await putRec({ id: cid, name: mine.name, updated: Date.now(), synced: 0, dirty: true, deleted: false, data: JSON.stringify(mine) }); res.conflict++;
+      }
+      await putRec({ id: rec.id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, data }); res.down++; res.changed.push(rec.id);
+    }
+    for (const [id, r] of Object.entries(idx)) { // 계정에만 있는 것
+      if (seen.has(id) || r.deleted) continue; const data = await sget(id + '.json'); if (!data) continue;
+      await putRec({ id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, data }); res.down++;
+    }
+    if (res.conflict) scheduleSync(500); // 충돌 사본도 올린다
+    if (idxDirty) await sput('_index.json', JSON.stringify(idx));
+    ls.set('byr.syncAt', Date.now());
+    status(`동기화됨 · ${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`);
+  } catch (e) { console.warn('[sync]', e); status('동기화 실패 · ' + (e.message || e)); throw e; }
+  return res;
+}
+export const lastSync = () => ls.get('byr.syncAt', 0);
+export { SB };
