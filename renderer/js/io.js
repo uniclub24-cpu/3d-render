@@ -1,0 +1,64 @@
+// 외부 3D 에셋 가져오기(GLTF/GLB · OBJ · FBX) · 장면 내보내기(GLB · OBJ) · 파일 열기/저장
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
+
+export const ASSET_EXT = ['glb', 'gltf', 'obj', 'fbx'];
+export const extOf = (name) => (name.split('.').pop() || '').toLowerCase();
+
+/** 파일 바이트 → Three 객체 */
+async function parseAsset(ext, bytes) {
+  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  if (ext === 'glb' || ext === 'gltf') return new Promise((ok, no) => new GLTFLoader().parse(buf, '', (g) => ok(g.scene), no));
+  if (ext === 'obj') return new OBJLoader().parse(new TextDecoder().decode(bytes));
+  if (ext === 'fbx') return new FBXLoader().parse(buf, '');
+  throw new Error('지원하지 않는 형식이에요: ' + ext);
+}
+
+/**
+ * 에셋을 읽어 "가운데 · 바닥 맞춤 + m 단위"로 정리한다.
+ * 반환: { key, object, size(Vector3, m), mm: { w, d, h } }
+ */
+export async function loadAsset(name, bytes) {
+  const ext = extOf(name), obj = await parseAsset(ext, bytes);
+  obj.traverse((o) => {
+    if (!o.isMesh) return; o.castShadow = o.receiveShadow = true;
+    const fix = (m) => (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial ? m : new THREE.MeshStandardMaterial({ color: m.color || '#b8bcc2', map: m.map || null, roughness: 0.7, metalness: 0, transparent: m.transparent, opacity: m.opacity }));
+    o.material = Array.isArray(o.material) ? o.material.map(fix) : fix(o.material); // OBJ · FBX 의 옛 재질을 PBR 로
+  });
+  let box = new THREE.Box3().setFromObject(obj); const s0 = box.getSize(new THREE.Vector3()), max = Math.max(s0.x, s0.y, s0.z) || 1;
+  // 단위 짐작: glTF 는 m, 그 밖에는 크기로 mm · cm 를 가늠한다 (속성 창에서 크기를 고칠 수 있다)
+  const unit = ext === 'glb' || ext === 'gltf' ? (max > 60 ? 0.001 : 1) : max > 60 ? 0.001 : max > 6 ? 0.01 : 1;
+  const wrap = new THREE.Group(); obj.scale.multiplyScalar(unit); wrap.add(obj);
+  box = new THREE.Box3().setFromObject(wrap); const c = box.getCenter(new THREE.Vector3());
+  obj.position.x -= c.x; obj.position.z -= c.z; obj.position.y -= box.min.y;
+  const size = box.getSize(new THREE.Vector3()); size.set(Math.max(size.x, 1e-3), Math.max(size.y, 1e-3), Math.max(size.z, 1e-3));
+  return { key: name + ':' + bytes.byteLength, object: wrap, size, mm: { w: Math.round(size.x * 1000), d: Math.round(size.z * 1000), h: Math.round(size.y * 1000) } };
+}
+
+/** 장면 전체 → GLB (Blender · D5 Render · Twinmotion 에서 바로 열린다) */
+export function exportGLB(root) {
+  return new Promise((ok, no) => new GLTFExporter().parse(root, (r) => ok(new Uint8Array(r)), no, { binary: true, onlyVisible: true }));
+}
+/** 장면 전체 → OBJ (재질 정보는 빠지고 형상만) */
+export function exportOBJ(root) { root.updateMatrixWorld(true); return new OBJExporter().parse(root); }
+
+/* ---------- 파일 열기 · 저장 (Electron 이면 대화 상자, 브라우저면 입력창 · 내려받기) ---------- */
+export async function openFiles({ title, extensions, multi = false }) {
+  if (window.byr) { const r = await window.byr.openFiles({ title, multi, filters: [{ name: title || '파일', extensions }] }); return r.map((f) => ({ name: f.name, data: new Uint8Array(f.data) })); }
+  return new Promise((ok) => {
+    const i = Object.assign(document.createElement('input'), { type: 'file', multiple: multi, accept: extensions.map((e) => '.' + e).join(',') });
+    i.onchange = async () => ok(await Promise.all([...i.files].map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) }))));
+    i.oncancel = () => ok([]); i.click();
+  });
+}
+export async function saveFile({ title, defaultName, extensions, data }) {
+  if (window.byr) return window.byr.saveFile({ title, defaultName, filters: [{ name: title || '파일', extensions }], data });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([data])), download: defaultName });
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); return defaultName;
+}
+export const bytesToB64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+export const b64ToBytes = (b) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0));

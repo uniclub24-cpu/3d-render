@@ -1,0 +1,25 @@
+{
+  "name": "byr-next",
+  "productName": "BYR Next",
+  "version": "0.1.0",
+  "description": "Build Your Restaurant — Three.js 실사 렌더 · 태블릿 UI 신규 빌드",
+  "main": "electron/main.js",
+  "scripts": {
+    "postinstall": "node scripts/vendor.js",
+    "vendor": "node scripts/vendor.js",
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.byr.next",
+    "files": ["electron/**", "renderer/**", "package.json"],
+    "win": { "target": "portable" }
+  }
+}

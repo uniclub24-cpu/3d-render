@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' blob: data: https://api.anthropic.com https://zxehyxjjiruxgqkthotn.supabase.co">
+<title>BYR Next</title>
+<link rel="stylesheet" href="./styles.css">
+<!-- Three.js 는 전부 로컬(vendor)에서 읽는다. CDN 없음 -->
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/build/three.module.min.js", "three/addons/": "./vendor/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <!-- 화면: 2D 도면 | 3D (분할 · 한쪽만) -->
+  <main id="stage" class="psplit">
+    <canvas id="plan" aria-label="2D 도면"></canvas>
+    <canvas id="view" aria-label="3D 매장 화면"></canvas>
+    <!-- 2D 도구 (도면이 보일 때만) -->
+    <div id="planTools" role="toolbar" aria-label="도면 도구" aria-orientation="vertical">
+      <button class="ib" data-tool="select" aria-pressed="true" title="고르기 · 끌기 (벽 끝점 · 문 · 기물)" aria-label="고르기"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6z"/></svg></button>
+      <button class="ib" data-tool="wall" aria-pressed="false" title="벽 그리기 (점을 차례로 톡 · 또는 끌기 · 같은 점 한 번 더 / Esc 로 끝)" aria-label="벽 그리기"><svg viewBox="0 0 24 24"><path d="M4 18L20 6" stroke-width="4"/><circle cx="4" cy="18" r="1.6"/><circle cx="20" cy="6" r="1.6"/></svg></button>
+      <button class="ib" data-tool="door1" aria-pressed="false" title="문 넣기 (벽을 톡)" aria-label="문"><svg viewBox="0 0 24 24"><path d="M4 20h16M6 20V6M6 6a14 14 0 0 1 14 14"/></svg></button>
+      <button class="ib" data-tool="window" aria-pressed="false" title="창 넣기 (벽을 톡)" aria-label="창"><svg viewBox="0 0 24 24"><path d="M3 9h18M3 15h18M3 12h18M3 9v6M21 9v6"/></svg></button>
+      <button class="ib" data-tool="pass" aria-pressed="false" title="배식구 넣기 (벽을 톡)" aria-label="배식구"><svg viewBox="0 0 24 24"><path d="M3 12h3M9 12h3M15 12h3M3 8v8M21 8v8"/></svg></button>
+      <button class="ib" data-tool="erase" aria-pressed="false" title="지우기 (톡)" aria-label="지우기"><svg viewBox="0 0 24 24"><path d="M8 20h12M5 14l8-8 6 6-7 7H8z"/></svg></button>
+      <button class="ib" id="btnFit" title="도면 전체 보기" aria-label="도면 전체 보기"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    </div>
+  </main>
+
+  <!-- 상단 바: 아이콘 버튼 (모두 44px 이상) -->
+  <header id="topbar" role="toolbar" aria-label="도구">
+    <button class="ib" id="btnDrawer" aria-label="기물 목록 열기" aria-expanded="false" title="기물 목록"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <div class="title"><b id="projName">BYR Next</b><select id="levelSel" aria-label="층" hidden></select></div>
+    <div class="seg" role="group" aria-label="조작 방식">
+      <button class="ib" data-mode="select" aria-pressed="true" aria-label="선택" title="선택 (톡 눌러 고르기)"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6z"/></svg></button>
+      <button class="ib" data-mode="move" aria-pressed="false" aria-label="이동" title="이동 (기물을 끌어 옮기기)"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></button>
+      <button class="ib" data-mode="orbit" aria-pressed="false" aria-label="둘러보기" title="둘러보기 (화면만 돌리기)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M2 12c2.5-4.5 6-7 10-7s7.5 2.5 10 7c-2.5 4.5-6 7-10 7s-7.5-2.5-10-7z"/></svg></button>
+    </div>
+    <div class="seg" role="group" aria-label="화면 나누기">
+      <button class="ib txt" data-pane="2d" aria-pressed="false" title="2D 도면만">2D</button>
+      <button class="ib txt" data-pane="split" aria-pressed="true" title="2D + 3D 함께 (2D 에서 그리면 3D 에 바로)">분할</button>
+      <button class="ib txt" data-pane="3d" aria-pressed="false" title="3D 만">3D</button>
+    </div>
+    <button class="ib" id="btnStyle" aria-label="보기 스타일" aria-haspopup="menu" aria-expanded="false" title="보기 스타일 (실사 · 카툰 · 타이쿤 · 만화 · 클레이 · 도면)"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.6-.9 1.2-1.8-.5-1-.1-2.2 1.2-2.2H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="15" cy="7.5" r="1.2"/></svg></button>
+    <div class="grow"></div>
+    <button class="ib" id="btnUndo" aria-label="되돌리기" title="되돌리기"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+    <button class="ib" id="btnRedo" aria-label="다시 실행" title="다시 실행"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+    <span class="sep"></span>
+    <button class="ib" data-view="iso" aria-label="비스듬히 보기" title="비스듬히 보기"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></button>
+    <button class="ib" data-view="top" aria-label="위에서 보기" title="위에서 보기"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 10h7v10M11 14h9"/></svg></button>
+    <span class="sep"></span>
+    <button class="ib" id="btnFile" aria-label="파일 메뉴" aria-haspopup="menu" aria-expanded="false" title="열기 · 저장 · 가져오기 · 내보내기"><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg></button>
+  </header>
+
+  <!-- 보기 스타일 메뉴 -->
+  <div id="styleMenu" class="menu" role="menu" hidden></div>
+
+  <!-- 파일 메뉴 -->
+  <div id="fileMenu" class="menu" role="menu" hidden>
+    <button role="menuitem" data-act="new">새 프로젝트</button>
+    <button role="menuitem" data-act="open">프로젝트 열기 (.byr.json)</button>
+    <button role="menuitem" data-act="save">프로젝트 저장</button>
+    <hr>
+    <button role="menuitem" data-act="legacy">기존 앱 작업물 가져오기 (JSON)</button>
+    <button role="menuitem" data-act="account">기존 앱 계정에서 불러오기 (로그인)</button>
+    <button role="menuitem" data-act="sample">기존 앱 샘플 불러오기</button>
+    <hr>
+    <button role="menuitem" data-act="ai">AI · 도면 사진/PDF → 벽 · 현장 사진 → 기물</button>
+    <button role="menuitem" data-act="asset">3D 에셋 가져오기 (GLB · GLTF · OBJ · FBX)</button>
+    <hr>
+    <button role="menuitem" data-act="glb">전체 장면 내보내기 · GLB (Blender · D5 · Twinmotion)</button>
+    <button role="menuitem" data-act="obj">전체 장면 내보내기 · OBJ</button>
+    <button role="menuitem" data-act="png">화면 이미지 저장 · PNG</button>
+  </div>
+
+  <!-- 왼쪽 접이식 서랍: 기물 목록 (아코디언) -->
+  <aside id="drawer" aria-label="기물 목록" aria-hidden="true">
+    <div class="dhead"><b>기물</b><button class="ib" id="btnDrawerClose" aria-label="기물 목록 닫기"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <input id="search" type="search" placeholder="기물 찾기 (예: 냉장고, 튀김기)" aria-label="기물 찾기">
+    <div id="catalog"></div>
+  </aside>
+  <div id="scrim" hidden></div>
+
+  <!-- 오른쪽 아래 FAB + 속성 카드 (팝오버) -->
+  <button id="fab" class="ib" aria-label="속성 열기" aria-expanded="false" title="속성"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+  <section id="props" class="card" aria-label="속성" hidden>
+    <div class="chead"><b id="propsTitle">장면 설정</b><button class="ib" id="btnPropsClose" aria-label="속성 닫기"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div id="propsBody"></div>
+  </section>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <div id="drop" hidden><div>여기에 놓으면 가져와요<br><small>기존 앱 JSON · 프로젝트 · GLB / GLTF / OBJ / FBX</small></div></div>
+</div>
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>

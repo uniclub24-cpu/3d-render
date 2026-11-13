@@ -1,0 +1,29 @@
+# BYR Next: 올릴 때마다 (1) 리눅스에서 실제 Electron 으로 켜 보는 확인 (2) 윈도우 포터블 exe 만들기
+name: build
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install
+      - name: Electron 으로 켜서 샘플 불러오기 · 스타일 전환까지 확인
+        run: xvfb-run -a npx electron . --smoke --no-sandbox --use-gl=swiftshader --enable-unsafe-swiftshader
+  windows:
+    needs: smoke
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install
+      - run: npx electron-builder --win portable --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BYR-Next-windows
+          path: dist/*.exe
+          if-no-files-found: error
