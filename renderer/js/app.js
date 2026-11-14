@@ -16,7 +16,8 @@ import { findFaces } from './rooms.js';
 import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
-export const APP_VERSION = '2.1.8';
+import { initLang, setLang, lang } from './i18n.js';
+export const APP_VERSION = '2.1.9';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -176,6 +177,8 @@ const ACT = {
   auto: () => { S.panel = 'auto'; S.propsOpen = true; renderProps(); },
   view: () => { S.panel = 'view'; S.propsOpen = true; renderProps(); },
   hist: () => { S.panel = 'hist'; S.propsOpen = true; renderProps(); },
+  lang: () => { setLang(lang() === 'en' ? 'ko' : 'en'); renderProps(); buildDock(); syncBar && syncBar(); if (!$('#home').hidden) renderHome(); toast(lang() === 'en' ? 'English screen (names in your project stay as they are)' : '한국어 화면으로 바꿨어요'); },
+  sketch: () => setPlanTool('sketch'),
   cmt: () => { S.panel = 'cmt'; S.propsOpen = true; renderProps(); },
   pack: async () => { /* 블렌더 패키지: GLB(모든 층) + DXF + 프로젝트 + 견적 + 안내 를 zip 하나로 */
     setSel(null); toast('패키지를 만드는 중…'); const nm = safeName(), root = engine.buildAll(S.model.levels, (L) => (it) => SL.itemZ(L, it, S.lib)), glb = await exportGLB(root), dxf = CAD.dxfDoc(S.model.levels.map((L, i) => ({ level: L, pre: `F${i + 1}_` })), S.lib, (L, it) => SL.itemZ(L, it, S.lib));
@@ -231,6 +234,7 @@ function renderProps() {
   if (S.panel === 'view') return renderView(body);
   if (S.panel === 'hist') return renderHist(body);
   if (S.panel === 'cmt') return renderCmt(body);
+  if (S.panel === 'multi' && (S.multi || []).length) return renderMulti(body);
   if (S.panel === 'dxf') return renderDxf(body);
   if (selRoom()) return renderRoom(body, selRoom());
   if (S.panel === 'account') return renderAccount(body);
@@ -269,6 +273,9 @@ function renderProps() {
     <div class="sec">크기 (mm)</div><div class="row">${num('폭', 'w', it.w)}${num('깊이', 'd', it.d)}${num('높이', 'h', it.h)}</div>
     <div class="sec">색 · 재질</div><div class="row"><label class="fld">색<input type="color" data-k="color" value="${/^#[0-9a-f]{6}$/i.test(color) ? color : '#b8bcc2'}" ${it.asset ? 'disabled' : ''}></label>
       <label class="fld">재질<select data-k="mat" ${it.asset ? 'disabled' : ''}>${Object.entries(MAT_LABEL).map(([k, n]) => `<option value="${k}" ${(it.mat || '') === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+    <div class="sec">텍스처 입히기 (사진 · 무늬 이미지)</div>
+    <div class="btns"><button class="btn" data-a="tex" ${it.asset ? 'disabled' : ''}>${it.tex ? '이미지 바꾸기' : '이미지 고르기'}</button>${it.tex ? `<button class="btn" data-a="texX">텍스처 지우기</button>` : ''}</div>
+    ${it.tex ? `<label class="fld">반복 <b>${it.tex.rep || 1}회</b><input type="range" data-tx="rep" min="1" max="10" step="1" value="${it.tex.rep || 1}"></label>` : ''}
     <div class="sec">조명</div>
     <label class="tog">이 기물에 불 켜기<input type="checkbox" data-l="on" ${lt && lt.on ? 'checked' : ''}></label>
     ${lt && lt.on ? `<div class="row"><label class="fld">밝기<input type="range" data-l="power" min="0.1" max="3" step="0.1" value="${lt.power ?? 1}"></label><label class="fld">빛 색<input type="color" data-l="color" value="${lt.color || '#ffe2bd'}"></label></div>
@@ -288,6 +295,7 @@ function renderProps() {
       if (k === 'w' || k === 'd' || k === 'h') patchSel({ [k]: clamp(v, 10, 30000) }); else patchSel({ [k]: v }, false);
     };
   });
+  $$('[data-tx]', body).forEach((i) => (i.onchange = () => { const t = selItem(); if (!t || !t.tex) return; t.tex.rep = +i.value; engine.rebuildItem(t); commit(); renderProps(); }));
   $$('[data-l]', body).forEach((i) => (i.onchange = () => {
     const t = selItem(), k = i.dataset.l; t.light = t.light || { on: false, kind: (S.lib[t.type] || {}).layer === 'floor' || !S.lib[t.type] ? 'point' : 'spot', color: '#ffe2bd', power: 1 };
     t.light[k] = i.type === 'checkbox' ? i.checked : i.type === 'range' ? +i.value : i.value; engine.rebuildItem(t); commit(); renderProps();
@@ -298,6 +306,8 @@ function renderProps() {
     if (b.dataset.a === 'dup') { const c = { ...JSON.parse(JSON.stringify(t)), id: uid('i'), x: t.x + 300, y: t.y + 300 }; level().items.push(c); engine.rebuildItem(c); engine.select(c.id); commit(); }
     if (b.dataset.a === 'del') { plan.erase({ kind: 'item', id: t.id }); }
     if (b.dataset.a === 'design') startDesign(t);
+    if (b.dataset.a === 'tex') pickTexture().then((img) => { if (!img) return; const q = selItem(); if (!q) return; q.tex = { img, rep: (q.tex && q.tex.rep) || 1 }; engine.rebuildItem(q); commit(); renderProps(); });
+    if (b.dataset.a === 'texX') { delete t.tex; engine.rebuildItem(t); commit(); renderProps(); }
     if (b.dataset.a === 'fit') fitItems([t.id], '바닥 위로 올렸어요');
     if (b.dataset.a === 'unfit') { delete t.onSlope; engine.moveItem(t); commit(); renderProps(); }
     if (b.dataset.a === 'drain') { const r = SL.roomAt(level(), t.x, t.y) || nearestRoom(t.x, t.y); if (!r) return toast('이 배수 기물이 놓인 공간이 없어요 · 먼저 2D 에서 공간(사각형 · 선)을 그려 주세요'); setDrain(r, t, `"${t.name}" 쪽으로 구배를 잡았어요 · 각도만 바꾸면 돼요`); setSel({ kind: 'room', id: r.id }); }
@@ -345,6 +355,8 @@ function renderRoom(body, r) {
     <div class="sec">바닥</div>
     <div class="row">${num('천장 높이 (비우면 층 기본)', 'ceilH', r.ceilH || '')}</div>
     <div class="row">${num('단 높이 (mm)', 'lift', r.lift || 0)}<label class="fld">마감<select data-r="finish">${Object.entries(FLOORS).map(([k, n]) => `<option value="${k}" ${r.finish === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label><label class="fld">색<input type="color" data-r="color" value="${/^#[0-9a-f]{6}$/i.test(r.color) ? r.color : '#c9c3b8'}"></label></div>
+    <div class="btns"><button class="btn" data-ra="tex">${r.tex ? '바닥 이미지 바꾸기' : '바닥에 이미지(텍스처) 입히기'}</button>${r.tex ? '<button class="btn" data-ra="texX">텍스처 지우기</button>' : ''}</div>
+    ${r.tex ? `<div class="row">${num('이미지 한 장 크기 (mm)', 'texSize', r.tex.size || 600, 50)}</div>` : ''}
     <div class="sec">구배 (물빠짐 경사) · 직선 구배라 타일이 그대로</div>
     <div class="chips">${[0.5, 1, 1.5, 2, 3].map((v) => `<button data-pct="${v}" aria-pressed="${Math.abs(v - pct) < 0.01}">${v}%</button>`).join('')}</div>
     <div class="row"><label class="fld">경사 %<input type="number" id="swPct" step="0.1" min="0.1" max="25" value="${pct}"></label><label class="fld">각도 °<input type="number" id="swDeg" step="0.05" min="0.05" max="14" value="${Math.round((Math.atan(pct / 100) * 180) / Math.PI * 1000) / 1000}"></label><label class="fld">1m 당<input disabled value="${Math.round(pct * 10)}mm"></label></div>
@@ -368,7 +380,7 @@ function renderRoom(body, r) {
     <p class="hint">2D 에서 공간을 고르면 꼭짓점(동그라미)을 끌어 모양을 바꾸고, 공간 안쪽을 끌면 공간째(안의 기물까지) 옮겨요.</p>`;
   const live = () => { engine.rebuildStructure(); };
   $$('[data-r]', body).forEach((i) => { const k = i.dataset.r; if (k === 'color') { i.oninput = () => { r.color = i.value; live(); }; i.onchange = () => commit(); return; } i.onchange = () => { r[k] = k === 'name' ? i.value.trim() || r.name : i.value; live(); commit(); renderProps(); }; });
-  $$('[data-k]', body).forEach((i) => (i.onchange = () => { const v = Math.round(+i.value || 0); if (i.dataset.k === 'ceilH') { if (v >= 1800) r.ceilH = Math.min(12000, v); else delete r.ceilH; } else r.lift = clamp(v, 0, 3000); live(); commit(); renderProps(); }));
+  $$('[data-k]:not([data-k=texSize])', body).forEach((i) => (i.onchange = () => { const v = Math.round(+i.value || 0); if (i.dataset.k === 'ceilH') { if (v >= 1800) r.ceilH = Math.min(12000, v); else delete r.ceilH; } else r.lift = clamp(v, 0, 3000); live(); commit(); renderProps(); }));
   $$('[data-kind]', body).forEach((b) => (b.onclick = () => { const old = r.kind; r.kind = b.dataset.kind; if (!r.name || /^공간 \d+$/.test(r.name) || r.name === old) r.name = level().rooms.some((q) => q !== r && q.name === r.kind) ? `${r.kind} ${level().rooms.filter((q) => q.kind === r.kind).length}` : r.kind; commit(); renderProps(); }));
   const applyPct = (v) => { SW.pct = clamp(Math.round((+v || 1) * 100) / 100, 0.1, 25); if (r.slope && r.slope.drain) { r.slope.deg = SL.pct2deg(SW.pct); live(); commit(); renderProps(); } else startPick(r, 'pt'); };
   $$('[data-pct]', body).forEach((b) => (b.onclick = () => applyPct(+b.dataset.pct)));
@@ -380,7 +392,9 @@ function renderRoom(body, r) {
   $$('[data-fd]', body).forEach((b) => (b.onclick = () => { r.layers.splice(+b.dataset.fd, 1); if (!r.layers.length) delete r.layers; commit(); renderProps(); }));
   $$('[data-lyr]', body).forEach((b) => (b.onclick = () => { r.vis ||= {}; const k = b.dataset.lyr; r.vis[k] = r.vis[k] === false; if (Object.values(r.vis).every((v) => v !== false)) delete r.vis; engine.applyFocus(); plan.redraw(); commit(); renderProps(); }));
   $$('[data-dr]', body).forEach((b) => (b.onclick = () => { const it = L.items.find((q) => q.id === b.dataset.dr); if (it) setDrain(r, it, `"${it.name}" 쪽으로 구배를 잡았어요`); renderProps(); }));
-  $$('[data-ra]', body).forEach((b) => (b.onclick = () => {
+  { const ts = $('[data-k=texSize]', body); if (ts) ts.onchange = () => { r.tex.size = clamp(+ts.value || 600, 50, 20000); engine.rebuildStructure(); commit(); }; }
+  $$('[data-ra=tex],[data-ra=texX]', body).forEach((b) => (b.onclick = async (e) => { e.stopImmediatePropagation(); if (b.dataset.ra === 'texX') delete r.tex; else { const img = await pickTexture(); if (!img) return; r.tex = { img, size: (r.tex && r.tex.size) || 600 }; } engine.rebuildStructure(); commit(); renderProps(); }));
+  $$('[data-ra]:not([data-ra=tex]):not([data-ra=texX])', body).forEach((b) => (b.onclick = () => {
     const a = b.dataset.ra;
     if (a === 'pt' || a === 'line') { if (SW.pick === a) endPick(); else startPick(r, a); renderProps(); }
     if (a === 'fit') fitItems(bad.map((x) => x.id));
@@ -656,6 +670,12 @@ function renderView(body) {
 }
 
 
+/** 이미지 파일 → 1024px 이하 JPEG dataURL (프로젝트에 함께 저장 · 동기화) */
+async function pickTexture() {
+  const f = (await openFiles({ title: '텍스처 이미지', extensions: ['png', 'jpg', 'jpeg', 'webp'] }))[0]; if (!f) return null;
+  const url = URL.createObjectURL(new Blob([f.data])), img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; }).catch(() => null); URL.revokeObjectURL(url); if (!img) { toast('이미지를 읽지 못했어요'); return null; }
+  const k = Math.min(1, 1024 / Math.max(img.width, img.height)), c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k)); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.85);
+}
 /* ----- 댓글 · 핀 (기존 앱 v7) ----- */
 const pinsHere = () => (S.model.comments || []).filter((c) => (c.lv ?? 0) === S.model.activeLevel);
 function syncPins() { if (!S.model || !plan) return; const P = pinsHere(); plan.pins = P; engine.setPins(P); }
@@ -676,6 +696,32 @@ function renderCmt(body) {
   $$('[data-cre]', body).forEach((b) => (b.onclick = () => askText((t) => { const c = find(b.dataset.cre); (c.re ||= []).push({ text: t, by: me, t: Date.now() }); commit(); renderProps(); })));
   $$('[data-cdn]', body).forEach((b) => (b.onclick = () => { const c = find(b.dataset.cdn); c.done = !c.done; commit(); renderProps(); }));
   $$('[data-cx]', body).forEach((b) => (b.onclick = () => { S.model.comments = C().filter((c) => c.id !== b.dataset.cx); commit(); renderProps(); }));
+}
+/* ----- 여러 개 고르기 · 정렬 · 간격 (기존 앱 v9) ----- */
+const multiItems = () => level().items.filter((q) => (S.multi || []).includes(q.id));
+const ext = (q) => { const r = ((q.rot || 0) % 180) === 90; return { hw: (r ? q.d : q.w) / 2, hd: (r ? q.w : q.d) / 2 }; };
+function renderMulti(body) {
+  const its = multiItems(), kw = its.reduce((a, q) => a + SH.itemKw(q, S.lib), 0);
+  $('#propsTitle').textContent = `여러 개 · ${its.length}개`;
+  body.innerHTML = `<p class="hint">고른 기물 중 하나를 끌면 함께 옮겨져요. Shift+누르기로 더하고 빼요. 전력 ${kw.toFixed(1)} kW</p>
+    <div class="sec">정렬</div><div class="chips">${[['l', '왼쪽'], ['cx', '가로 가운데'], ['r', '오른쪽'], ['t', '위'], ['cy', '세로 가운데'], ['b', '아래']].map(([k, n]) => `<button data-al="${k}">${n}</button>`).join('')}</div>
+    <div class="sec">간격 같게</div><div class="chips"><button data-ds="x">가로로</button><button data-ds="y">세로로</button><button data-ds="xt">가로로 딱 붙이기</button><button data-ds="yt">세로로 딱 붙이기</button></div>
+    <div class="sec">한꺼번에</div><div class="row"><label class="fld">색<input type="color" id="muC" value="#b8bcc2"></label><label class="fld">재질<select id="muM"><option value="">그대로</option>${Object.entries(MAT_LABEL).map(([k, n]) => `<option value="${k}">${n}</option>`).join('')}</select></label></div>
+    <div class="btns"><button class="btn" data-mu="rot">묶어서 90° 돌리기</button><button class="btn" data-mu="dup">복제</button><button class="btn danger" data-mu="del">삭제</button><button class="btn" data-mu="none">고르기 풀기</button></div>`;
+  const done = (msg) => { for (const q of its) engine.moveItem(q); commit(); plan.redraw(); if (msg) toast(msg, 2000); };
+  $$('[data-al]', body).forEach((b) => (b.onclick = () => { const k = b.dataset.al, E = its.map((q) => ({ q, ...ext(q) }));
+    const v = { l: Math.min(...E.map((e) => e.q.x - e.hw)), r: Math.max(...E.map((e) => e.q.x + e.hw)), t: Math.min(...E.map((e) => e.q.y - e.hd)), b: Math.max(...E.map((e) => e.q.y + e.hd)), cx: E.reduce((a, e) => a + e.q.x, 0) / E.length, cy: E.reduce((a, e) => a + e.q.y, 0) / E.length }[k];
+    for (const e of E) { if (k === 'l') e.q.x = Math.round(v + e.hw); if (k === 'r') e.q.x = Math.round(v - e.hw); if (k === 't') e.q.y = Math.round(v + e.hd); if (k === 'b') e.q.y = Math.round(v - e.hd); if (k === 'cx') e.q.x = Math.round(v); if (k === 'cy') e.q.y = Math.round(v); } done('맞췄어요'); }));
+  $$('[data-ds]', body).forEach((b) => (b.onclick = () => { const k = b.dataset.ds, ax = k[0] === 'x' ? 'x' : 'y', hk = ax === 'x' ? 'hw' : 'hd', E = its.map((q) => ({ q, ...ext(q) })).sort((a, c) => a.q[ax] - c.q[ax]); if (E.length < 2) return;
+    const a0 = E[0].q[ax] - E[0][hk], a1 = E[E.length - 1].q[ax] + E[E.length - 1][hk], tot = E.reduce((a, e) => a + 2 * e[hk], 0), gap = k.length > 1 ? 0 : (a1 - a0 - tot) / (E.length - 1); let c = a0;
+    for (const e of E) { e.q[ax] = Math.round(c + e[hk]); c += 2 * e[hk] + gap; } done(k.length > 1 ? '딱 붙였어요' : `간격 ${Math.round(gap)} mm 로 맞췄어요`); }));
+  $('#muC').onchange = (e) => { for (const q of its) { q.color = e.target.value; engine.rebuildItem(q); } commit(); };
+  $('#muM').onchange = (e) => { if (!e.target.value) return; for (const q of its) { q.mat = e.target.value; engine.rebuildItem(q); } commit(); };
+  $$('[data-mu]', body).forEach((b) => (b.onclick = () => { const a = b.dataset.mu;
+    if (a === 'none') return plan.setMulti([]);
+    if (a === 'del') { const set = new Set(S.multi); level().items = level().items.filter((q) => !set.has(q.id)); for (const id of set) engine.removeItem(id); plan.setMulti([]); commit(); return toast(`${set.size}개를 지웠어요`); }
+    if (a === 'dup') { const n = its.map((q) => ({ ...JSON.parse(JSON.stringify(q)), id: uid('i'), x: q.x + 400, y: q.y + 400 })); level().items.push(...n); n.forEach((q) => engine.rebuildItem(q)); commit(); plan.setMulti(n.map((q) => q.id)); return; }
+    if (a === 'rot') { const cx = its.reduce((s2, q) => s2 + q.x, 0) / its.length, cy = its.reduce((s2, q) => s2 + q.y, 0) / its.length; for (const q of its) { const dx = q.x - cx, dy = q.y - cy; q.x = Math.round(cx - dy); q.y = Math.round(cy + dx); q.rot = ((q.rot || 0) + 90) % 360; } done('묶어서 돌렸어요'); } }));
 }
 /* ----- 작업 기록 ----- */
 function renderHist(body) {
@@ -1006,8 +1052,20 @@ function renderOpening(body, o) {
     <div class="row">${num('폭', 'w', o.w)}${num('높이', 'h', o.h)}${num('바닥에서', 'sill', o.sill)}</div>
     <div class="row">${num('벽 시작점에서 (가운데)', 't', o.t)}</div>
     <label class="tog">간유리 띠<input type="checkbox" data-k="frost" ${o.frost ? 'checked' : ''}></label>
+    <div class="sec">디자인 상세</div>
+    <div class="row"><label class="fld">틀 색<input type="color" data-od="frame" value="${o.frame || '#2b2d31'}"></label>${num('틀 굵기 (mm)', 'fw', o.fw ?? 50, 5).replace('data-k=', 'data-on=')}</div>
+    ${/window|full|auto|slide/.test(o.type) ? `<div class="row">${num('세로 나눔 (칸)', 'div', o.div || 1, 1).replace('data-k=', 'data-on=')}${num('가로 띠 높이 (바닥 기준, 0=없음)', 'hdiv', o.hdiv || 0, 50).replace('data-k=', 'data-on=')}</div><label class="fld">유리 색<input type="color" data-od="tint" value="${o.tint || '#bfe3f2'}"></label>` : ''}
+    ${/door/.test(o.type) ? `<label class="fld">문짝 색<input type="color" data-od="leaf" value="${o.leaf || '#d9d4ca'}"></label>` : ''}
+    ${/pass/.test(o.type) ? `<div class="row">${num('선반 깊이 (mm, 0=없음)', 'shelf', o.shelf ?? 180, 10).replace('data-k=', 'data-on=')}${num('선반 두께', 'shelfT', o.shelfT ?? 30, 5).replace('data-k=', 'data-on=')}</div>
+      <div class="row"><label class="fld">선반 쪽<select data-os="shelfSide">${[['both', '양쪽'], ['a', '앞쪽만'], ['b', '뒤쪽만']].map(([v, n]) => `<option value="${v}" ${(o.shelfSide || 'both') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label><label class="fld">선반 색<input type="color" data-od="shelfColor" value="${o.shelfColor || '#c9ced4'}"></label></div>
+      <label class="tog">배식구 둘레 틀<input type="checkbox" data-ot="pframe" ${o.pframe ? 'checked' : ''}></label>` : ''}
     <p class="hint">2D 에서 끌면 벽을 따라 움직여요.</p>
     <div class="btns"><button class="btn danger" data-a="del">삭제</button></div>`;
+  const od = () => { engine.rebuildStructure(); commit(); };
+  $$('[data-od]', body).forEach((i) => { i.oninput = () => { o[i.dataset.od] = i.value; liveStructure(); }; i.onchange = od; });
+  $$('[data-on]', body).forEach((i) => (i.onchange = () => { const v = Math.max(0, Math.round(+i.value || 0)), k = i.dataset.on; o[k] = k === 'div' ? clamp(v || 1, 1, 12) : k === 'fw' ? clamp(v, 10, 200) : v; od(); }));
+  $$('[data-os]', body).forEach((i) => (i.onchange = () => { o[i.dataset.os] = i.value; od(); }));
+  $$('[data-ot]', body).forEach((i) => (i.onchange = () => { o[i.dataset.ot] = i.checked; od(); }));
   $$('[data-k]', body).forEach((i) => (i.onchange = () => {
     const k = i.dataset.k, w = level().walls.find((q) => q.id === o.wall), L = w ? Math.hypot(w.x2 - w.x1, w.y2 - w.y1) : 1e9;
     if (k === 'type') { const d = cloud.OPDEF[i.value]; o.type = i.value; if (d) { o.h = d[1]; o.sill = d[2]; } }
@@ -1284,6 +1342,8 @@ async function boot() {
     level, lib: S.lib, style: () => engine.style, toast,
     onSelect: (sel) => setSel(sel),
     onLive: (kind, x) => { if (kind === 'structure') liveStructure(); else if (kind === 'item') { engine.moveItem(x); drainMoved(x); } else if (kind === 'item-removed') engine.removeItem(x); },
+    onMulti: (ids) => { S.multi = ids; if (ids.length && plan.tool === 'boxsel') setPlanTool('select'); if (ids.length) { engine.select(null); S.sel = null; S.panel = 'multi'; S.propsOpen = true; } else if (S.panel === 'multi') S.panel = 'props'; renderProps(); },
+    onSketch: (pts) => { const L = level(); (L.sketches ||= []).push({ id: uid('k'), pts, color: plan.skColor || '#e8467c', w: plan.skW || 3 }); commit(); },
     onRoom: (pts) => newRoom(pts),
     onLine: (pts) => { const L = level(), k = LINEKINDS[plan.lineKind] || LINEKINDS.wire; (L.lines ||= []).push({ id: uid('l'), kind: plan.lineKind || 'wire', pts, ...(k.z === 'below' ? { depth: LOPT.depth } : {}), ...(k.z === 'hang' ? { off: LOPT.off } : {}) }); engine.rebuildStructure(); commit(); toast(`${k.name} ${Math.round(pts.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]), 0) / 100) / 10}m 를 그렸어요 · 이어서 다음 선을 그려도 돼요`, 3000); },
     onDim: (d) => { const L = level(); (L.dims ||= []).push({ id: uid('d'), ...d }); engine.rebuildStructure(); commit(); toast(`${Math.round(Math.hypot(d.x2 - d.x1, d.y2 - d.y1)).toLocaleString()} mm · 지우기 도구로 누르면 지워져요`, 2500); },
@@ -1338,7 +1398,11 @@ async function boot() {
     if (engine.design.active) return;
     if (engine.walker.active) return;
     const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase(), it = selItem();
-    if (mod && k === 'c' && it) { S.clip = JSON.parse(JSON.stringify(it)); toast('복사했어요 · Ctrl+V 로 붙여넣기'); return; }
+    if ((S.multi || []).length && !mod && (e.key === 'Delete' || e.key === 'Backspace')) { const b = $('[data-mu=del]'); if (b) b.click(); return; }
+    if ((S.multi || []).length && mod && k === 'c') { S.clipM = multiItems().map((q) => JSON.parse(JSON.stringify(q))); S.clip = null; toast(`${S.clipM.length}개를 복사했어요`); return; }
+    if (mod && k === 'v' && S.clipM && !S.clip) { e.preventDefault(); const n = S.clipM.map((q) => ({ ...JSON.parse(JSON.stringify(q)), id: uid('i'), x: q.x + 400, y: q.y + 400 })); S.clipM = n.map((q) => JSON.parse(JSON.stringify(q))); level().items.push(...n); n.forEach((q) => engine.rebuildItem(q)); commit(); plan.setMulti(n.map((q) => q.id)); return; }
+    if (mod && k === 'a' && S.pane !== '3d') { e.preventDefault(); plan.setMulti(level().items.filter((q) => !q.hidden).map((q) => q.id)); return; }
+    if (mod && k === 'c' && it) { S.clipM = null; S.clip = JSON.parse(JSON.stringify(it)); toast('복사했어요 · Ctrl+V 로 붙여넣기'); return; }
     if (mod && (k === 'v' || k === 'd') && (k === 'd' ? it : S.clip)) { e.preventDefault(); const src = k === 'd' ? it : S.clip, n = { ...JSON.parse(JSON.stringify(src)), id: uid('i'), x: src.x + 300, y: src.y + 300 }; if (k === 'v') S.clip = { ...S.clip, x: n.x, y: n.y }; level().items.push(n); engine.rebuildItem(n); commit(); setSel({ kind: 'item', id: n.id }); return; }
     if (!mod && it && k === 'r') { patchSel({ rot: ((it.rot || 0) + (e.shiftKey ? 270 : 90)) % 360 }, false); renderProps(); return; }
     if (!mod && it && /^arrow/.test(k)) { e.preventDefault(); const st = e.shiftKey ? 100 : 10, d = { arrowleft: [-st, 0], arrowright: [st, 0], arrowup: [0, -st], arrowdown: [0, st] }[k]; patchSel({ x: it.x + d[0], y: it.y + d[1] }, false); return; }
@@ -1346,6 +1410,7 @@ async function boot() {
     if (!mod && !e.altKey && k === 'm') { setPlanTool('measure'); return; }
     if (!mod && !e.altKey && k === 'h') { ACT.hist(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel) plan.erase(S.sel);
+    if (e.key === 'Escape' && (S.multi || []).length) { plan.setMulti([]); return; }
     if (e.key === 'Escape') { if (SW.pick) { endPick(); renderProps(); return; } setSel(null); closeDrawer(); }
   });
   // 파일을 끌어다 놓기
@@ -1359,7 +1424,7 @@ async function boot() {
   let first = null; try { const id = lib2.lastId(); first = id && (await lib2.loadLocal(id)); } catch (e) { console.warn(e); }
   await setModel(first || emptyProject());
   window.__goBack = goBack; window.BYR = { S, engine, plan, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
-  showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
+  initLang(); showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
   const intro = $('#intro'), wait = Math.max(0, 1400 - performance.now()); setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
   // 계정 동기화: 켤 때 · 1분마다 · 앱으로 돌아올 때
   const sync = () => { if (!cloud.session() || document.visibilityState === 'hidden') return; lib2.syncNow().then(reloadIfChanged).catch(() => {}); };

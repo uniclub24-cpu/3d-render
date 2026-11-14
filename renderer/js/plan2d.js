@@ -114,13 +114,19 @@ export class Plan2D {
       if (this.tool === 'wall') { act = { wall: true, start, a: this.snapPoint(p) }; return; }
       if (this.tool === 'roomRect' || this.tool === 'soffitRect') { const a0 = this.snapPoint(p); this.rrect = [a0, a0]; act = { rect: true, start }; return; }
       if (this.tool === 'measure') { const a0 = this.snapPoint(p); this.mtmp = [a0, a0]; act = { meas: true, start }; return; }
+      if (this.tool === 'sketch') { this.skp = [p]; act = { sk: true, start }; return; } /* 낙서 */
+      if (this.tool === 'boxsel' || (this.tool === 'select' && e.shiftKey && !this.pickAt(p))) { this.brect = [p, p]; act = { box: true, start, add: e.shiftKey }; return; } /* 여러 개 고르기: 끌어서 사각형 */
       if (this.tool !== 'select') { act = { tap: true, start }; return; }
       const rv = this.hitRoomVtx(p); if (rv) { act = this._dragRoomVtx(rv.r, rv.k, start); return; }
       // 고르기: 벽 끝점 → 문/창 → 기물 → 벽 → 빈 곳(화면 이동)
+      { const rh = this._rotHandle(); if (rh && Math.hypot(p.x - rh.x, p.y - rh.y) < 14 / this.view.sc) { act = this._dragRot(rh.it, start); return; } } /* 링 회전 */
       const end = this.sel && this.sel.kind === 'wall' ? this.hitEnd(p) : null;
       if (end) { const mates = this.ends().filter((q) => Math.hypot(q.x - end.x, q.y - end.y) < 1); act = this._dragEnds(mates, start); return; }
       const hit = this.pickAt(p);
+      if (hit && hit.kind === 'item' && this.multi && this.multi.includes(hit.id) && this.multi.length > 1) { act = this._dragGroup(p, start); return; }
+      if (hit && hit.kind === 'item' && e.shiftKey) { const m = new Set(this.multi || (this.sel && this.sel.kind === 'item' ? [this.sel.id] : [])); m.has(hit.id) ? m.delete(hit.id) : m.add(hit.id); this.setMulti([...m]); act = null; return; }
       if (!hit) { act = { pan: true, start, last: start, tapEmpty: true }; return; }
+      if (this.multi && this.multi.length) this.setMulti([]);
       const was = !!(this.sel && this.sel.id === hit.id); if (!was) this.select(hit);
       if (hit.kind === 'item') act = this._dragItem(this.L.items.find((i) => i.id === hit.id), p, start);
       else if (hit.kind === 'opening') act = this._dragOpening(this.L.openings.find((o) => o.id === hit.id), start);
@@ -133,12 +139,14 @@ export class Plan2D {
       const p = this.evMm(e);
       if (this.tool === 'roomPoly' || this.tool === 'pick' || this.tool === 'line') { this.hover = this.tool === 'pick' ? p : this.snapPoint(p, this.rpts && this.rpts[this.rpts.length - 1]); this.redraw(); }
       if (act && act.rect) { const b = this.snapPoint(p); this.rrect = [this.rrect[0], b]; this.redraw(); return; }
+      if (act && act.sk) { const l = this.skp[this.skp.length - 1]; if (Math.hypot(p.x - l.x, p.y - l.y) > 3 / this.view.sc) { this.skp.push(p); this.redraw(); } return; }
+      if (act && act.box) { this.brect = [this.brect[0], p]; this.redraw(); return; }
       if (act && act.meas) { this.mtmp = [this.mtmp[0], this.snapPoint(p, this.mtmp[0])]; this.redraw(); return; }
       if (this.tool === 'wall') { const drag = act && act.wall && Math.hypot(e.clientX - act.start.x, e.clientY - act.start.y) > 6; this.dragFrom = drag ? act.a : null; this.hover = this.snapPoint(p, this.dragFrom || (this.chain && this.chain.last)); this.redraw(); }
       if (!act) return;
       const moved = Math.hypot(e.clientX - act.start.x, e.clientY - act.start.y) > 6; act.moved ||= moved;
       if (act.pan) { this.view.ox -= (e.clientX - act.last.x) / this.view.sc; this.view.oy -= (e.clientY - act.last.y) / this.view.sc; act.last = { x: e.clientX, y: e.clientY }; this.redraw(); return; }
-      if (act.move && act.moved) { act.move(p); this.redraw(); }
+      if (act.move && act.moved) { act.move(p, e); this.redraw(); }
     });
     const up = (e) => {
       pts.delete(e.pointerId); if (pinch) { if (pts.size < 2) pinch = null; act = null; return; }
@@ -152,6 +160,9 @@ export class Plan2D {
         this.redraw(); return;
       }
       if (a.rect) { const [q0, q1] = this.rrect; this.rrect = null; this.redraw(); if (Math.abs(q1.x - q0.x) < 300 || Math.abs(q1.y - q0.y) < 300) { this.api.toast('끌어서 사각형을 그려 주세요 (30cm 이상)'); return; } const x0 = Math.min(q0.x, q1.x), x1 = Math.max(q0.x, q1.x), y0 = Math.min(q0.y, q1.y), y1 = Math.max(q0.y, q1.y), pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map((q) => q.map(Math.round)); if (this.tool === 'soffitRect') this.api.onSoffit(pts); else this.api.onRoom(pts); return; }
+      if (a.sk) { const P = this.skp; this.skp = null; this.redraw(); if (P.length > 1 && this.api.onSketch) this.api.onSketch(P.map((q) => [Math.round(q.x), Math.round(q.y)])); return; }
+      if (a.box) { const [q0, q1] = this.brect; this.brect = null; const x0 = Math.min(q0.x, q1.x), x1 = Math.max(q0.x, q1.x), y0 = Math.min(q0.y, q1.y), y1 = Math.max(q0.y, q1.y);
+        const ids = this.L.items.filter((it) => !it.hidden && it.x >= x0 && it.x <= x1 && it.y >= y0 && it.y <= y1 && (!this.focus || this._inFocus(it))).map((it) => it.id); this.setMulti(a.add ? [...new Set([...(this.multi || []), ...ids])] : ids); return; }
       if (a.meas) { const [q0, q1] = this.mtmp; this.mtmp = null; this.redraw(); if (Math.hypot(q1.x - q0.x, q1.y - q0.y) < 50) { this.api.toast('재고 싶은 두 점 사이를 끌어 주세요'); return; } this.api.onDim({ x1: Math.round(q0.x), y1: Math.round(q0.y), x2: Math.round(q1.x), y2: Math.round(q1.y) }); return; }
       if (a.tap && !a.moved && this.tool === 'roomPoly') { const q = this.snapPoint(p, this.rpts && this.rpts[this.rpts.length - 1]), R = (this.rpts ||= []);
         const first = R[0], tol = SNAP_PX / this.view.sc, last = R[R.length - 1];
@@ -162,7 +173,7 @@ export class Plan2D {
       if (a.tap && !a.moved && this.tool === 'line') { const R2 = (this.lpts ||= []), q = this.snapPoint(p, R2[R2.length - 1]), last = R2[R2.length - 1];
         if (last && Math.hypot(q.x - last.x, q.y - last.y) < Math.max(1, 6 / this.view.sc)) { if (R2.length >= 2) this.api.onLine(R2.map((v) => [Math.round(v.x), Math.round(v.y)])); this.lpts = null; } else R2.push(q); this.redraw(); return; }
       if (a.tap && !a.moved && this.tool === 'pick') { if (this.picker) this.picker(p, this.hitItem(p)); return; }
-      if (a.tap && !a.moved) { if (OPDEF[this.tool]) this.addOpening(this.tool, p); if (this.tool === 'erase') { const ln = this.hitLine(p); if (ln) { this.L.lines = this.L.lines.filter((q) => q !== ln); this.api.onLive('structure'); this.api.onChange('배관 · 전선을 지웠어요'); return; } const d = this.hitDim(p), sf = !d && this.hitSoffit(p); if (d) { this.L.dims = this.L.dims.filter((q) => q !== d); this.api.onLive('structure'); this.api.onChange('치수를 지웠어요'); } else if (sf) { this.L.soffits = this.L.soffits.filter((q) => q !== sf); this.api.onLive('structure'); this.api.onChange('천장 가벽을 지웠어요'); } else this.erase(this.pickAt(p)); } return; }
+      if (a.tap && !a.moved) { if (OPDEF[this.tool]) this.addOpening(this.tool, p); if (this.tool === 'erase') { const tol = 10 / this.view.sc, sk = (this.L.sketches || []).find((k) => k.pts.some((q) => Math.hypot(q[0] - p.x, q[1] - p.y) < tol)); if (sk) { this.L.sketches = this.L.sketches.filter((k) => k !== sk); this.api.onChange('낙서를 지웠어요'); this.redraw(); return; } const ln = this.hitLine(p); if (ln) { this.L.lines = this.L.lines.filter((q) => q !== ln); this.api.onLive('structure'); this.api.onChange('배관 · 전선을 지웠어요'); return; } const d = this.hitDim(p), sf = !d && this.hitSoffit(p); if (d) { this.L.dims = this.L.dims.filter((q) => q !== d); this.api.onLive('structure'); this.api.onChange('치수를 지웠어요'); } else if (sf) { this.L.soffits = this.L.soffits.filter((q) => q !== sf); this.api.onLive('structure'); this.api.onChange('천장 가벽을 지웠어요'); } else this.erase(this.pickAt(p)); } return; }
       if (a.pan) { if (a.tapEmpty && !a.moved) this.select(null); return; }
       if (a.done) a.done(a.moved);
     };
@@ -182,8 +193,30 @@ export class Plan2D {
   }
   _dragItem(it, p0, start) {
     const ox = it.x, oy = it.y;
-    return { start, move: (p) => { it.x = Math.round((ox + p.x - p0.x) / 10) * 10; it.y = Math.round((oy + p.y - p0.y) / 10) * 10; this.api.onLive('item', it); },
-      done: (m) => m && this.api.onChange(), cancel: () => { it.x = ox; it.y = oy; this.api.onLive('item', it); } };
+    return { start, move: (p) => { let x = Math.round((ox + p.x - p0.x) / 10) * 10, y = Math.round((oy + p.y - p0.y) / 10) * 10; const g = this._guides(it, x, y); it.x = g.x; it.y = g.y; this.api.onLive('item', it); },
+      done: (m) => { this.guides = null; this.redraw(); m && this.api.onChange(); }, cancel: () => { this.guides = null; it.x = ox; it.y = oy; this.api.onLive('item', it); } };
+  }
+  /** 정렬선: 다른 기물의 가장자리 · 가운데와 맞으면 붙이고 선을 보여 준다 */
+  _guides(it, x, y) {
+    if (this.noGuides) { this.guides = null; return { x, y }; }
+    const tol = 8 / this.view.sc, ext = (q, qx, qy) => { const r = ((q.rot || 0) % 180) === 90, hw = (r ? q.d : q.w) / 2, hd = (r ? q.w : q.d) / 2; return { xs: [qx - hw, qx, qx + hw], ys: [qy - hd, qy, qy + hd] }; };
+    const me = ext(it, x, y), G = []; let bx = null, by = null;
+    for (const o of this.L.items) { if (o === it || o.hidden || (this.multi && this.multi.includes(o.id))) continue; const e = ext(o, o.x, o.y);
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) { const dx = e.xs[j] - me.xs[i], dy = e.ys[j] - me.ys[i];
+        if (Math.abs(dx) < tol && (!bx || Math.abs(dx) < Math.abs(bx.d))) bx = { d: dx, v: e.xs[j], o }; if (Math.abs(dy) < tol && (!by || Math.abs(dy) < Math.abs(by.d))) by = { d: dy, v: e.ys[j], o }; } }
+    if (bx) { x += bx.d; G.push({ x: bx.v, y0: Math.min(y, bx.o.y) - 600, y1: Math.max(y, bx.o.y) + 600 }); } if (by) { y += by.d; G.push({ y: by.v, x0: Math.min(x, by.o.x) - 600, x1: Math.max(x, by.o.x) + 600 }); }
+    this.guides = G.length ? G : null; return { x: Math.round(x), y: Math.round(y) };
+  }
+  /** 고른 기물 앞쪽 손잡이 (끌어서 돌리기 · 15° 씩 · Shift 는 자유) */
+  _rotHandle() { if (!this.sel || this.sel.kind !== 'item' || this.tool !== 'select') return null; const it = this.L.items.find((q) => q.id === this.sel.id); if (!it) return null; const a = ((it.rot || 0) * Math.PI) / 180, r = it.d / 2 + 28 / this.view.sc; return { it, x: it.x - Math.sin(a) * r, y: it.y + Math.cos(a) * r, a }; }
+  _dragRot(it, start) { const r0 = it.rot || 0; return { start, move: (p, e) => { let d = (Math.atan2(-(p.x - it.x), p.y - it.y) * 180) / Math.PI; if (!(e && e.shiftKey)) d = Math.round(d / 15) * 15; it.rot = Math.round(((d % 360) + 360) % 360); this.rotInfo = it.rot; this.api.onLive('item', it); },
+    done: (m) => { this.rotInfo = null; this.redraw(); m && this.api.onChange('돌렸어요'); }, cancel: () => { it.rot = r0; this.rotInfo = null; this.api.onLive('item', it); } }; }
+  setMulti(ids) { this.multi = ids && ids.length ? ids : null; if (this.multi && this.multi.length === 1) { const id = this.multi[0]; this.multi = null; this.select({ kind: 'item', id }); } else { this.redraw(); if (this.api.onMulti) this.api.onMulti(this.multi || []); } }
+  _inFocus(it) { let c = false; const P = this.focus; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > it.y) !== (P[j][1] > it.y) && it.x < ((P[j][0] - P[i][0]) * (it.y - P[i][1])) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; return c; }
+  _dragGroup(p0, start) {
+    const its = this.L.items.filter((q) => this.multi.includes(q.id)), o = its.map((q) => [q.x, q.y]);
+    return { start, move: (p) => { const dx = Math.round((p.x - p0.x) / 10) * 10, dy = Math.round((p.y - p0.y) / 10) * 10; its.forEach((q, i) => { q.x = o[i][0] + dx; q.y = o[i][1] + dy; this.api.onLive('item', q); }); },
+      done: (m) => m && this.api.onChange('옮겼어요'), cancel: () => its.forEach((q, i) => { q.x = o[i][0]; q.y = o[i][1]; this.api.onLive('item', q); }) };
   }
   _dragOpening(o, start) {
     const w = this.L.walls.find((q) => q.id === o.wall), t0 = o.t;
@@ -267,6 +300,14 @@ export class Plan2D {
     // 배관 · 전선 · 덕트 (종류별 색 · 굵기)
     for (const l of L.lines || []) { const k = LINEKINDS[l.kind]; if (!k || !l.pts || l.pts.length < 2) continue; g.save(); g.strokeStyle = l.color || k.color; g.lineWidth = Math.max(2 * px1, Math.min(l.w || k.w, 300)); g.globalAlpha = 0.85; if (k.z === 'below') g.setLineDash([10 * px1, 6 * px1]); g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath(); l.pts.forEach((q, i) => (i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]))); g.stroke(); g.restore(); }
     if (this.tool === 'line' && this.lpts && this.lpts.length) { const k = LINEKINDS[this.lineKind] || LINEKINDS.wire, R2 = [...this.lpts, ...(this.hover ? [this.hover] : [])]; g.save(); g.strokeStyle = k.color; g.lineWidth = Math.max(3 * px1, k.w); g.globalAlpha = 0.7; g.beginPath(); R2.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.stroke(); g.restore(); }
+    { const rh = this._rotHandle(); if (rh) { const it = rh.it; g.save(); g.strokeStyle = '#2f7df6'; g.fillStyle = '#fff'; g.lineWidth = 2 * px1; g.beginPath(); g.moveTo(it.x - Math.sin(rh.a) * it.d / 2, it.y + Math.cos(rh.a) * it.d / 2); g.lineTo(rh.x, rh.y); g.stroke(); g.beginPath(); g.arc(rh.x, rh.y, 9 * px1, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.beginPath(); g.arc(rh.x, rh.y, 4.5 * px1, -2.2, 1.4); g.stroke(); if (this.rotInfo != null) { g.fillStyle = '#2f7df6'; g.font = `600 ${13 * px1}px system-ui`; g.textAlign = 'left'; g.fillText(this.rotInfo + '°', rh.x + 14 * px1, rh.y + 4 * px1); } g.restore(); } }
+    // 낙서 (2D 메모 그림)
+    for (const k of [...(L.sketches || []), ...(this.skp ? [{ pts: this.skp.map((q) => [q.x, q.y]), color: this.skColor || '#e8467c', w: this.skW || 3 }] : [])]) { if (!k.pts || k.pts.length < 2) continue; g.save(); g.strokeStyle = k.color || '#e8467c'; g.lineWidth = (k.w || 3) * px1; g.lineCap = g.lineJoin = 'round'; g.beginPath(); k.pts.forEach((q, i) => (i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]))); g.stroke(); g.restore(); }
+    // 여러 개 고르기 · 정렬선
+    if (this.multi) for (const id of this.multi) { const it = this.L.items.find((q) => q.id === id); if (!it) continue; g.save(); g.translate(it.x, it.y); g.rotate(((it.rot || 0) * Math.PI) / 180); g.strokeStyle = '#ff9f0a'; g.lineWidth = 2.5 * px1; g.setLineDash([6 * px1, 4 * px1]); g.strokeRect(-it.w / 2 - 30, -it.d / 2 - 30, it.w + 60, it.d + 60); g.restore(); }
+    if (this.brect) { const [a, b] = this.brect; g.save(); g.fillStyle = 'rgba(255,159,10,.10)'; g.strokeStyle = '#ff9f0a'; g.lineWidth = 1.5 * px1; g.setLineDash([6 * px1, 4 * px1]); g.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y)); g.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y)); g.restore(); }
+    if (this.guides) { g.save(); g.strokeStyle = '#e8467c'; g.lineWidth = 1.2 * px1; g.setLineDash([5 * px1, 4 * px1]); for (const q of this.guides) { g.beginPath(); if (q.x != null) { g.moveTo(q.x, q.y0); g.lineTo(q.x, q.y1); } else { g.moveTo(q.x0, q.y); g.lineTo(q.x1, q.y); } g.stroke(); } g.restore(); }
     // 댓글 핀
     if (this.pins) this.pins.forEach((c, i) => { g.save(); g.fillStyle = c.done ? '#7c8794' : '#ff6b3d'; g.strokeStyle = '#fff'; g.lineWidth = 2 * px1; g.beginPath(); g.arc(c.x, c.y - 26 * px1, 13 * px1, 0, Math.PI * 2); g.moveTo(c.x - 7 * px1, c.y - 18 * px1); g.lineTo(c.x, c.y); g.lineTo(c.x + 7 * px1, c.y - 18 * px1); g.fill(); g.stroke();
       g.fillStyle = '#fff'; g.font = `700 ${13 * px1}px system-ui`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(i + 1), c.x, c.y - 26 * px1); g.restore(); });

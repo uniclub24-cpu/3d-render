@@ -5,6 +5,13 @@ import { material, floorMaterial, MAT_TEX } from './materials.js';
 import { slopeFrame, slopePieces, slopeH } from './slope.js';
 
 export const MM = 0.001;
+/** 텍스처 입히기: tex = { img(dataURL), size(mm, 한 장 크기 · 바닥용), rot } → 반복되는 PBR 재질 */
+const texMats = new Map();
+export function texMaterial(tex, rep = 1) {
+  if (!tex || !tex.img) return null; const k = tex.img.length + ':' + tex.img.slice(-64) + ':' + rep.toFixed(4); if (texMats.has(k)) return texMats.get(k);
+  const t = new THREE.TextureLoader().load(tex.img); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); t.anisotropy = 4;
+  const m = new THREE.MeshStandardMaterial({ map: t, roughness: tex.rough ?? 0.7, metalness: 0 }); texMats.set(k, m); return m;
+}
 const FRAME = '#2b2d31';
 
 /* ---------- 부품(각기둥 · 면 묶음) → 지오메트리 ---------- */
@@ -84,6 +91,7 @@ export function buildItem(it, ctx) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(it.w * MM, it.h * MM, it.d * MM), material(MAT_TEX[it.mat] || 'plain', it.color || '#b8bcc2'));
     m.position.y = (it.h * MM) / 2; m.castShadow = m.receiveShadow = true; g.add(m);
   }
+  if (it.tex && it.tex.img) { const tm = texMaterial(it.tex, it.tex.rep || 1); g.traverse((o) => { if (o.isMesh && (!it.tex.main || !o.userData.own)) o.material = tm; }); } /* 텍스처 입히기 */
   if (it.light && it.light.on) g.add(...makeLight(it));
   placeItem(g, it, ctx.zOf ? ctx.zOf(it) : it.elev);
   return g;
@@ -114,14 +122,14 @@ export function buildWalls(level) {
     // 다른 벽과 꺾여 만나는 끝은 두께 절반만큼 늘려 모서리를 채운다
     const e0 = corner(w.x1, w.y1, w) ? t / 2 : 0, e1 = corner(w.x2, w.y2, w) ? t / 2 : 0;
     const ops = level.openings.filter((o) => o.wall === w.id).map((o) => ({ o, a: Math.max(0, o.t - o.w / 2) * MM, b: Math.min(len, o.t + o.w / 2) * MM, y0: Math.max(0, o.sill) * MM, y1: Math.min(w.h, o.sill + o.h) * MM })).filter((q) => q.b - q.a > 0.02).sort((p, q) => p.a - q.a);
-    const solid = [], frame = [], glass = [], frost = [], leaf = [], steel = [];
+    const solid = [], frost = [], FR = new Map(), LF = new Map(), GL = new Map(), ST = new Map(), put = (M, k, v) => { if (!M.has(k)) M.set(k, []); M.get(k).push(v); }; /* 색마다 묶기 (배식구 · 통창 디자인 상세) */
     let u = -e0;
     for (const q of ops) {
       if (q.a > u + 1e-4) solid.push(boxAt(u, q.a, 0, H, -t / 2, t / 2));
       if (q.y0 > 0.001) solid.push(boxAt(q.a, q.b, 0, q.y0, -t / 2, t / 2));
       if (q.y1 < H - 0.001) solid.push(boxAt(q.a, q.b, q.y1, H, -t / 2, t / 2));
-      const f = 0.05, ty = q.o.type;
-      if (ty !== 'arch' && ty !== 'pass') { // 틀
+      const o = q.o, f = (o.fw ?? 50) * MM, ty = o.type, fc = o.frame || FRAME, frame = { push: (...b) => b.forEach((x) => put(FR, fc, x)) }, glass = { push: (...b) => b.forEach((x) => put(GL, o.tint || '#bfe3f2', x)) }, leaf = { push: (...b) => b.forEach((x) => put(LF, o.leaf || '#d9d4ca', x)) }, steel = { push: (...b) => b.forEach((x) => put(ST, o.shelfColor || '#c9ced4', x)) };
+      if ((ty !== 'arch' && ty !== 'pass') || o.pframe) { // 틀
         frame.push(boxAt(q.a, q.a + f, q.y0, q.y1, -t / 2 - 0.01, t / 2 + 0.01), boxAt(q.b - f, q.b, q.y0, q.y1, -t / 2 - 0.01, t / 2 + 0.01), boxAt(q.a, q.b, q.y1 - f, q.y1, -t / 2 - 0.01, t / 2 + 0.01));
         if (q.y0 > 0.001) frame.push(boxAt(q.a, q.b, q.y0, q.y0 + f, -t / 2 - 0.01, t / 2 + 0.01));
       }
@@ -132,20 +140,22 @@ export function buildWalls(level) {
           if (a > gy0) glass.push(boxAt(gx0, gx1, gy0, a, -0.006, 0.006)); if (b < gy1) glass.push(boxAt(gx0, gx1, b, gy1, -0.006, 0.006)); if (b > a) frost.push(boxAt(gx0, gx1, a, b, -0.007, 0.007)); }
         else glass.push(boxAt(gx0, gx1, gy0, gy1, -0.006, 0.006));
         if (ty === 'auto' || ty === 'slide') frame.push(boxAt((gx0 + gx1) / 2 - 0.02, (gx0 + gx1) / 2 + 0.02, gy0, gy1, -0.02, 0.02));
+        const nd = Math.max(1, Math.round(o.div || 1)), mw = Math.max(0.02, f * 0.7); for (let k = 1; k < nd; k++) { const x = gx0 + ((gx1 - gx0) * k) / nd; frame.push(boxAt(x - mw / 2, x + mw / 2, gy0, gy1, -0.025, 0.025)); } /* 통창 세로 나눔 */
+        if (o.hdiv && o.hdiv > 0) { const y = Math.min(gy1 - 0.05, q.y0 + o.hdiv * MM); if (y > gy0 + 0.05) frame.push(boxAt(gx0, gx1, y - mw / 2, y + mw / 2, -0.025, 0.025)); } /* 가로 띠 (欄間) */
       }
       if (ty === 'door1') leaf.push(boxAt(gx0, gx1, gy0, gy1, -0.02, 0.02));
       if (ty === 'door2') leaf.push(boxAt(gx0, (gx0 + gx1) / 2 - 0.004, gy0, gy1, -0.02, 0.02), boxAt((gx0 + gx1) / 2 + 0.004, gx1, gy0, gy1, -0.02, 0.02));
-      if (ty === 'pass' || ty === 'slidepass') steel.push(boxAt(q.a - 0.03, q.b + 0.03, q.y0 - 0.03, q.y0, -t / 2 - 0.18, t / 2 + 0.18)); // 배식 선반
+      if ((ty === 'pass' || ty === 'slidepass') && o.shelf !== 0) { const sd = (o.shelf ?? 180) * MM, sa = o.shelfSide || 'both'; steel.push(boxAt(q.a - 0.03, q.b + 0.03, q.y0 - (o.shelfT ?? 30) * MM, q.y0, sa === 'b' ? -t / 2 : -t / 2 - sd, sa === 'a' ? t / 2 : t / 2 + sd)); } // 배식 선반 (깊이 · 쪽 · 두께 · 색)
       u = q.b;
     }
     if (L + e1 > u + 1e-4) solid.push(boxAt(u, L + e1, 0, H, -t / 2, t / 2));
     const g = new THREE.Group(); g.name = '벽'; g.userData.wallId = w.id;
     g.position.set(w.x1 * MM, 0, w.y1 * MM); g.rotation.y = -Math.atan2(w.y2 - w.y1, w.x2 - w.x1);
     if (solid.length) { const tex = MAT_TEX[w.finish] || 'plain', glass = tex === 'glass'; g.add(meshOf(solid, glass ? material('glass', w.color || '#bfe3f2', 0.35) : material(tex, w.color), !glass)); } // 마감: 페인트 · 타일 · 목재 · 콘크리트 · 유리(반투명)
-    if (frame.length) g.add(meshOf(frame, material('plastic', FRAME)));
-    if (leaf.length) g.add(meshOf(leaf, material('plain', '#d9d4ca')));
-    if (steel.length) g.add(meshOf(steel, material('steel', '#c9ced4')));
-    if (glass.length) g.add(meshOf(glass, material('glass', '#bfe3f2'), false));
+    for (const [c, b] of FR) g.add(meshOf(b, material('plastic', c)));
+    for (const [c, b] of LF) g.add(meshOf(b, material('plain', c)));
+    for (const [c, b] of ST) g.add(meshOf(b, material('steel', c)));
+    for (const [c, b] of GL) g.add(meshOf(b, material('glass', c), false));
     if (frost.length) g.add(meshOf(frost, material('frost', '#eef2f4'), false));
     if (w.form && w.form.o && w.form.o.some((q) => q[0] || q[1] || q[2])) deformWall(g, w, len, w.h, w.t / 2); // 벽 디자인 수정 (8 모서리 끌기)
     addSheet(g, w, len, ops); // 시트지 · 벽 그림
@@ -174,7 +184,7 @@ export function buildFloors(level) {
     const shape = new THREE.Shape(r.pts.map((p) => new THREE.Vector2(p[0] * MM, -p[1] * MM)));
     const depth = Math.max(0.004, r.lift * MM + 0.004);
     const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false }); geo.rotateX(-Math.PI / 2);
-    const m = new THREE.Mesh(geo, floorMaterial(r.finish, r.color)); m.receiveShadow = true; m.castShadow = r.lift > 20; m.name = r.name; m.userData.roomId = r.id; root.add(m);
+    const m = new THREE.Mesh(geo, texMaterial(r.tex, 1000 / ((r.tex && r.tex.size) || 600)) || floorMaterial(r.finish, r.color)); m.receiveShadow = true; m.castShadow = r.lift > 20; m.name = r.name; m.userData.roomId = r.id; root.add(m);
   }
   return root;
 }
@@ -199,7 +209,7 @@ function slopedRoom(r) {
       for (const i of [0, 2, 1, 0, 3, 2, 0, 1, 2, 0, 2, 3]) { pos.push(...v[i]); uv.push(v[i][0] + v[i][2], v[i][1]); } }
   }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals();
-  const m = new THREE.Mesh(g, floorMaterial(r.finish, r.color)); m.receiveShadow = true; m.name = r.name; m.userData.roomId = r.id; return m;
+  const m = new THREE.Mesh(g, texMaterial(r.tex, 1000 / ((r.tex && r.tex.size) || 600)) || floorMaterial(r.finish, r.color)); m.receiveShadow = true; m.name = r.name; m.userData.roomId = r.id; return m;
 }
 
 /** 천장: 공간(방)마다 · 공간이 없으면 벽 테두리 전체. 아래를 보는 면만 그려서 위에서 내려다보면 투명하게 보인다 */

@@ -29,7 +29,9 @@
       <button class="ib" data-tool="roomRect" aria-pressed="false" title="공간 그리기 · 사각형 (끌기)" aria-label="공간 사각형"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1" stroke-dasharray="3 2"/><path d="M9 12h6"/></svg></button>
       <button class="ib" data-tool="roomPoly" aria-pressed="false" title="공간 그리기 · 선 (꼭짓점을 차례로 · 첫 점을 다시 누르면 닫힘)" aria-label="공간 선"><svg viewBox="0 0 24 24"><path d="M4 18l3-12 9 2 4 9z" stroke-dasharray="3 2"/><circle cx="4" cy="18" r="1.5"/><circle cx="7" cy="6" r="1.5"/><circle cx="16" cy="8" r="1.5"/><circle cx="20" cy="17" r="1.5"/></svg></button>
       <button class="ib" id="btnRooms" title="공간 목록 (태그 · 공간만 작업)" aria-label="공간 목록"><svg viewBox="0 0 24 24"><path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10"/></svg></button>
+      <button class="ib" data-tool="boxsel" aria-pressed="false" title="여러 개 고르기 (끌어서 사각형 · Shift+누르기로 더하기 · Ctrl+A 전부)" aria-label="여러 개 고르기"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="1" stroke-dasharray="3 2.5"/><rect x="7" y="7" width="4" height="4"/><rect x="13" y="13" width="4" height="4"/></svg></button>
       <button class="ib" data-tool="measure" aria-pressed="false" title="줄자 (두 점 사이를 끌기 · 2D · 3D 치수)" aria-label="줄자"><svg viewBox="0 0 24 24"><path d="M3 15l12-12 6 6-12 12z"/><path d="M7 11l2 2M10 8l2 2M13 5l2 2"/></svg></button>
+      <button class="ib" data-tool="sketch" aria-pressed="false" title="낙서 (2D 에 손으로 메모 · 지우기 도구로 지움)" aria-label="낙서"><svg viewBox="0 0 24 24"><path d="M4 17c3-6 5 2 8-3s4-6 8-2"/><path d="M15 5l4 4-9 9H6v-4z" opacity=".5"/></svg></button>
       <button class="ib" data-tool="erase" aria-pressed="false" title="지우기 (톡)" aria-label="지우기"><svg viewBox="0 0 24 24"><path d="M8 20h12M5 14l8-8 6 6-7 7H8z"/></svg></button>
       <button class="ib" id="btnFit" title="도면 전체 보기" aria-label="도면 전체 보기"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     </div>
@@ -90,6 +92,7 @@
     <button role="menuitem" data-act="hist">작업 기록 (H)</button>
     <button role="menuitem" data-act="png">화면 이미지 저장 · PNG</button>
     <hr>
+    <button role="menuitem" data-act="lang">영어 화면 · English</button>
     <button role="menuitem" data-act="home">홈 화면</button>
     <button role="menuitem" data-act="quit" id="miQuit">종료</button>
   </div>
