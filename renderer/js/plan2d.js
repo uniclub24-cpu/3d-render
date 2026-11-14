@@ -2,6 +2,7 @@
 // 좌표는 모델과 같은 mm, 도면 y 는 아래로 (3D 의 z).
 import { OPDEF } from './cloud.js';
 import { pointInPoly, polyArea, polyCenter, slopeFrame, roomTop, deg2pct } from './slope.js';
+import { LINEKINDS } from './lines.js';
 export const KINDS = { 주방: '#f2c46b', 홀: '#9cc8e8', 카운터: '#e8a0a0', 공장: '#b9b0d8', 창고: '#c8bfae', 복도: '#cfd6dc', 화장실: '#9fd9d0', 거실: '#d7c49e', 사무실: '#b7d39b', 기타: '#d9d2c4' };
 
 const GRID = 50, SNAP_PX = 14, HIT_PX = 12;
@@ -10,7 +11,7 @@ const wlen = (w) => Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
 const OP_LABEL = { door1: '외문', door2: '양문', auto: '자동문', slide: '미닫이', window: '창', full: '통창', pass: '배식구', slidepass: '미닫이 배식구', arch: '아치' };
 /** 문/창 하나를 벽 길이 L 안에 맞춘다 (폭이 넘치면 줄이고 위치를 안쪽으로) */
 export function fitOpening(o, L) { o.w = Math.round(Math.min(o.w, Math.max(200, L - 40))); o.t = Math.round(Math.min(L - o.w / 2, Math.max(o.w / 2, o.t))); }
-export const TOOLS = { select: '고르기 · 끌기', wall: '벽 그리기', door1: '문', window: '창', pass: '배식구', roomRect: '공간 (사각형)', roomPoly: '공간 (선)', measure: '줄자', soffitRect: '천장 가벽', erase: '지우기' };
+export const TOOLS = { select: '고르기 · 끌기', wall: '벽 그리기', door1: '문', window: '창', pass: '배식구', roomRect: '공간 (사각형)', roomPoly: '공간 (선)', measure: '줄자', soffitRect: '천장 가벽', line: '배관 · 전선', erase: '지우기' };
 
 export class Plan2D {
   /** api: { level(), lib, style(), onLive(kind), onChange(msg), onSelect(sel), toast(msg) } */
@@ -23,7 +24,7 @@ export class Plan2D {
   get L() { return this.api.level(); }
   redraw() { this.dirty = true; }
   resize() { const pr = Math.min(2, devicePixelRatio || 1), w = this.cv.clientWidth, h = this.cv.clientHeight; if (!w) return; this.cv.width = w * pr; this.cv.height = h * pr; this.pr = pr; if ((!this._fitted || this._needFit) && this.L) { this._fitted = true; this.fit(); } this.redraw(); }
-  setTool(t) { this.tool = t; this.chain = null; this.rpts = null; this.rrect = null; this.cv.style.cursor = t === 'select' ? 'default' : 'crosshair'; this.redraw(); }
+  setTool(t) { this.tool = t; this.chain = null; this.rpts = null; this.rrect = null; this.lpts = null; this.cv.style.cursor = t === 'select' ? 'default' : 'crosshair'; this.redraw(); }
   select(sel, quiet) { this.sel = sel; this.redraw(); if (!quiet) this.api.onSelect(sel); }
 
   /* ---------- 좌표 ---------- */
@@ -62,6 +63,7 @@ export class Plan2D {
   hitOpening(p) { const h = this.hitWall(p); if (!h) return null; return this.L.openings.find((o) => o.wall === h.w.id && Math.abs(h.q.t - o.t) <= o.w / 2) || null; }
   hitEnd(p) { const tol = HIT_PX / this.view.sc; let best = null; for (const e of this.ends()) { const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < tol && (!best || d < best.d)) best = { ...e, d }; } return best; }
   hitDim(p) { const tol = HIT_PX / this.view.sc; for (const d of this.L.dims || []) { const dx = d.x2 - d.x1, dy = d.y2 - d.y1, L = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((p.x - d.x1) * dx + (p.y - d.y1) * dy) / L)); if (Math.hypot(d.x1 + dx * t - p.x, d.y1 + dy * t - p.y) < tol) return d; } return null; }
+  hitLine(p) { const tol = HIT_PX / this.view.sc; for (const l of this.L.lines || []) for (let i = 1; i < (l.pts || []).length; i++) { const [x1, y1] = l.pts[i - 1], [x2, y2] = l.pts[i], dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((p.x - x1) * dx + (p.y - y1) * dy) / L)); if (Math.hypot(x1 + dx * t - p.x, y1 + dy * t - p.y) < tol) return l; } return null; }
   hitSoffit(p) { return (this.L.soffits || []).find((q) => pointInPoly(p.x, p.y, q.pts)) || null; }
   hitRoom(p) { let best = null; for (const r of this.L.rooms) if (r.pts.length >= 3 && pointInPoly(p.x, p.y, r.pts)) { const a = polyArea(r.pts); if (!best || a < best.a) best = { a, r }; } return best && best.r; }
   hitRoomVtx(p) { const r = this.sel && this.sel.kind === 'room' && this.L.rooms.find((q) => q.id === this.sel.id); if (!r) return null; const tol = HIT_PX / this.view.sc; const k = r.pts.findIndex((q) => Math.hypot(q[0] - p.x, q[1] - p.y) < tol); return k < 0 ? null : { r, k }; }
@@ -129,7 +131,7 @@ export class Plan2D {
       if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pinch && pts.size === 2) { const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y), cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, r = cv.getBoundingClientRect(); this.view.ox -= (cx - pinch.cx) / this.view.sc; this.view.oy -= (cy - pinch.cy) / this.view.sc; this.zoomAt(cx - r.left, cy - r.top, d / pinch.d); pinch = { d, cx, cy }; return; }
       const p = this.evMm(e);
-      if (this.tool === 'roomPoly' || this.tool === 'pick') { this.hover = this.tool === 'pick' ? p : this.snapPoint(p, this.rpts && this.rpts[this.rpts.length - 1]); this.redraw(); }
+      if (this.tool === 'roomPoly' || this.tool === 'pick' || this.tool === 'line') { this.hover = this.tool === 'pick' ? p : this.snapPoint(p, this.rpts && this.rpts[this.rpts.length - 1]); this.redraw(); }
       if (act && act.rect) { const b = this.snapPoint(p); this.rrect = [this.rrect[0], b]; this.redraw(); return; }
       if (act && act.meas) { this.mtmp = [this.mtmp[0], this.snapPoint(p, this.mtmp[0])]; this.redraw(); return; }
       if (this.tool === 'wall') { const drag = act && act.wall && Math.hypot(e.clientX - act.start.x, e.clientY - act.start.y) > 6; this.dragFrom = drag ? act.a : null; this.hover = this.snapPoint(p, this.dragFrom || (this.chain && this.chain.last)); this.redraw(); }
@@ -157,13 +159,15 @@ export class Plan2D {
         else if (last && Math.hypot(q.x - last.x, q.y - last.y) < 1) { if (R.length >= 3) { this.rpts = null; this.api.onRoom(R.map((v) => [Math.round(v.x), Math.round(v.y)])); } }
         else R.push(q);
         this.redraw(); return; }
+      if (a.tap && !a.moved && this.tool === 'line') { const R2 = (this.lpts ||= []), q = this.snapPoint(p, R2[R2.length - 1]), last = R2[R2.length - 1];
+        if (last && Math.hypot(q.x - last.x, q.y - last.y) < Math.max(1, 6 / this.view.sc)) { if (R2.length >= 2) this.api.onLine(R2.map((v) => [Math.round(v.x), Math.round(v.y)])); this.lpts = null; } else R2.push(q); this.redraw(); return; }
       if (a.tap && !a.moved && this.tool === 'pick') { if (this.picker) this.picker(p, this.hitItem(p)); return; }
-      if (a.tap && !a.moved) { if (OPDEF[this.tool]) this.addOpening(this.tool, p); if (this.tool === 'erase') { const d = this.hitDim(p), sf = !d && this.hitSoffit(p); if (d) { this.L.dims = this.L.dims.filter((q) => q !== d); this.api.onLive('structure'); this.api.onChange('치수를 지웠어요'); } else if (sf) { this.L.soffits = this.L.soffits.filter((q) => q !== sf); this.api.onLive('structure'); this.api.onChange('천장 가벽을 지웠어요'); } else this.erase(this.pickAt(p)); } return; }
+      if (a.tap && !a.moved) { if (OPDEF[this.tool]) this.addOpening(this.tool, p); if (this.tool === 'erase') { const ln = this.hitLine(p); if (ln) { this.L.lines = this.L.lines.filter((q) => q !== ln); this.api.onLive('structure'); this.api.onChange('배관 · 전선을 지웠어요'); return; } const d = this.hitDim(p), sf = !d && this.hitSoffit(p); if (d) { this.L.dims = this.L.dims.filter((q) => q !== d); this.api.onLive('structure'); this.api.onChange('치수를 지웠어요'); } else if (sf) { this.L.soffits = this.L.soffits.filter((q) => q !== sf); this.api.onLive('structure'); this.api.onChange('천장 가벽을 지웠어요'); } else this.erase(this.pickAt(p)); } return; }
       if (a.pan) { if (a.tapEmpty && !a.moved) this.select(null); return; }
       if (a.done) a.done(a.moved);
     };
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', (e) => { if (act && act.cancel) act.cancel(); act = null; up(e); });
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (this.chain || this.rpts)) { this.chain = null; this.rpts = null; this.redraw(); } });
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (this.chain || this.rpts || this.lpts)) { this.chain = null; this.rpts = null; this.lpts = null; this.redraw(); } if (e.key === 'Enter' && this.lpts && this.lpts.length >= 2) { this.api.onLine(this.lpts.map((v) => [Math.round(v.x), Math.round(v.y)])); this.lpts = null; this.redraw(); } });
   }
   _dragRoomVtx(r, k, start) {
     const o = [...r.pts[k]];
@@ -254,6 +258,11 @@ export class Plan2D {
     // 천장 가벽 (보라 점선) · 줄자 치수 · 외벽 치수 자동
     for (const sf of L.soffits || []) { poly(sf.pts); g.setLineDash([4 * px1, 4 * px1]); g.strokeStyle = '#8a5cf6'; g.lineWidth = 2 * px1; g.stroke(); g.setLineDash([]); g.fillStyle = 'rgba(138,92,246,0.08)'; g.fill(); const c = polyCenter(sf.pts); g.save(); g.translate(c[0], c[1]); g.scale(px1, px1); g.font = '11px system-ui'; g.fillStyle = '#6f45d9'; g.textAlign = 'center'; g.fillText(`가벽 ${sf.h || L.soffitH || 2400}`, 0, 0); g.restore(); }
     if (L.dimsOn !== false) for (const d of L.dims || []) this._tape(d.x1, d.y1, d.x2, d.y2, px1);
+    // 배관 · 전선 · 덕트 (종류별 색 · 굵기)
+    for (const l of L.lines || []) { const k = LINEKINDS[l.kind]; if (!k || !l.pts || l.pts.length < 2) continue; g.save(); g.strokeStyle = l.color || k.color; g.lineWidth = Math.max(2 * px1, Math.min(l.w || k.w, 300)); g.globalAlpha = 0.85; if (k.z === 'below') g.setLineDash([10 * px1, 6 * px1]); g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath(); l.pts.forEach((q, i) => (i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]))); g.stroke(); g.restore(); }
+    if (this.tool === 'line' && this.lpts && this.lpts.length) { const k = LINEKINDS[this.lineKind] || LINEKINDS.wire, R2 = [...this.lpts, ...(this.hover ? [this.hover] : [])]; g.save(); g.strokeStyle = k.color; g.lineWidth = Math.max(3 * px1, k.w); g.globalAlpha = 0.7; g.beginPath(); R2.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.stroke(); g.restore(); }
+    // 동선 시뮬레이터: 직원 · 남은 길
+    if (this.simA) for (const A of this.simA) { g.save(); g.fillStyle = A.a.color; g.strokeStyle = A.a.color; if (A.path) { g.setLineDash([8 * px1, 6 * px1]); g.lineWidth = 2 * px1; g.beginPath(); g.moveTo(A.pos[0], A.pos[1]); for (const q of A.path.slice(A.pi)) g.lineTo(q[0], q[1]); g.stroke(); g.setLineDash([]); } g.beginPath(); g.arc(A.pos[0], A.pos[1], 220, 0, Math.PI * 2); g.fill(); g.restore(); }
     if (this.mtmp) this._tape(this.mtmp[0].x, this.mtmp[0].y, this.mtmp[1].x, this.mtmp[1].y, px1);
     if (this.autoDims) for (const w of L.walls) this._dim(w.x1, w.y1, w.x2, w.y2, w.t + 300);
     // 공간 이름표 (태그 · 단 · 구배)

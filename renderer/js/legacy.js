@@ -13,7 +13,7 @@ export const VERSION = 2; // 2: 단(lift) 높이를 기물 elev 에 넣지 않�
 
 const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
 const uid = (p) => p + Math.random().toString(36).slice(2, 9);
-const LEVEL_KEYS = ['walls', 'openings', 'items', 'rooms', 'ceilingH', 'slabH', 'soffitH', 'floor', 'bg', 'ceiling'];
+const LEVEL_KEYS = ['walls', 'openings', 'items', 'rooms', 'ceilingH', 'slabH', 'soffitH', 'floor', 'bg', 'ceiling', 'lines'];
 const OPDEF = { slidepass: [900, 600, 900], slide: [1800, 2100, 0], pass: [900, 600, 900], arch: [1200, 2400, 0], door1: [900, 2100, 0], door2: [1600, 2300, 0], auto: [1800, 2300, 0], window: [1800, 1500, 900], full: [2400, 2400, 0] };
 
 /** 파일 내용(JSON 값)에서 기존 프로젝트들을 찾아낸다 */
@@ -60,7 +60,7 @@ export function convertLegacy(P, lib) {
   if ((P.walls || []).some((w) => w.form)) report.notes.push('모양을 바꾼 벽(벽 디자인 수정)은 곧은 벽으로 불러왔어요');
 
   return {
-    model: { format: FORMAT, version: VERSION, id: uid('p'), name: P.name || '이름 없는 프로젝트', env: P.env ? { ...P.env } : undefined, source: { app: 'byr-legacy', id: P.id || null, importedAt: new Date().toISOString() }, wallT: base.wallT, levels, activeLevel: Math.max(0, srcLevels.findIndex((l) => l.id === P.levelId)) },
+    model: { format: FORMAT, version: VERSION, id: uid('p'), name: P.name || '이름 없는 프로젝트', env: P.env ? { ...P.env } : undefined, sim: P.sim && Array.isArray(P.sim.actors) ? JSON.parse(JSON.stringify(P.sim)) : undefined, source: { app: 'byr-legacy', id: P.id || null, importedAt: new Date().toISOString() }, wallT: base.wallT, levels, activeLevel: Math.max(0, srcLevels.findIndex((l) => l.id === P.levelId)) },
     report,
   };
 }
@@ -111,7 +111,8 @@ function convertLevel(meta, D, base, lib, report) {
   report.walls += walls.length; report.openings += openings.length; report.rooms += rooms.length; report.items += items.length;
   const bg = D.bg && D.bg.src ? { src: D.bg.src, wmm: num(D.bg.wmm, 10000), x: num(D.bg.x), y: num(D.bg.y), opacity: num(D.bg.opacity, 0.5) } : null;
   const ceiling = D.ceiling && typeof D.ceiling === 'object' ? { on: D.ceiling.on !== false, color: D.ceiling.color || '#f3f1ec', opacity: num(D.ceiling.opacity, 1) } : { on: true };
-  return { ...meta, ceilingH, bg, ceiling, soffitH: num(D.soffitH, 2400), slabH, floor: { color: (D.floor && D.floor.color) || '#c9c3b8', finish: (D.floor && D.floor.type) || 'epoxy' }, walls, openings, rooms, items };
+  const lines = Array.isArray(D.lines) ? D.lines.filter((l) => l && l.kind && Array.isArray(l.pts) && l.pts.length >= 2).map((l) => ({ id: l.id || uid('l'), kind: l.kind, pts: l.pts.map((q) => [num(q[0]), num(q[1])]), ...(l.w ? { w: num(l.w) } : {}), ...(l.depth != null ? { depth: num(l.depth) } : {}), ...(l.off != null ? { off: num(l.off) } : {}), ...(l.color ? { color: l.color } : {}) })) : [];
+  return { ...meta, ceilingH, bg, ceiling, lines, soffitH: num(D.soffitH, 2400), slabH, floor: { color: (D.floor && D.floor.color) || '#c9c3b8', finish: (D.floor && D.floor.type) || 'epoxy' }, walls, openings, rooms, items };
 }
 
 /** 조명 · 열 기물의 기본 광원 */

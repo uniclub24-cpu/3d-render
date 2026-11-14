@@ -11,6 +11,9 @@ import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { buildItem, buildWalls, buildFloors, placeItem, levelBounds, MM , buildCeiling } from './builder.js';
 import { Walker } from './walk.js';
 import { buildDims } from './dims.js';
+import { buildLines, itemCat } from './lines.js';
+import { AirSim } from './air.js';
+import { KitchenSim } from './sim.js';
 import { setEnvMap } from './materials.js';
 import { STYLES, StylePass, applyStyleMaterials, restoreMaterials } from './styles3d.js';
 import { DesignEditor } from './design.js';
@@ -81,6 +84,7 @@ export class Engine {
     this._bindPointer();
     this.design = new DesignEditor(this);
     this.walker = new Walker(this);
+    this.air = new AirSim(this); this.sim = new KitchenSim(this);
     this.resize(); this.setSun(this.opt.sunHour);
     new ResizeObserver(() => this.resize()).observe(canvas);
     r.setAnimationLoop(() => this._frame());
@@ -98,8 +102,9 @@ export class Engine {
   _applyShift() { const el = this.canvas, w = el.clientWidth, h = el.clientHeight; if (!w) return; for (const c of [this.persp, this.ortho]) { if (this.shift) c.setViewOffset(w, h, this.shift, 0, w, h); else c.clearViewOffset(); } }
   _fitOrtho() { const o = this.ortho, s = this.orthoSize || 8, a = this.aspect || 1; o.left = -s * a; o.right = s * a; o.top = s; o.bottom = -s; o.updateProjectionMatrix(); }
   _frame() {
-    if (!this.canvas.clientWidth) return; // 2D 만 볼 때는 3D 를 그리지 않는다
     const now = performance.now(), dt = Math.min(0.1, ((now - (this._t || now)) / 1000)); this._t = now;
+    this.air.update(dt); this.sim.update(dt); if (this.onTick) this.onTick(dt); // 2D 만 볼 때도 시뮬레이션은 돈다
+    if (!this.canvas.clientWidth) return; // 2D 만 볼 때는 3D 를 그리지 않는다
     if (this.walker.active) this.walker.update(dt); else this.controls.update();
     if (this.selBox.visible) this.selBox.update();
     this.ssaoPass.enabled = this.opt.ssao && STYLES[this.style].ssao && !this.camera.isOrthographicCamera; this.fxaaPass.enabled = this.opt.fxaa;
@@ -136,29 +141,37 @@ export class Engine {
     this.items = new THREE.Group(); this.items.name = '기물';
     for (const r of level.rooms || []) syncDrain(level, r);
     this.structure = new THREE.Group(); this.structure.name = '구조';
-    this.structure.add(buildFloors(level), buildWalls(level), buildCeiling(level), buildDims(level));
+    this.structure.add(buildFloors(level), buildWalls(level), buildCeiling(level), buildDims(level), buildLines(level));
     this.world.add(this.structure, this.items);
     for (const it of level.items) this.items.add(buildItem(it, this.ctx));
     applyStyleMaterials(this.world, this.style);
     const b = levelBounds(level); this.bounds = { cx: ((b[0] + b[2]) / 2) * MM, cz: ((b[1] + b[3]) / 2) * MM, r: Math.max(3, (Math.hypot(b[2] - b[0], b[3] - b[1]) / 2) * MM) };
-    this.setSun(this.opt.sunHour); this._limitLights(); if (this.envE) this.setEnv(this.envE, this.envMeta); this.applyFocus();
+    this.setSun(this.opt.sunHour); this._limitLights(); if (this.envE) this.setEnv(this.envE, this.envMeta); this.applyFocus(); this._applyXray(); if (this.air.on) this.air.refresh();
   }
   itemGroup(id) { return this.items.children.find((g) => g.userData.itemId === id) || null; }
   /** 기물 하나를 다시 만든다 (색 · 크기 · 조명 변경 뒤) */
   rebuildItem(it) {
     const old = this.itemGroup(it.id), g = buildItem(it, this.ctx);
-    if (old) { this.items.remove(old); disposeTree(old); } this.items.add(g); applyStyleMaterials(g, this.style); if (this.focusPts) this.applyFocus();
+    if (old) { this.items.remove(old); disposeTree(old); } this.items.add(g); applyStyleMaterials(g, this.style); if (this.focusPts) this.applyFocus(); if (this.xray) this._applyXray();
     if (this.selId === it.id) this.selBox.setFromObject(g);
     this._limitLights(); return g;
   }
   /** 벽 · 문/창 · 바닥만 다시 만든다 (2D 도면에서 벽을 그리거나 끌 때 바로 3D 에 반영) */
   rebuildStructure() {
     if (!this.level) return; const old = this.structure; for (const r of this.level.rooms || []) syncDrain(this.level, r);
-    this.structure = new THREE.Group(); this.structure.name = '구조'; this.structure.add(buildFloors(this.level), buildWalls(this.level), buildCeiling(this.level), buildDims(this.level));
+    this.structure = new THREE.Group(); this.structure.name = '구조'; this.structure.add(buildFloors(this.level), buildWalls(this.level), buildCeiling(this.level), buildDims(this.level), buildLines(this.level));
     applyStyleMaterials(this.structure, this.style);
     if (old) { this.world.remove(old); disposeTree(old); } this.world.add(this.structure);
     const b = levelBounds(this.level); this.bounds = { cx: ((b[0] + b[2]) / 2) * MM, cz: ((b[1] + b[3]) / 2) * MM, r: Math.max(3, (Math.hypot(b[2] - b[0], b[3] - b[1]) / 2) * MM) };
-    this.renderer.shadowMap.needsUpdate = true; if (this.hl) this.highlight(this.hl); this.replaceItems(); this.applyFocus();
+    this.renderer.shadowMap.needsUpdate = true; if (this.hl) this.highlight(this.hl); this.replaceItems(); this.applyFocus(); this._applyXray(); if (this.air.on) this.air.refresh();
+  }
+  /** 설치물 투시: cat = 'floor' | 'wall' | 'ceil' | null. 그 분류의 배관 · 전선 · 설비만 진하게, 나머지는 흑백 반투명 */
+  setXray(cat) { this.xray = cat || null; applyStyleMaterials(this.world, this.style); if (this.envGroup) this.envGroup.visible = !this.xray && !this.focusPts; this._applyXray(); }
+  _applyXray() {
+    const cat = this.xray; if (!cat) return; const gray = (this._xrMat ||= new THREE.MeshStandardMaterial({ color: '#c9ccd1', transparent: true, opacity: 0.16, depthWrite: false, roughness: 1 }));
+    const keep = (o) => { for (let p = o; p; p = p.parent) { if (p.userData.xr) return p.userData.xr === cat; if (p.userData.itemId) { const it = this.level.items.find((q) => q.id === p.userData.itemId); return it ? itemCat(this.ctx.lib[it.type]) === cat : false; } } return false; };
+    this.world.traverse((o) => { if (!o.isMesh) return; o.userData.baseMat ||= o.material; if (!keep(o)) o.material = gray; });
+    if (this.structure) for (const g of this.structure.getObjectsByProperty('name', '천장')) g.visible = cat === 'ceil' || g.visible;
   }
   /** 천장 보이기 · 끄기 (모델의 level.ceiling.on 과 함께) */
   showCeiling(on) { if (this.structure) for (const g of this.structure.getObjectsByProperty('name', '천장')) g.visible = on; }
@@ -188,7 +201,7 @@ export class Engine {
   /** 보기 스타일 바꾸기 — 모델은 그대로라서 어떤 스타일에서도 계속 편집할 수 있다 */
   setStyle(name) {
     const st = STYLES[name]; if (!st) return; this.style = name;
-    applyStyleMaterials(this.world, name); if (this.envGroup) applyStyleMaterials(this.envGroup, name);
+    applyStyleMaterials(this.world, name); if (this.envGroup) applyStyleMaterials(this.envGroup, name); this._applyXray();
     this.scene.background = new THREE.Color(st.bg); this.ground.material.color.set(st.ground);
     this.ambient.intensity = st.ambient; this.sun.intensity = this.opt.sunPower * st.sun;
     this.renderer.toneMapping = name === 'real' || name === 'clay' ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping; this.renderer.toneMappingExposure = this.opt.exposure * (st.exposure || 1);
@@ -211,7 +224,7 @@ export class Engine {
   /** 모든 층을 층 높이(elev)대로 쌓은 Group (내보내기용 · PBR 재질) */
   buildAll(levels, zOfFor) {
     const root = new THREE.Group(); root.name = 'BYR 전체 층';
-    for (const L of levels) { for (const r of L.rooms || []) syncDrain(L, r); const g = new THREE.Group(); g.name = L.name || '층'; g.position.y = (L.elev || 0) * MM; g.add(buildFloors(L), buildWalls(L), buildCeiling(L)); const ctx = { ...this.ctx, zOf: zOfFor(L) }; for (const it of L.items) g.add(buildItem(it, ctx)); g.traverse((o) => { if (o.isLight) o.visible = false; }); root.add(g); }
+    for (const L of levels) { for (const r of L.rooms || []) syncDrain(L, r); const g = new THREE.Group(); g.name = L.name || '층'; g.position.y = (L.elev || 0) * MM; g.add(buildFloors(L), buildWalls(L), buildCeiling(L), buildLines(L)); const ctx = { ...this.ctx, zOf: zOfFor(L) }; for (const it of L.items) g.add(buildItem(it, ctx)); g.traverse((o) => { if (o.isLight) o.visible = false; }); root.add(g); }
     root.updateMatrixWorld(true); return root;
   }
   disposeTree(o) { disposeTree(o); }
