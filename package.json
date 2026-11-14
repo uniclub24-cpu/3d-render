@@ -16,12 +16,13 @@
     "three": "0.170.0",
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
-    "@capacitor/cli": "^6.1.0",
-    "@capacitor/core": "^6.1.0",
-    "@capacitor/android": "^6.1.0",
-    "@capacitor/filesystem": "^6.0.0",
-    "@capacitor/share": "^6.0.0",
-    "@capacitor/app": "^6.0.0"
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/share": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/assets": "^3.0.5"
   },
   "build": {
     "appId": "com.byr.next",

@@ -1,9 +1,15 @@
 {
-  "appId": "com.byr.next",
+  "appId": "com.byr2.app",
   "appName": "BYR2",
   "webDir": "renderer",
   "backgroundColor": "#1b1d21",
   "server": {
     "androidScheme": "https"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "DARK"
+    }
   }
 }
