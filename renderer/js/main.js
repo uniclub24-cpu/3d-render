@@ -8,7 +8,9 @@ import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
-import { buildItem, buildWalls, buildFloors, placeItem, levelBounds, MM } from './builder.js';
+import { buildItem, buildWalls, buildFloors, placeItem, levelBounds, MM , buildCeiling } from './builder.js';
+import { Walker } from './walk.js';
+import { buildDims } from './dims.js';
 import { setEnvMap } from './materials.js';
 import { STYLES, StylePass, applyStyleMaterials, restoreMaterials } from './styles3d.js';
 import { DesignEditor } from './design.js';
@@ -78,6 +80,7 @@ export class Engine {
 
     this._bindPointer();
     this.design = new DesignEditor(this);
+    this.walker = new Walker(this);
     this.resize(); this.setSun(this.opt.sunHour);
     new ResizeObserver(() => this.resize()).observe(canvas);
     r.setAnimationLoop(() => this._frame());
@@ -96,7 +99,8 @@ export class Engine {
   _fitOrtho() { const o = this.ortho, s = this.orthoSize || 8, a = this.aspect || 1; o.left = -s * a; o.right = s * a; o.top = s; o.bottom = -s; o.updateProjectionMatrix(); }
   _frame() {
     if (!this.canvas.clientWidth) return; // 2D 만 볼 때는 3D 를 그리지 않는다
-    this.controls.update();
+    const now = performance.now(), dt = Math.min(0.1, ((now - (this._t || now)) / 1000)); this._t = now;
+    if (this.walker.active) this.walker.update(dt); else this.controls.update();
     if (this.selBox.visible) this.selBox.update();
     this.ssaoPass.enabled = this.opt.ssao && STYLES[this.style].ssao && !this.camera.isOrthographicCamera; this.fxaaPass.enabled = this.opt.fxaa;
     this.selBox.visible && (this.selBox.visible = !!(this.selId || this.hl));
@@ -132,7 +136,7 @@ export class Engine {
     this.items = new THREE.Group(); this.items.name = '기물';
     for (const r of level.rooms || []) syncDrain(level, r);
     this.structure = new THREE.Group(); this.structure.name = '구조';
-    this.structure.add(buildFloors(level), buildWalls(level));
+    this.structure.add(buildFloors(level), buildWalls(level), buildCeiling(level), buildDims(level));
     this.world.add(this.structure, this.items);
     for (const it of level.items) this.items.add(buildItem(it, this.ctx));
     applyStyleMaterials(this.world, this.style);
@@ -150,12 +154,14 @@ export class Engine {
   /** 벽 · 문/창 · 바닥만 다시 만든다 (2D 도면에서 벽을 그리거나 끌 때 바로 3D 에 반영) */
   rebuildStructure() {
     if (!this.level) return; const old = this.structure; for (const r of this.level.rooms || []) syncDrain(this.level, r);
-    this.structure = new THREE.Group(); this.structure.name = '구조'; this.structure.add(buildFloors(this.level), buildWalls(this.level));
+    this.structure = new THREE.Group(); this.structure.name = '구조'; this.structure.add(buildFloors(this.level), buildWalls(this.level), buildCeiling(this.level), buildDims(this.level));
     applyStyleMaterials(this.structure, this.style);
     if (old) { this.world.remove(old); disposeTree(old); } this.world.add(this.structure);
     const b = levelBounds(this.level); this.bounds = { cx: ((b[0] + b[2]) / 2) * MM, cz: ((b[1] + b[3]) / 2) * MM, r: Math.max(3, (Math.hypot(b[2] - b[0], b[3] - b[1]) / 2) * MM) };
     this.renderer.shadowMap.needsUpdate = true; if (this.hl) this.highlight(this.hl); this.replaceItems(); this.applyFocus();
   }
+  /** 천장 보이기 · 끄기 (모델의 level.ceiling.on 과 함께) */
+  showCeiling(on) { if (this.structure) for (const g of this.structure.getObjectsByProperty('name', '천장')) g.visible = on; }
   /** 배경(상권) 다시 세우기. E = model.env */
   setEnv(E, meta = {}) {
     if (this.envGroup) { this.scene.remove(this.envGroup); disposeTree(this.envGroup); this.envGroup = null; }
@@ -205,7 +211,7 @@ export class Engine {
   /** 모든 층을 층 높이(elev)대로 쌓은 Group (내보내기용 · PBR 재질) */
   buildAll(levels, zOfFor) {
     const root = new THREE.Group(); root.name = 'BYR 전체 층';
-    for (const L of levels) { for (const r of L.rooms || []) syncDrain(L, r); const g = new THREE.Group(); g.name = L.name || '층'; g.position.y = (L.elev || 0) * MM; g.add(buildFloors(L), buildWalls(L)); const ctx = { ...this.ctx, zOf: zOfFor(L) }; for (const it of L.items) g.add(buildItem(it, ctx)); g.traverse((o) => { if (o.isLight) o.visible = false; }); root.add(g); }
+    for (const L of levels) { for (const r of L.rooms || []) syncDrain(L, r); const g = new THREE.Group(); g.name = L.name || '층'; g.position.y = (L.elev || 0) * MM; g.add(buildFloors(L), buildWalls(L), buildCeiling(L)); const ctx = { ...this.ctx, zOf: zOfFor(L) }; for (const it of L.items) g.add(buildItem(it, ctx)); g.traverse((o) => { if (o.isLight) o.visible = false; }); root.add(g); }
     root.updateMatrixWorld(true); return root;
   }
   disposeTree(o) { disposeTree(o); }
@@ -261,7 +267,7 @@ export class Engine {
     const cv = this.canvas; let down = null, drag = null; const active = new Set();
     // capture 단계에서 먼저 받아, 기물을 끌 때는 OrbitControls 로 넘기지 않는다
     cv.addEventListener('pointerdown', (e) => {
-      active.add(e.pointerId); this._touches = active.size; if (this.design && this.design.active) return;
+      active.add(e.pointerId); this._touches = active.size; if ((this.design && this.design.active) || this.walker.active) return;
       if (active.size > 1) { if (drag) { drag.cancel(); drag = null; } down = null; return; } // 두 손가락 = 화면 조작
       down = { x: e.clientX, y: e.clientY, id: e.pointerId };
       if (this.mode !== 'move' || e.button > 0) return;
@@ -274,7 +280,7 @@ export class Engine {
       drag = { it, moved: false, plane, p0, cancel: () => { it.x = ox; it.y = oy; this.moveItem(it); this.onMove(it); } };
     }, true);
     cv.addEventListener('pointermove', (e) => {
-      if (this.design && this.design.active) return;
+      if ((this.design && this.design.active) || this.walker.active) return;
       if (!drag || e.pointerId !== down?.id) return; e.stopImmediatePropagation();
       const p = new THREE.Vector3(); if (!this._ray(e).ray.intersectPlane(drag.plane, p)) return;
       const snap = (v) => Math.round(v / 10) * 10, it = drag.it;
@@ -282,7 +288,7 @@ export class Engine {
       this.moveItem(it); this.onMove(it);
     }, true);
     const up = (e) => {
-      active.delete(e.pointerId); this._touches = active.size; if (this.design && this.design.active) { down = null; return; }
+      active.delete(e.pointerId); this._touches = active.size; if ((this.design && this.design.active) || this.walker.active) { down = null; return; }
       if (drag) { e.stopImmediatePropagation(); const moved = drag.moved; drag = null; if (moved) { this.onChange(); return; } }
       if (down && e.pointerId === down.id && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 7 && e.type === 'pointerup' && this.mode !== 'orbit') this.select(this.pick(e)); // 톡 누르면 선택
       down = null;

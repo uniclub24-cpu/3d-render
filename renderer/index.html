@@ -29,6 +29,7 @@
       <button class="ib" data-tool="roomRect" aria-pressed="false" title="공간 그리기 · 사각형 (끌기)" aria-label="공간 사각형"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1" stroke-dasharray="3 2"/><path d="M9 12h6"/></svg></button>
       <button class="ib" data-tool="roomPoly" aria-pressed="false" title="공간 그리기 · 선 (꼭짓점을 차례로 · 첫 점을 다시 누르면 닫힘)" aria-label="공간 선"><svg viewBox="0 0 24 24"><path d="M4 18l3-12 9 2 4 9z" stroke-dasharray="3 2"/><circle cx="4" cy="18" r="1.5"/><circle cx="7" cy="6" r="1.5"/><circle cx="16" cy="8" r="1.5"/><circle cx="20" cy="17" r="1.5"/></svg></button>
       <button class="ib" id="btnRooms" title="공간 목록 (태그 · 공간만 작업)" aria-label="공간 목록"><svg viewBox="0 0 24 24"><path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10"/></svg></button>
+      <button class="ib" data-tool="measure" aria-pressed="false" title="줄자 (두 점 사이를 끌기 · 2D · 3D 치수)" aria-label="줄자"><svg viewBox="0 0 24 24"><path d="M3 15l12-12 6 6-12 12z"/><path d="M7 11l2 2M10 8l2 2M13 5l2 2"/></svg></button>
       <button class="ib" data-tool="erase" aria-pressed="false" title="지우기 (톡)" aria-label="지우기"><svg viewBox="0 0 24 24"><path d="M8 20h12M5 14l8-8 6 6-7 7H8z"/></svg></button>
       <button class="ib" id="btnFit" title="도면 전체 보기" aria-label="도면 전체 보기"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     </div>
@@ -37,7 +38,8 @@
   <!-- 상단 바: 홈 · 이름 · 되돌리기 · 화면 나누기 · 파일 (폰에서도 전부 보이는 것만) -->
   <header id="topbar" role="toolbar" aria-label="프로젝트">
     <button class="ib" id="btnHome" aria-label="홈 (프로젝트 목록 · 계정 · AI)" title="홈 · 내 프로젝트"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg></button>
-    <div class="title"><b id="projName">BYR2</b><small id="saveState" class="savest" aria-live="polite"></small><select id="levelSel" aria-label="층" hidden></select></div>
+    <div class="title"><b id="projName">BYR2</b><small id="saveState" class="savest" aria-live="polite"></small></div>
+    <select id="levelSel" aria-label="층" title="층 고르기" hidden></select>
     <div class="grow"></div>
     <button class="ib" id="btnUndo" aria-label="되돌리기" title="되돌리기"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
     <button class="ib wide" id="btnRedo" aria-label="다시 실행" title="다시 실행"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
@@ -99,6 +101,12 @@
   </section>
 
   <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- 걷기 모드 -->
+  <div id="walkUI" hidden>
+    <div id="walkPad" aria-label="이동 조이스틱"><i></i></div>
+    <div class="wbtns"><button class="btn" id="walkUp" aria-label="눈높이 올리기">눈 ▲</button><button class="btn" id="walkDown" aria-label="눈높이 내리기">눈 ▼</button><button class="btn" id="walkThrough" aria-pressed="false">통과</button><button class="btn pri" id="walkExit">걷기 끝</button></div>
+  </div>
 
   <!-- 홈 (대시보드): 이어서 하기 · 내 프로젝트 · 계정 · AI -->
   <section id="home" aria-label="홈" hidden>

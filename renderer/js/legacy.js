@@ -13,7 +13,7 @@ export const VERSION = 2; // 2: 단(lift) 높이를 기물 elev 에 넣지 않�
 
 const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
 const uid = (p) => p + Math.random().toString(36).slice(2, 9);
-const LEVEL_KEYS = ['walls', 'openings', 'items', 'rooms', 'ceilingH', 'slabH', 'floor', 'bg'];
+const LEVEL_KEYS = ['walls', 'openings', 'items', 'rooms', 'ceilingH', 'slabH', 'soffitH', 'floor', 'bg', 'ceiling'];
 const OPDEF = { slidepass: [900, 600, 900], slide: [1800, 2100, 0], pass: [900, 600, 900], arch: [1200, 2400, 0], door1: [900, 2100, 0], door2: [1600, 2300, 0], auto: [1800, 2300, 0], window: [1800, 1500, 900], full: [2400, 2400, 0] };
 
 /** 파일 내용(JSON 값)에서 기존 프로젝트들을 찾아낸다 */
@@ -110,7 +110,8 @@ function convertLevel(meta, D, base, lib, report) {
   }
   report.walls += walls.length; report.openings += openings.length; report.rooms += rooms.length; report.items += items.length;
   const bg = D.bg && D.bg.src ? { src: D.bg.src, wmm: num(D.bg.wmm, 10000), x: num(D.bg.x), y: num(D.bg.y), opacity: num(D.bg.opacity, 0.5) } : null;
-  return { ...meta, ceilingH, bg, floor: { color: (D.floor && D.floor.color) || '#c9c3b8', finish: (D.floor && D.floor.type) || 'epoxy' }, walls, openings, rooms, items };
+  const ceiling = D.ceiling && typeof D.ceiling === 'object' ? { on: D.ceiling.on !== false, color: D.ceiling.color || '#f3f1ec', opacity: num(D.ceiling.opacity, 1) } : { on: true };
+  return { ...meta, ceilingH, bg, ceiling, soffitH: num(D.soffitH, 2400), slabH, floor: { color: (D.floor && D.floor.color) || '#c9c3b8', finish: (D.floor && D.floor.type) || 'epoxy' }, walls, openings, rooms, items };
 }
 
 /** 조명 · 열 기물의 기본 광원 */
@@ -129,7 +130,7 @@ export function emptyProject(name = '새 프로젝트', W = 8000, D = 6000) {
   const pts = [[0, 0], [W, 0], [W, D], [0, D]];
   return {
     format: FORMAT, version: VERSION, id: uid('p'), name, wallT: 150, activeLevel: 0,
-    levels: [{ id: 'L1', name: '1층', elev: 0, ceilingH: 2700, floor: { color: '#c9c3b8', finish: 'tile' }, rooms: [], openings: [], items: [],
+    levels: [{ id: 'L1', name: '1층', elev: 0, ceilingH: 2700, slabH: 3300, soffitH: 2400, ceiling: { on: true }, dims: [], soffits: [], floor: { color: '#c9c3b8', finish: 'tile' }, rooms: [], openings: [], items: [],
       walls: pts.map((p, i) => { const q = pts[(i + 1) % 4]; return { id: uid('w'), x1: p[0], y1: p[1], x2: q[0], y2: q[1], t: 150, h: 2700, color: '#ece8e1', finish: 'paint' }; }) }],
   };
 }

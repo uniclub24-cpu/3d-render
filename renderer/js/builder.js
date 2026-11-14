@@ -199,3 +199,24 @@ function slopedRoom(r) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals();
   const m = new THREE.Mesh(g, floorMaterial(r.finish, r.color)); m.receiveShadow = true; m.name = r.name; m.userData.roomId = r.id; return m;
 }
+
+/** 천장: 공간(방)마다 · 공간이 없으면 벽 테두리 전체. 아래를 보는 면만 그려서 위에서 내려다보면 투명하게 보인다 */
+export function buildCeiling(level) {
+  const root = new THREE.Group(); root.name = '천장'; const C = level.ceiling || {}; root.visible = C.on !== false;
+  const H = level.ceilingH || 2700, mat = new THREE.MeshStandardMaterial({ color: C.color || '#f3f1ec', roughness: 0.92, metalness: 0, transparent: (C.opacity ?? 1) < 1, opacity: C.opacity ?? 1 });
+  const polys = (level.rooms || []).filter((r) => r.pts && r.pts.length >= 3).map((r) => ({ pts: r.pts, h: r.ceilH || H }));
+  if (!polys.length) { const b = levelBounds(level); polys.push({ pts: [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]], h: H }); }
+  for (const P of polys) {
+    const g = new THREE.ShapeGeometry(new THREE.Shape(P.pts.map((p) => new THREE.Vector2(p[0] * MM, p[1] * MM)))); g.rotateX(Math.PI / 2);
+    const n = g.attributes.normal; let flip = false; g.computeVertexNormals(); if (n && g.attributes.normal.getY(0) > 0) flip = true; // 아래를 보게
+    if (flip) { const idx = g.index.array; for (let i = 0; i < idx.length; i += 3) { const t = idx[i]; idx[i] = idx[i + 1]; idx[i + 1] = t; } g.computeVertexNormals(); }
+    const m = new THREE.Mesh(g, mat); m.position.y = P.h * MM; m.receiveShadow = true; m.castShadow = false; m.name = '천장판'; root.add(m);
+  }
+  // 천장 가벽(단 내림): level.soffits = [{ pts, h(내려온 아래면 높이) }]
+  for (const S of level.soffits || []) {
+    if (!S.pts || S.pts.length < 3) continue; const top = H, bot = S.h || level.soffitH || 2400; if (bot >= top) continue;
+    const g = new THREE.ExtrudeGeometry(new THREE.Shape(S.pts.map((p) => new THREE.Vector2(p[0] * MM, -p[1] * MM))), { depth: (top - bot) * MM, bevelEnabled: false }); g.rotateX(-Math.PI / 2); g.translate(0, bot * MM, 0);
+    const m = new THREE.Mesh(g, mat); m.castShadow = false; m.receiveShadow = true; m.name = '가벽'; root.add(m);
+  }
+  return root;
+}

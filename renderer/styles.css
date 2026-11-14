@@ -183,3 +183,12 @@ button { cursor: pointer; }
 #styleMenu { top: auto; bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
 .btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; vertical-align: -4px; margin-right: 4px; }
 #fileMenu { max-height: calc(100% - 180px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); overflow-y: auto; }
+
+/* 걷기 */
+#walkUI[hidden] { display: none; }
+#walkPad { position: absolute; z-index: 30; left: calc(24px + env(safe-area-inset-left, 0px)); bottom: calc(96px + env(safe-area-inset-bottom, 0px)); width: 128px; height: 128px; border-radius: 64px; background: rgba(20, 22, 28, .45); border: 2px solid rgba(255, 255, 255, .35); touch-action: none; display: grid; place-items: center; backdrop-filter: blur(6px); }
+#walkPad i { width: 52px; height: 52px; border-radius: 26px; background: rgba(255, 255, 255, .85); box-shadow: 0 4px 14px rgba(0, 0, 0, .3); pointer-events: none; transition: transform .05s; }
+@media (pointer: fine) { #walkPad { opacity: .55; } }
+#walkUI .wbtns { position: absolute; z-index: 30; right: calc(16px + env(safe-area-inset-right, 0px)); top: calc(78px + env(safe-area-inset-top, 0px)); display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+#walkUI .btn[aria-pressed="true"] { background: var(--accent); color: #fff; }
+#topbar #levelSel { min-height: 36px; max-width: 84px; font-size: 13px; padding: 0 4px; }

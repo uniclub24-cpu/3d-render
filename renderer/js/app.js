@@ -10,7 +10,7 @@ import * as lib2 from './store.js';
 import * as SL from './slope.js';
 import { ENVTYPES, ENVCOL, ENVLV, envOf, envFront } from './env.js';
 import { bakeParts, applyParts } from './design.js';
-export const APP_VERSION = '2.1.2';
+export const APP_VERSION = '2.1.3';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -42,7 +42,7 @@ function redo() { if (!S.redo.length) return; S.undo.push(S.last); restore(S.red
 async function setModel(model, fit = true) {
   if (S.model && S.model !== model) await lib2.flush();
   S.model = migrate(model, S.lib); S.undo.length = S.redo.length = 0; S.last = snap(); setFocus(null);
-  await restoreAssets(); S.sel = null; engine.setLevel(level()); applyEnv(); loadRender(); if (fit) { engine.view('iso'); plan.fit(); } plan.select(null, true); syncBar(); renderProps();
+  await restoreAssets(); S.sel = null; engine.setLevel(level()); applyEnv(); loadRender(); syncCeilBtn(); if (fit) { engine.view('iso'); plan.fit(); } plan.select(null, true); syncBar(); renderProps();
   try { await lib2.saveLocal(S.model); setSaveState('이 기기에 저장됨'); } catch (e) { console.warn(e); } refreshBad(); if (cloud.session()) lib2.scheduleSync(2000);
 }
 function syncBar() {
@@ -154,6 +154,7 @@ const ACT = {
   home: () => showHome(),
   quit: () => quitApp(),
   library: () => { S.panel = 'library'; S.propsOpen = true; renderProps(); },
+  levels: () => { S.panel = 'levels'; S.propsOpen = true; renderProps(); },
   rooms: () => { S.panel = 'rooms'; S.propsOpen = true; renderProps(); },
   bg: () => { S.panel = 'bg'; S.propsOpen = true; renderProps(); },
   open: async () => handleFiles(await openFiles({ title: 'BYR 프로젝트', extensions: ['json'] })),
@@ -188,6 +189,7 @@ function renderProps() {
   if (S.panel === 'design') return renderDesign(body);
   if (S.panel === 'library') return renderLibrary(body);
   if (S.panel === 'rooms') return renderRooms(body);
+  if (S.panel === 'levels') return renderLevels(body);
   if (S.panel === 'bg') return renderBg(body);
   if (selRoom()) return renderRoom(body, selRoom());
   if (S.panel === 'account') return renderAccount(body);
@@ -300,6 +302,7 @@ function renderRoom(body, r) {
     <div class="chips">${Object.keys(KINDS).map((k) => `<button data-kind="${k}" aria-pressed="${r.kind === k}"><i class="dot" style="background:${KINDS[k]}"></i>${k}</button>`).join('')}</div>
     <div class="btns"><button class="btn ${S.focus === r.id ? 'pri' : ''}" data-ra="focus">${S.focus === r.id ? '전체 보기로' : '이 공간만 작업'}</button><button class="btn" data-ra="export">별도 프로젝트로 보관</button></div>
     <div class="sec">바닥</div>
+    <div class="row">${num('천장 높이 (비우면 층 기본)', 'ceilH', r.ceilH || '')}</div>
     <div class="row">${num('단 높이 (mm)', 'lift', r.lift || 0)}<label class="fld">마감<select data-r="finish">${Object.entries(FLOORS).map(([k, n]) => `<option value="${k}" ${r.finish === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label><label class="fld">색<input type="color" data-r="color" value="${/^#[0-9a-f]{6}$/i.test(r.color) ? r.color : '#c9c3b8'}"></label></div>
     <div class="sec">구배 (물빠짐 경사) · 직선 구배라 타일이 그대로</div>
     <div class="chips">${[0.5, 1, 1.5, 2, 3].map((v) => `<button data-pct="${v}" aria-pressed="${Math.abs(v - pct) < 0.01}">${v}%</button>`).join('')}</div>
@@ -314,7 +317,7 @@ function renderRoom(body, r) {
     <p class="hint">2D 에서 공간을 고르면 꼭짓점(동그라미)을 끌어 모양을 바꿀 수 있어요.</p>`;
   const live = () => { engine.rebuildStructure(); };
   $$('[data-r]', body).forEach((i) => { const k = i.dataset.r; if (k === 'color') { i.oninput = () => { r.color = i.value; live(); }; i.onchange = () => commit(); return; } i.onchange = () => { r[k] = k === 'name' ? i.value.trim() || r.name : i.value; live(); commit(); renderProps(); }; });
-  $$('[data-k]', body).forEach((i) => (i.onchange = () => { r.lift = clamp(Math.round(+i.value || 0), 0, 3000); live(); commit(); renderProps(); }));
+  $$('[data-k]', body).forEach((i) => (i.onchange = () => { const v = Math.round(+i.value || 0); if (i.dataset.k === 'ceilH') { if (v >= 1800) r.ceilH = Math.min(12000, v); else delete r.ceilH; } else r.lift = clamp(v, 0, 3000); live(); commit(); renderProps(); }));
   $$('[data-kind]', body).forEach((b) => (b.onclick = () => { const old = r.kind; r.kind = b.dataset.kind; if (!r.name || /^공간 \d+$/.test(r.name) || r.name === old) r.name = level().rooms.some((q) => q !== r && q.name === r.kind) ? `${r.kind} ${level().rooms.filter((q) => q.kind === r.kind).length}` : r.kind; commit(); renderProps(); }));
   const applyPct = (v) => { SW.pct = clamp(Math.round((+v || 1) * 100) / 100, 0.1, 25); if (r.slope && r.slope.drain) { r.slope.deg = SL.pct2deg(SW.pct); live(); commit(); renderProps(); } else startPick(r, 'pt'); };
   $$('[data-pct]', body).forEach((b) => (b.onclick = () => applyPct(+b.dataset.pct)));
@@ -360,6 +363,51 @@ function renderRooms(body) {
   $$('[data-room]', body).forEach((b) => (b.onclick = () => { setFocus(b.dataset.room); setSel({ kind: 'room', id: b.dataset.room }); }));
   const a = $('[data-ra=all]', body); if (a) a.onclick = () => { setFocus(null); renderProps(); };
 }
+
+/* ----- 층 · 천장 · 치수 ----- */
+function renderLevels(body) {
+  const M = S.model, L = level(), C = L.ceiling || {};
+  $('#propsTitle').textContent = '층 · 천장';
+  body.innerHTML = `<div class="plist">${M.levels.map((l, i) => `<div class="prow ${i === M.activeLevel ? 'on' : ''}"><button data-lv="${i}"><b>${esc(l.name)}</b><small>바닥 +${(l.elev || 0).toLocaleString()} · 천장 ${l.ceilingH || 2700} · 벽 ${l.walls.length} · 기물 ${l.items.length}</small></button></div>`).join('')}</div>
+    <div class="btns"><button class="btn pri" data-la="add">층 추가 (바깥 벽 복사)</button><button class="btn" data-la="blank">빈 층 추가</button><button class="btn" data-la="dup">이 층 복제</button></div>
+    <div class="sec">지금 층 · ${esc(L.name)}</div>
+    <label class="fld">이름<input type="text" data-l="name" value="${esc(L.name)}"></label>
+    <div class="row">${num('바닥 높이 (아래층 기준)', 'elev', L.elev || 0)}${num('층고 · 슬래브', 'slabH', L.slabH || 3300)}</div>
+    <div class="sec">천장</div>
+    <label class="tog">천장 보이기 (위에서 보면 투명)<input type="checkbox" data-c="on" ${C.on !== false ? 'checked' : ''}></label>
+    <div class="row">${num('천장 마감 높이', 'ceilingH', L.ceilingH || 2700)}${num('천장 가벽 높이', 'soffitH', L.soffitH || 2400)}</div>
+    <div class="row"><label class="fld">천장 색<input type="color" data-c="color" value="${/^#[0-9a-f]{6}$/i.test(C.color) ? C.color : '#f3f1ec'}"></label><label class="fld">불투명도<input type="range" data-c="opacity" min="0.2" max="1" step="0.05" value="${C.opacity ?? 1}"></label></div>
+    <div class="btns"><button class="btn" data-la="soffit">천장 가벽 그리기 (2D 사각형)</button><button class="btn" data-la="wallsH">벽 높이를 천장에 맞추기</button></div>
+    <p class="hint">천장 설비(조명 · 에어컨 · 덕트)는 기물 목록 "천장 설비" 에서 넣으면 천장 높이에 붙어요. 공간마다 천장 높이를 다르게 하려면 공간 카드의 "천장 높이"를 쓰세요.</p>
+    <div class="sec">치수</div>
+    <label class="tog">줄자 치수 보이기 (2D · 3D)<input type="checkbox" data-d="dimsOn" ${L.dimsOn !== false ? 'checked' : ''}></label>
+    <label class="tog">벽 길이 자동 표시 (2D)<input type="checkbox" id="autoDims" ${plan.autoDims ? 'checked' : ''}></label>
+    <div class="btns"><button class="btn" data-la="measure">줄자로 재기</button><button class="btn danger" data-la="clearDims" ${(L.dims || []).length ? '' : 'disabled'}>치수 모두 지우기 (${(L.dims || []).length})</button></div>
+    ${M.levels.length > 1 ? '<div class="btns"><button class="btn danger" data-la="del">이 층 지우기</button></div>' : ''}`;
+  const reb = () => { engine.setLevel(L); applyEnv(); commit(); syncBar(); };
+  $$('[data-lv]', body).forEach((b) => (b.onclick = () => { switchLevel(+b.dataset.lv); renderProps(); }));
+  $('[data-l=name]', body).onchange = (e) => { L.name = e.target.value.trim() || L.name; commit(); syncBar(); renderProps(); };
+  $$('[data-k]', body).forEach((i) => (i.onchange = () => { const v = Math.round(+i.value); if (!Number.isFinite(v)) return; const k = i.dataset.k; L[k] = k === 'elev' ? v : clamp(v, 1800, 12000);
+    if (k === 'ceilingH') for (const it of L.items) { const Lb = S.lib[it.type]; if (Lb && (Lb.layer === 'ceil' || Lb.layer === 'ceiling') && !it.manualElev) it.elev = Math.max(0, L.ceilingH - it.h); } // 천장 설비도 따라 올라가고 내려감
+    reb(); renderProps(); }));
+  $$('[data-c]', body).forEach((i) => { const k = i.dataset.c; const set = () => { L.ceiling ||= {}; L.ceiling[k] = k === 'on' ? i.checked : k === 'opacity' ? +i.value : i.value; };
+    if (k === 'color' || k === 'opacity') { i.oninput = () => { set(); engine.rebuildStructure(); }; i.onchange = () => commit(); } else i.onchange = () => { set(); engine.rebuildStructure(); syncCeilBtn(); commit(); }; });
+  $('[data-d=dimsOn]', body).onchange = (e) => { L.dimsOn = e.target.checked; engine.rebuildStructure(); commit(); };
+  $('#autoDims').onchange = (e) => { plan.autoDims = e.target.checked; store.set('byr.autoDims', plan.autoDims); plan.redraw(); };
+  $$('[data-la]', body).forEach((b) => (b.onclick = async () => { const a = b.dataset.la;
+    if (a === 'add' || a === 'blank' || a === 'dup') { const top = M.levels.reduce((m, l) => Math.max(m, (l.elev || 0) + (l.slabH || 3300)), 0), n = M.levels.length + 1;
+      const nl = a === 'dup' ? { ...JSON.parse(JSON.stringify(L)), id: uid('L'), name: `${L.name} 복제` } : { id: uid('L'), name: `${n}층`, elev: top, ceilingH: L.ceilingH || 2700, slabH: L.slabH || 3300, floor: { ...L.floor }, rooms: [], openings: [], items: [], walls: [] };
+      if (a === 'dup') { nl.elev = top; const re = (o) => ({ ...o, id: uid(o.id[0] || 'x') }); const wm = new Map(); nl.walls = nl.walls.map((w) => { const q = re(w); wm.set(w.id, q.id); return q; }); nl.openings = nl.openings.map((o) => ({ ...re(o), wall: wm.get(o.wall) })); nl.items = nl.items.map(re); nl.rooms = nl.rooms.map((r) => ({ ...re(r), slope: null })); }
+      if (a === 'add') { const b2 = levelBox(); nl.walls = L.walls.filter((w) => [w.x1, w.x2].every((x) => Math.abs(x - b2[0]) < 400 || Math.abs(x - b2[2]) < 400) || [w.y1, w.y2].every((y) => Math.abs(y - b2[1]) < 400 || Math.abs(y - b2[3]) < 400)).map((w) => ({ ...w, id: uid('w') })); if (!nl.walls.length) nl.walls = L.walls.map((w) => ({ ...w, id: uid('w') })); }
+      M.levels.push(nl); switchLevel(M.levels.length - 1); commit(); renderProps(); toast(`"${nl.name}" 을 만들었어요 · 위 막대의 층 고르기로 오가요`); }
+    if (a === 'del') { if (!(await ask(`"${L.name}" 을 지울까요?`, '이 층의 벽 · 기물 · 공간이 모두 지워져요. 되돌리기로 살릴 수 있어요.', [{ label: '취소', value: false }, { label: '지우기', value: true, kind: 'danger' }]))) return; M.levels.splice(M.activeLevel, 1); switchLevel(Math.max(0, M.activeLevel - 1)); commit(); renderProps(); }
+    if (a === 'soffit') setPlanTool('soffitRect');
+    if (a === 'measure') setPlanTool('measure');
+    if (a === 'clearDims') { L.dims = []; engine.rebuildStructure(); commit(); renderProps(); }
+    if (a === 'wallsH') { for (const w of L.walls) w.h = L.ceilingH || 2700; engine.rebuildStructure(); commit(); toast('벽 높이를 천장 높이에 맞췄어요'); }
+  }));
+}
+function switchLevel(i) { S.model.activeLevel = clamp(i, 0, S.model.levels.length - 1); S.sel = null; setFocus(null); engine.setLevel(level()); applyEnv(); engine.view('iso'); plan.fit(); plan.select(null, true); syncBar(); syncCeilBtn(); refreshBad(); }
 
 /* ----- 배경 (주변 거리) · 도면 밑그림 ----- */
 function renderBg(body) {
@@ -648,6 +696,8 @@ const DOCK = [
   { mode: 'move', label: '이동', icon: '<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>' },
   { mode: 'orbit', label: '둘러보기', icon: '<circle cx="12" cy="12" r="3"/><path d="M2.5 12c2.4-4.4 5.6-6.6 9.5-6.6s7.1 2.2 9.5 6.6c-2.4 4.4-5.6 6.6-9.5 6.6S4.9 16.4 2.5 12z"/>' },
   '|',
+  { act: 'levels', label: '층', icon: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>' },
+  { run: () => setPlanTool('measure'), label: '줄자', icon: '<path d="M3 15l12-12 6 6-12 12z"/><path d="M7 11l2 2M10 8l2 2M13 5l2 2"/>' },
   { act: 'rooms', label: '공간', icon: '<path d="M4 4h16v16H4z" stroke-dasharray="3 2.5"/><path d="M9 12h6"/>' },
   { run: () => slopeTool(), label: '구배', icon: '<path d="M3 17L21 9M3 17h18"/><path d="M15 7l3 2.6-3.6 1.1"/>' },
   { act: 'bg', label: '배경', icon: '<path d="M3 20h18M5 20V10h4v10M11 20V5h5v15M18 20v-7h2"/>' },
@@ -658,8 +708,8 @@ const DOCK = [
   '|',
   { act: 'ai', label: 'AI', icon: '<path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4z"/><path d="M18 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>' },
   '|',
-  { soon: '2차', label: '천장', icon: '<path d="M3 6h18M6 6v3M12 6v3M18 6v3"/><circle cx="12" cy="13" r="2.5"/>' },
-  { soon: '2차', label: '걷기', icon: '<circle cx="13" cy="4.5" r="1.8"/><path d="M10 21l2-6-2.5-2.5L11 8l3 2 3 1M12 15l3 6M9.5 12.5L7 14"/>' },
+  { id: 'dkCeil', run: () => toggleCeiling(), label: '천장', icon: '<path d="M3 6h18M6 6v3M12 6v3M18 6v3"/><circle cx="12" cy="13" r="2.5"/>' },
+  { run: () => startWalk(), label: '걷기', icon: '<circle cx="13" cy="4.5" r="1.8"/><path d="M10 21l2-6-2.5-2.5L11 8l3 2 3 1M12 15l3 6M9.5 12.5L7 14"/>' },
   { soon: '3차', label: '설치물', icon: '<path d="M3 18h18M5 18v-4h14v4"/><path d="M8 14V9h8v5" stroke-dasharray="2 2"/>' },
   { soon: '3차', label: '공기', icon: '<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h8"/>' },
   { soon: '3차', label: '동선', icon: '<circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h6a3 3 0 0 0 0-6h-2a3 3 0 0 1 0-6h6" stroke-dasharray="2.5 2"/>' },
@@ -671,6 +721,14 @@ function buildDock() {
     if (d.soon) b.onclick = () => toast(`"${d.label}" 은 ${d.soon} 업데이트에서 들어와요`);
     else if (d.act) b.onclick = () => { closeHome(); ACT[d.act](); };
     else if (d.run) b.onclick = () => { closeHome(); d.run(); }; });
+}
+function stopWalk() { engine.walker.stop(); }
+function setPlanTool(t) { if (S.pane === '3d') setPane('split'); plan.setTool(t); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q.dataset.tool === t))); if (t === 'measure') toast('2D 에서 잴 두 점 사이를 끌어요 · 벽 끝 · 모서리에 붙어요 · 3D 에도 보여요', 5000); }
+function toggleCeiling() { const L = level(); L.ceiling ||= {}; L.ceiling.on = L.ceiling.on === false; engine.showCeiling(L.ceiling.on); syncCeilBtn(); commit(); toast(L.ceiling.on ? '천장을 보여요 · 위에서 내려다보면 투명해요' : '천장을 껐어요'); }
+function syncCeilBtn() { const b = $('#dkCeil'); if (b && level()) b.setAttribute('aria-pressed', String((level().ceiling || {}).on !== false)); }
+function startWalk() {
+  closeHome(); S.walkPane = S.pane; if (S.pane !== '3d') setPane('3d'); S.propsOpen = false; renderProps(); closeDrawer(); setSel(null);
+  setTimeout(() => { engine.walker.start(); toast(window.matchMedia('(pointer: coarse)').matches ? '왼쪽 아래 동그라미로 걷고, 화면을 끌어 둘러봐요' : 'W A S D · 방향키로 걷고, 끌어서 둘러봐요 · Q/E 눈높이 · Shift 빨리 · Esc 끝', 6000); }, 60);
 }
 /** 구배 단추: 공간을 고른 상태면 그 공간의 구배, 아니면 공간 고르기부터 */
 function slopeTool() {
@@ -700,6 +758,7 @@ async function quitApp() {
 /** 뒤로 가기 (안드로이드 뒤로 단추 · Esc): 열린 것부터 하나씩 닫고, 마지막엔 홈 → 종료 확인 */
 async function goBack() {
   if (S.dlgClose) return S.dlgClose();
+  if (engine.walker.active) return stopWalk();
   for (const id of ['#fileMenu', '#styleMenu']) if (!$(id).hidden) { $(id).hidden = true; return; }
   if ($('#drawer').classList.contains('open')) return closeDrawer();
   if (engine.design.active) { if (await ask('디자인 수정을 그만할까요?', '저장하지 않은 모양 변경은 버려져요.', [{ label: '계속 수정', value: false }, { label: '그만하기', value: true, kind: 'danger' }])) endDesign(false); return; }
@@ -764,6 +823,8 @@ async function boot() {
     onSelect: (sel) => setSel(sel),
     onLive: (kind, x) => { if (kind === 'structure') liveStructure(); else if (kind === 'item') { engine.moveItem(x); drainMoved(x); } else if (kind === 'item-removed') engine.removeItem(x); },
     onRoom: (pts) => newRoom(pts),
+    onDim: (d) => { const L = level(); (L.dims ||= []).push({ id: uid('d'), ...d }); engine.rebuildStructure(); commit(); toast(`${Math.round(Math.hypot(d.x2 - d.x1, d.y2 - d.y1)).toLocaleString()} mm · 지우기 도구로 누르면 지워져요`, 2500); },
+    onSoffit: (pts) => { const L = level(); (L.soffits ||= []).push({ id: uid('s'), pts, h: L.soffitH || 2400 }); engine.rebuildStructure(); commit(); toast(`천장 가벽을 넣었어요 · 아래면 ${L.soffitH || 2400}mm (층 · 천장 카드에서 높이 바꾸기)`, 3500); },
     onChange: (msg) => { commit(); renderProps(); if (msg) toast(msg, 2200); },
   });
   $$('[data-tool]').forEach((b) => (b.onclick = () => { plan.setTool(b.dataset.tool); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q === b))); }));
@@ -787,7 +848,13 @@ async function boot() {
   $('#btnUndo').onclick = undo; $('#btnRedo').onclick = redo;
   $('#fab').onclick = () => { S.propsOpen = !S.propsOpen; S.panel = 'props'; renderProps(); };
   $('#btnPropsClose').onclick = () => { S.propsOpen = false; renderProps(); };
-  $('#levelSel').onchange = (e) => { S.model.activeLevel = +e.target.value; S.sel = null; engine.setLevel(level()); engine.view('iso'); plan.fit(); plan.select(null, true); renderProps(); };
+  $('#levelSel').onchange = (e) => { switchLevel(+e.target.value); renderProps(); };
+  plan.autoDims = !!store.get('byr.autoDims', false);
+  $('#walkExit').onclick = () => stopWalk();
+  engine.walker.onStop = () => { if (S.walkPane && S.walkPane !== S.pane) setPane(S.walkPane); S.walkPane = null; };
+  $('#walkUp').onclick = () => { engine.walker.eye = Math.min(4000, engine.walker.eye + 200); toast(`눈높이 ${Math.round(engine.walker.eye)}mm`, 1200); };
+  $('#walkDown').onclick = () => { engine.walker.eye = Math.max(400, engine.walker.eye - 200); toast(`눈높이 ${Math.round(engine.walker.eye)}mm`, 1200); };
+  $('#walkThrough').onclick = (e) => { engine.walker.through = !engine.walker.through; e.currentTarget.setAttribute('aria-pressed', String(engine.walker.through)); toast(engine.walker.through ? '벽 · 기물을 통과해요' : '벽에 막혀요 (문으로 지나가요)', 1600); };
   const fm = $('#fileMenu'), fb = $('#btnFile');
   fb.onclick = () => { fm.hidden = !fm.hidden; fb.setAttribute('aria-expanded', String(!fm.hidden)); };
   fm.onclick = async (e) => { const a = e.target.closest('[data-act]'); if (!a) return; fm.hidden = true; fb.setAttribute('aria-expanded', 'false'); try { await ACT[a.dataset.act](); } catch (er) { console.error(er); toast('작업을 마치지 못했어요: ' + (er.message || er)); } };
