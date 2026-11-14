@@ -121,10 +121,10 @@ export class Plan2D {
       if (end) { const mates = this.ends().filter((q) => Math.hypot(q.x - end.x, q.y - end.y) < 1); act = this._dragEnds(mates, start); return; }
       const hit = this.pickAt(p);
       if (!hit) { act = { pan: true, start, last: start, tapEmpty: true }; return; }
-      if (!this.sel || this.sel.id !== hit.id) this.select(hit);
+      const was = !!(this.sel && this.sel.id === hit.id); if (!was) this.select(hit);
       if (hit.kind === 'item') act = this._dragItem(this.L.items.find((i) => i.id === hit.id), p, start);
       else if (hit.kind === 'opening') act = this._dragOpening(this.L.openings.find((o) => o.id === hit.id), start);
-      else if (hit.kind === 'room') act = { pan: true, start, last: start }; // 공간은 눌러서 고르기만 (꼭짓점으로 모양 바꾸기)
+      else if (hit.kind === 'room') act = was ? this._dragRoom(this.L.rooms.find((r) => r.id === hit.id), p, start) : { pan: true, start, last: start }; // 고른 공간을 다시 끌면 공간째 옮기기, 아니면 화면 이동
       else act = this._dragWall(this.L.walls.find((w) => w.id === hit.id), p, start);
     });
     cv.addEventListener('pointermove', (e) => {
@@ -168,6 +168,12 @@ export class Plan2D {
     };
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', (e) => { if (act && act.cancel) act.cancel(); act = null; up(e); });
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (this.chain || this.rpts || this.lpts)) { this.chain = null; this.rpts = null; this.lpts = null; this.redraw(); } if (e.key === 'Enter' && this.lpts && this.lpts.length >= 2) { this.api.onLine(this.lpts.map((v) => [Math.round(v.x), Math.round(v.y)])); this.lpts = null; this.redraw(); } });
+  }
+  _dragRoom(r, p0, start) {
+    const pts0 = r.pts.map((q) => [...q]), its = this.L.items.filter((it) => pointInPoly(it.x, it.y, r.pts)).map((it) => ({ it, x: it.x, y: it.y })), sl = r.slope ? JSON.parse(JSON.stringify(r.slope)) : null;
+    const apply = (dx, dy) => { r.pts = pts0.map((q) => [q[0] + dx, q[1] + dy]); for (const q of its) { q.it.x = q.x + dx; q.it.y = q.y + dy; } if (sl) { r.slope.drain = [sl.drain[0] + dx, sl.drain[1] + dy]; if (sl.drain2) r.slope.drain2 = [sl.drain2[0] + dx, sl.drain2[1] + dy]; } };
+    return { start, move: (p) => { apply(Math.round((p.x - p0.x) / GRID) * GRID, Math.round((p.y - p0.y) / GRID) * GRID); this.api.onLive('structure'); for (const q of its) this.api.onLive('item', q.it); },
+      done: (m) => m && this.api.onChange(its.length ? `공간과 안의 기물 ${its.length}개를 옮겼어요` : ''), cancel: () => { apply(0, 0); this.api.onLive('structure'); for (const q of its) this.api.onLive('item', q.it); } };
   }
   _dragRoomVtx(r, k, start) {
     const o = [...r.pts[k]];

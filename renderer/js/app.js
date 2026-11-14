@@ -12,7 +12,9 @@ import { ENVTYPES, ENVCOL, ENVLV, envOf, envFront } from './env.js';
 import { bakeParts, applyParts } from './design.js';
 import { LINEKINDS, lineCat, XRN } from './lines.js';
 import { ROLES, FAMN, SIMCOL } from './sim.js';
-export const APP_VERSION = '2.1.4';
+import { findFaces } from './rooms.js';
+import { WFI } from './builder.js';
+export const APP_VERSION = '2.1.5';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -321,7 +323,17 @@ function renderRoom(body, r) {
     <p class="hint">${bad.length ? `<b class="warn">조정 필요 ${bad.length}개</b> · 구배 · 단 때문에 다리가 바닥에 묻혀요` : on ? `${on}개가 구배 위에 올라가 있어요` : its.length ? '충돌 없음' : '이 공간에 기물이 없어요'}</p>
     <div class="btns"><button class="btn ${bad.length ? 'pri' : ''}" data-ra="fit" ${bad.length ? '' : 'disabled'}>조정 필요 · 일괄조정</button><button class="btn" data-ra="fitall" ${its.length ? '' : 'disabled'}>모두 올리기</button><button class="btn" data-ra="unfit" ${on ? '' : 'disabled'}>원래 높이로</button></div>
     <div class="btns"><button class="btn" data-ra="off" ${s ? '' : 'disabled'}>구배 지우기</button><button class="btn danger" data-ra="del">공간 지우기</button></div>
-    <p class="hint">2D 에서 공간을 고르면 꼭짓점(동그라미)을 끌어 모양을 바꿀 수 있어요.</p>`;
+    <div class="sec">공간 프리셋 · 이 공간 안에만</div>
+    <div class="chips">${(SPBUILT[r.kind] || []).map((b, i) => `<button data-sp="b${i}">${esc(b.n)}</button>`).join('')}${spList().filter((q) => !q.kind || q.kind === r.kind || true).map((q) => `<button data-sp="m${q.id}">★ ${esc(q.name)}</button>`).join('')}</div>
+    ${(SPBUILT[r.kind] || []).length || spList().length ? '' : '<p class="hint">태그(주방 · 홀 · 화장실 …)를 고르면 맞는 프리셋이 떠요</p>'}
+    <div class="row2"><label class="tog" style="flex:1">기존 기물 지우고 적용<input type="checkbox" id="spClear"></label><button class="btn" data-ra="spSave">이 구성 저장</button></div>
+    <div class="sec">바닥 채움층 (양생 · 단 올림) · 합계 ${(r.layers || []).reduce((a, q) => a + (+q[1] || 0), 0)}mm</div>
+    <div class="chips">${Object.entries(FILLSETS).map(([k, v]) => `<button data-fs="${k}">${v[0]}</button>`).join('')}</div>
+    ${(r.layers || []).map((q, i) => `<div class="row2"><select data-fm="${i}">${Object.entries(FILLS).map(([k, v]) => `<option value="${k}" ${q[0] === k ? 'selected' : ''}>${v[0]}</option>`).join('')}</select><input type="number" data-ft="${i}" value="${q[1]}" style="width:80px" aria-label="두께 mm"><span class="hint">mm</span><button class="btn danger" data-fd="${i}">✕</button></div>`).join('')}
+    <div class="btns"><button class="btn" data-ra="fillAdd">층 더하기</button>${(r.layers || []).length ? '<button class="btn" data-ra="fillLift">단 높이를 채움층 합계로</button>' : ''}</div>
+    <div class="sec">이 공간에서 보일 것 (레이어)</div>
+    <div class="chips">${Object.entries(LAYERN).map(([k, n]) => `<button data-lyr="${k}" aria-pressed="${!(r.vis && r.vis[k] === false)}">${n}</button>`).join('')}</div>
+    <p class="hint">2D 에서 공간을 고르면 꼭짓점(동그라미)을 끌어 모양을 바꾸고, 공간 안쪽을 끌면 공간째(안의 기물까지) 옮겨요.</p>`;
   const live = () => { engine.rebuildStructure(); };
   $$('[data-r]', body).forEach((i) => { const k = i.dataset.r; if (k === 'color') { i.oninput = () => { r.color = i.value; live(); }; i.onchange = () => commit(); return; } i.onchange = () => { r[k] = k === 'name' ? i.value.trim() || r.name : i.value; live(); commit(); renderProps(); }; });
   $$('[data-k]', body).forEach((i) => (i.onchange = () => { const v = Math.round(+i.value || 0); if (i.dataset.k === 'ceilH') { if (v >= 1800) r.ceilH = Math.min(12000, v); else delete r.ceilH; } else r.lift = clamp(v, 0, 3000); live(); commit(); renderProps(); }));
@@ -329,6 +341,12 @@ function renderRoom(body, r) {
   const applyPct = (v) => { SW.pct = clamp(Math.round((+v || 1) * 100) / 100, 0.1, 25); if (r.slope && r.slope.drain) { r.slope.deg = SL.pct2deg(SW.pct); live(); commit(); renderProps(); } else startPick(r, 'pt'); };
   $$('[data-pct]', body).forEach((b) => (b.onclick = () => applyPct(+b.dataset.pct)));
   $('#swPct').onchange = (e) => applyPct(e.target.value); $('#swDeg').onchange = (e) => applyPct(Math.tan(((+e.target.value || 0.5) * Math.PI) / 180) * 100);
+  $$('[data-sp]', body).forEach((b) => (b.onclick = () => spApply(r, b.dataset.sp, $('#spClear').checked)));
+  $$('[data-fs]', body).forEach((b) => (b.onclick = () => { r.layers = FILLSETS[b.dataset.fs][1].map((q) => [...q]); commit(); renderProps(); }));
+  $$('[data-fm]', body).forEach((i) => (i.onchange = () => { r.layers[+i.dataset.fm][0] = i.value; commit(); }));
+  $$('[data-ft]', body).forEach((i) => (i.onchange = () => { r.layers[+i.dataset.ft][1] = Math.max(1, Math.round(+i.value || 1)); commit(); renderProps(); }));
+  $$('[data-fd]', body).forEach((b) => (b.onclick = () => { r.layers.splice(+b.dataset.fd, 1); if (!r.layers.length) delete r.layers; commit(); renderProps(); }));
+  $$('[data-lyr]', body).forEach((b) => (b.onclick = () => { r.vis ||= {}; const k = b.dataset.lyr; r.vis[k] = r.vis[k] === false; if (Object.values(r.vis).every((v) => v !== false)) delete r.vis; engine.applyFocus(); plan.redraw(); commit(); renderProps(); }));
   $$('[data-dr]', body).forEach((b) => (b.onclick = () => { const it = L.items.find((q) => q.id === b.dataset.dr); if (it) setDrain(r, it, `"${it.name}" 쪽으로 구배를 잡았어요`); renderProps(); }));
   $$('[data-ra]', body).forEach((b) => (b.onclick = () => {
     const a = b.dataset.ra;
@@ -340,6 +358,9 @@ function renderRoom(body, r) {
     if (a === 'del') { if (S.focus === r.id) setFocus(null); plan.erase({ kind: 'room', id: r.id }); }
     if (a === 'focus') { setFocus(S.focus === r.id ? null : r.id); renderProps(); }
     if (a === 'export') exportRoom(r);
+    if (a === 'spSave') spSave(r);
+    if (a === 'fillAdd') { (r.layers ||= []).push(['mortar', 50]); commit(); renderProps(); }
+    if (a === 'fillLift') { r.lift = (r.layers || []).reduce((s2, q) => s2 + (+q[1] || 0), 0); live(); commit(); renderProps(); toast(`단 높이를 ${r.lift}mm 로 맞췄어요`); }
   }));
 }
 /** 공간 하나(안의 기물 · 닿은 벽 · 문/창)를 별도 프로젝트로 보관 — 내 프로젝트 목록에 들어가고 파일로도 받을 수 있다 */
@@ -362,11 +383,75 @@ async function exportRoom(r) {
   toast(`"${m.name}" 을 내 프로젝트에 보관했어요 (기물 ${m.levels[0].items.length} · 벽 ${walls.length})`, 6000);
   S.panel = 'library'; renderProps();
 }
+/* ----- 공간 프리셋 · 채움층 · 자동 인식 (기존 앱 v21) ----- */
+const FILLS = { concrete: ['콘크리트', '#a9a9a4'], mortar: ['시멘트 몰탈', '#bdbab2'], sand: ['모래', '#d9c49a'], gravel: ['자갈 · 쇄석', '#9a958c'], foam: ['기포 콘크리트 (경량)', '#e3e1da'], xps: ['단열재 (XPS)', '#7fb2d9'], mesh: ['와이어 메쉬', '#6f7377'], waterproof: ['방수층 (액체 · 우레탄)', '#4f7fa6'], selflevel: ['셀프 레벨링', '#cfcdc6'], heating: ['난방 배관층', '#d98a6a'], epoxy: ['에폭시 코팅', '#7c8f86'], tilebed: ['타일 붙임 몰탈', '#b7b2a6'] };
+const FILLSETS = { kitchen: ['주방 (방수 + 몰탈 + 타일)', [['concrete', 60], ['waterproof', 3], ['mortar', 50], ['tilebed', 20]]], raise: ['단 올림 (모래 + 몰탈)', [['sand', 80], ['mortar', 50]]], light: ['경량 단 올림 (기포 + 몰탈)', [['foam', 100], ['mortar', 40]]], heat: ['주거 난방 (단열 + 기포 + 배관 + 몰탈)', [['xps', 30], ['foam', 40], ['heating', 20], ['mortar', 40]]], factory: ['공장 (콘크리트 + 메쉬 + 에폭시)', [['gravel', 100], ['concrete', 150], ['mesh', 5], ['epoxy', 3]]] };
+const LAYERN = { floor: '바닥 기물', upper: '벽 상부', ceil: '천장 설비', elec: '전기', plumb: '배관 · 수전', deco: '장식' };
+const SPBUILT = {
+  주방: [{ n: '기본 주방 (벽 따라: 작업대 · 싱크 · 냉장고 · 레인지)', wall: ['k_reach', 'k_work18', 'sink2', 'k_work09', 'range', 'k_dwU', 'k_upper'] }],
+  홀: [{ n: '4인 테이블 배치', grid: { t: 't4', ch: 'chair', gap: 900 } }, { n: '2인 테이블 배치', grid: { t: 't2', ch: 'chair', gap: 800 } }],
+  화장실: [{ n: '남녀 공용 (양변기 · 소변기 · 세면대)', wall: ['toilet', 'b_urinal', 'washbasin', 'b_handdry', 'b_paper'] }, { n: '칸막이 화장실 2칸 + 세면대', wall: ['b_stall', 'b_stall', 'b_basin2', 'b_handdry'] }, { n: '가정 욕실 (변기 · 세면장 · 샤워)', wall: ['b_toiletB', 'b_vanity9', 'b_showerB'] }],
+  거실: [{ n: '거실 (소파 · TV장 · 테이블)', living: 1 }],
+  사무실: [{ n: '사무실 (책상 · 의자 · 캐비닛)', office: 1 }],
+  창고: [{ n: '창고 (랙 벽 따라)', wall: ['m_lrack', 'm_lrack', 'm_lrack', 'm_lrack', 'm_lrack', 'm_lrack'] }],
+  공장: [{ n: '공장 (랙 · 작업대 · 컨베이어)', wall: ['m_prack', 'm_bench', 'm_bench', 'm_mlocker', 'm_ext'], center: ['m_conv6'] }],
+  복도: [{ n: '복도 (라인 조명 · 비상등)', corridor: 1 }],
+};
+const spList = () => store.get('byr.spacepre', []) || [];
+function spBox(r) { const xs = r.pts.map((p) => p[0]), ys = r.pts.map((p) => p[1]); return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), get W() { return this.x1 - this.x0; }, get D() { return this.y1 - this.y0; } }; }
+function spItem(id, x, y, rot, r) { const L = S.lib[id]; if (!L) return null; const lv = level(), elev = L.elev != null ? L.elev : L.layer === 'ceil' || L.layer === 'ceiling' ? (lv.ceilingH || 2700) - L.h : 0;
+  return { id: uid('i'), type: id, name: L.name, x: Math.round(x), y: Math.round(y), elev, rot, w: L.w, d: L.d, h: L.h, color: null, mat: null, parts: null, light: L.light ? defaultLight(L) : null, kw: L.kw, room: r.id }; }
+function spDoorsOn(side, B) { const out = [], L = level(); for (const o of L.openings) { const w = L.walls.find((q) => q.id === o.wall); if (!w) continue; const len = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1, ux = (w.x2 - w.x1) / len, uy = (w.y2 - w.y1) / len, a = [w.x1 + ux * (o.t - o.w / 2), w.y1 + uy * (o.t - o.w / 2)], b = [w.x1 + ux * (o.t + o.w / 2), w.y1 + uy * (o.t + o.w / 2)], m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], tol = 400;
+    if (side === 'N' && Math.abs(m[1] - B.y0) < tol) out.push([Math.min(a[0], b[0]) - B.x0 - 250, Math.max(a[0], b[0]) - B.x0 + 250]);
+    if (side === 'S' && Math.abs(m[1] - B.y1) < tol) out.push([B.x1 - Math.max(a[0], b[0]) - 250, B.x1 - Math.min(a[0], b[0]) + 250]);
+    if (side === 'E' && Math.abs(m[0] - B.x1) < tol) out.push([Math.min(a[1], b[1]) - B.y0 - 250, Math.max(a[1], b[1]) - B.y0 + 250]);
+    if (side === 'W' && Math.abs(m[0] - B.x0) < tol) out.push([B.y1 - Math.max(a[1], b[1]) - 250, B.y1 - Math.min(a[1], b[1]) + 250]); } return out; }
+function spPlaceWall(r, ids, rep) { const B = spBox(r), sides = [['N', B.W], ['E', B.D], ['S', B.W], ['W', B.D]], doors = Object.fromEntries(sides.map(([sd]) => [sd, spDoorsOn(sd, B)])); let si = 0, u = 50;
+  for (const id of ids) { const L = S.lib[id]; if (!L) { rep.miss.push(id); continue; } const w = L.w, d = L.d; let ok = false;
+    while (si < 4) { const [sd, len] = sides[si]; const hit = doors[sd].find(([a, b]) => u < b && u + w > a); if (hit) { u = hit[1]; continue; } if (u + w <= len - 50) { ok = true; break; } si++; u = d + 80; }
+    if (!ok) { rep.miss.push(L.name); continue; } const sd = sides[si][0], c = u + w / 2, off = d / 2 + 10;
+    const [x, y, rot] = sd === 'N' ? [B.x0 + c, B.y0 + off, 0] : sd === 'E' ? [B.x1 - off, B.y0 + c, 90] : sd === 'S' ? [B.x1 - c, B.y1 - off, 180] : [B.x0 + off, B.y1 - c, 270];
+    if (!SL.pointInPoly(x, y, r.pts)) { u += w + 20; rep.miss.push(L.name); continue; } const it = spItem(id, x, y, rot, r); level().items.push(it); rep.placed++; u += w + (L.layer === 'upper' ? 0 : 20); } }
+function spPlaceCenter(r, ids, rep) { const B = spBox(r); ids.forEach((id, k) => { const L = S.lib[id]; if (!L) return; const x = B.x0 + B.W / 2, y = B.y0 + (B.D * (k + 1)) / (ids.length + 1); if (SL.pointInPoly(x, y, r.pts)) { level().items.push(spItem(id, x, y, B.W >= B.D ? 0 : 90, r)); rep.placed++; } }); }
+function spPlaceGrid(r, g, rep) { const B = spBox(r), T = S.lib[g.t], C = S.lib[g.ch]; if (!T || !C) return; const cw = T.w + 2 * (C.d + 100) + g.gap, ch = T.d + g.gap; let n = 0;
+  for (let y = B.y0 + 700 + T.d / 2; y + T.d / 2 < B.y1 - 600; y += ch) for (let x = B.x0 + 600 + T.w / 2 + C.d; x + T.w / 2 + C.d < B.x1 - 600; x += cw) {
+    if (![[x - T.w / 2 - C.d, y - T.d / 2], [x + T.w / 2 + C.d, y + T.d / 2], [x, y]].every((p) => SL.pointInPoly(p[0], p[1], r.pts))) continue; level().items.push(spItem(g.t, x, y, 0, r)); rep.placed++; n++;
+    const per = T.w > 900 ? 2 : 1; for (let k = 0; k < per; k++) { const cx = x - T.w / 2 + (T.w * (k + 0.5)) / per; level().items.push(spItem(g.ch, cx, y - T.d / 2 - C.d / 2 + 60, 180, r), spItem(g.ch, cx, y + T.d / 2 + C.d / 2 - 60, 0, r)); rep.placed += 2; rep.seats += 2; } }
+  if (!n) rep.miss.push('테이블 (공간이 좁아요)'); }
+function spApply(r, v, clear) {
+  const rep = { placed: 0, seats: 0, miss: [] }, L = level(), inR = (it) => SL.pointInPoly(it.x, it.y, r.pts);
+  if (v[0] === 'm') { const p = spList().find((q) => 'm' + q.id === v); if (!p) return; if (clear) L.items = L.items.filter((it) => !inR(it)); const B = spBox(r);
+    for (const q of p.items) { const it = { ...JSON.parse(JSON.stringify(q.it)), id: uid('i'), x: Math.round(B.x0 + q.u * B.W), y: Math.round(B.y0 + q.v * B.D), room: r.id }; if (SL.pointInPoly(it.x, it.y, r.pts)) { L.items.push(it); rep.placed++; } else rep.miss.push(it.name || it.type); }
+    if (p.floor) Object.assign(r, JSON.parse(JSON.stringify(p.floor))); }
+  else { const b = (SPBUILT[r.kind] || [])[+v.slice(1)]; if (!b) return; if (clear) L.items = L.items.filter((it) => !inR(it));
+    if (b.wall) spPlaceWall(r, b.wall, rep); if (b.center) spPlaceCenter(r, b.center, rep); if (b.grid) spPlaceGrid(r, b.grid, rep);
+    if (b.living) { spPlaceWall(r, ['f_tv18'], rep); const B = spBox(r), Sf = S.lib.f_sofa2, T = S.lib.f_ctable; if (Sf && T) { const y = B.y1 - Sf.d / 2 - 150, x = B.x0 + B.W / 2; L.items.push(spItem('f_sofa2', x, y, 0, r), spItem('f_ctable', x, y - Sf.d / 2 - 500, 0, r)); rep.placed += 2; } }
+    if (b.office) { spPlaceWall(r, ['f_book12', 'f_cabinet', 'f_file'], rep); const B = spBox(r), D = S.lib.f_desk14, C = S.lib.f_och; if (D && C) for (let y = B.y0 + 1500; y + D.d < B.y1 - 900; y += D.d + 1300) for (let x = B.x0 + 800 + D.w / 2; x + D.w / 2 < B.x1 - 600; x += D.w + 300) { if (!SL.pointInPoly(x, y, r.pts)) continue; L.items.push(spItem('f_desk14', x, y, 0, r), spItem('f_och', x, y + D.d / 2 + 350, 0, r)); rep.placed += 2; } }
+    if (b.corridor) { const B = spBox(r), Ll = S.lib.l_line, long = B.W >= B.D; if (Ll) { const n = Math.max(1, Math.floor((long ? B.W : B.D) / 2500)); for (let k = 0; k < n; k++) { const t = (k + 0.5) / n; L.items.push(spItem('l_line', long ? B.x0 + B.W * t : B.x0 + B.W / 2, long ? B.y0 + B.D / 2 : B.y0 + B.D * t, long ? 0 : 90, r)); rep.placed++; } } spPlaceWall(r, ['l_exit', 'm_ext'], rep); } }
+  L.items = L.items.filter(Boolean); engine.setLevel(L); applyEnv(); commit(); renderProps();
+  toast(`"${r.name}"에 ${rep.placed}개 놓았어요${rep.seats ? ` · 좌석 ${rep.seats}석` : ''}${rep.miss.length ? ` · 못 넣음: ${[...new Set(rep.miss)].slice(0, 3).join(', ')}` : ''}`, 6000);
+}
+function spSave(r) { const B = spBox(r), its = level().items.filter((it) => SL.pointInPoly(it.x, it.y, r.pts)); if (!its.length) return toast('이 공간 안에 기물이 없어요');
+  const Lst = spList(); Lst.push({ id: uid('sp'), name: `${r.name} 구성 (${its.length}개)`, kind: r.kind, items: its.map((it) => { const c = JSON.parse(JSON.stringify(it)); delete c.id; delete c.room; return { u: (it.x - B.x0) / (B.W || 1), v: (it.y - B.y0) / (B.D || 1), it: c }; }), floor: { finish: r.finish, color: r.color, lift: r.lift || 0, layers: r.layers } });
+  store.set('byr.spacepre', Lst); renderProps(); toast('이 구성을 프리셋(★)으로 저장했어요 · 다른 공간에도 적용할 수 있어요'); }
+/** 벽으로 둘러싼 공간을 찾아 아직 공간이 없는 곳에 만든다 */
+function autoRooms(at) {
+  const L = level(), faces = findFaces(L.walls); let made = 0, last = null;
+  for (const f of faces) { const c = SL.polyCenter(f.pts); if (at && !SL.pointInPoly(at.x, at.y, f.pts)) continue; if (!at && L.rooms.some((r) => SL.pointInPoly(c[0], c[1], r.pts))) continue;
+    if (at) { const ex = L.rooms.find((r) => SL.pointInPoly(at.x, at.y, r.pts)); if (ex && Math.abs(SL.polyArea(ex.pts) - f.area) < 1e5) { setSel({ kind: 'room', id: ex.id }); return toast('이미 공간이 있어요'); } }
+    const r = { id: uid('r'), name: `공간 ${L.rooms.length + 1}`, kind: '기타', pts: f.pts, lift: 0, color: '#c9c3b8', finish: 'tile', slope: null }; L.rooms.push(r); made++; last = r; if (at) break; }
+  if (!made) return toast(at ? '여기는 벽으로 닫혀 있지 않아요 · 벽 끝을 이어 주세요' : '새로 찾은 공간이 없어요 (이미 다 있거나 벽이 닫혀 있지 않아요)', 5000);
+  engine.rebuildStructure(); commit(); if (last) setSel({ kind: 'room', id: last.id }); toast(`공간 ${made}개를 찾았어요 · 태그(주방 · 홀 …)를 붙여 주세요`, 5000);
+}
+
 function renderRooms(body) {
   const L = level(); $('#propsTitle').textContent = '공간 목록';
   body.innerHTML = `<p class="hint">2D 도구의 "공간 (사각형)" 으로 끌거나 "공간 (선)" 으로 꼭짓점을 차례로 눌러 공간을 만들고 태그를 붙여요. 누르면 그 공간만 따로 작업해요.</p>
     <div class="plist">${L.rooms.length ? L.rooms.map((r) => `<button data-room="${r.id}"><b><i class="dot" style="background:${KINDS[r.kind] || '#ccc'}"></i>${esc(r.name)}</b><small>${esc(r.kind || '')} · ${(SL.polyArea(r.pts) / 1e6).toFixed(1)}㎡ · 기물 ${L.items.filter((it) => SL.pointInPoly(it.x, it.y, r.pts)).length}개${r.slope ? ' · 구배' : ''}${r.lift ? ` · 단 +${r.lift}` : ''}</small></button>`).join('') : '<p class="hint">아직 공간이 없어요</p>'}</div>
+    <div class="btns"><button class="btn pri" data-ra="auto">벽 따라 공간 자동 찾기</button><button class="btn" data-ra="autoTap">눌러서 찾기 (2D)</button></div>
     ${S.focus ? '<div class="btns"><button class="btn" data-ra="all">전체 보기로</button></div>' : ''}`;
+  $('[data-ra=auto]', body).onclick = () => autoRooms(null);
+  $('[data-ra=autoTap]', body).onclick = () => { if (S.pane === '3d') setPane('split'); plan.setTool('pick'); plan.picker = (p) => { plan.picker = null; plan.setTool('select'); autoRooms(p); }; toast('2D 에서 벽으로 둘러싼 곳 안쪽을 누르세요'); };
   $$('[data-room]', body).forEach((b) => (b.onclick = () => { setFocus(b.dataset.room); setSel({ kind: 'room', id: b.dataset.room }); }));
   const a = $('[data-ra=all]', body); if (a) a.onclick = () => { setFocus(null); renderProps(); };
 }
@@ -516,6 +601,7 @@ function startDesign(it) {
   toast('점 모드: 파란 점을 끌어요 · 면 모드: 부품을 고른 뒤 면을 밀고 당겨요 · 부품을 누르면 그 부품을 골라요', 7000);
 }
 function endDesign(save) {
+  if (DE.wall) return endWallDesign(save);
   const d = engine.design, it = DE.it; if (!it || !d.active) return;
   if (save) { const parts = d.result(); applyParts(it, parts); } d.stop(); DE.it = null;
   engine.rebuildItem(it); S.panel = 'props'; if (save) commit(); setSel({ kind: 'item', id: it.id }); if (save) toast('디자인을 저장했어요');
@@ -530,7 +616,7 @@ function loadMyLib() { const my = store.get('byr.mylib', {}); for (const [id, v]
 function renderDesign(body) {
   const d = engine.design; if (!d.active) { S.panel = 'props'; return renderProps(); }
   const P = d.parts, i = d.sel, p = P[i] || {};
-  $('#propsTitle').textContent = `디자인 수정 · ${DE.it.name}`;
+  $('#propsTitle').textContent = DE.wall ? '벽 디자인 수정' : `디자인 수정 · ${DE.it.name}`;
   body.innerHTML = `<div class="chips"><button data-dm="point" aria-pressed="${d.mode === 'point'}">점 끌기</button><button data-dm="face" aria-pressed="${d.mode === 'face'}">면 밀고 당기기</button></div>
     ${d.mode === 'point' ? `<div class="chips"><span class="hint">방향</span>${[['free', '자유'], ['x', '가로 X'], ['y', '높이 Y'], ['z', '깊이 Z']].map(([k, n]) => `<button data-ax="${k}" aria-pressed="${d.axis === k}">${n}</button>`).join('')}</div>` : '<p class="hint">고른 부품의 면을 눌러 바깥 · 안쪽으로 끌어요 (5mm 단위)</p>'}
     <label class="tog">붙은 점 같이 움직이기<input type="checkbox" id="deWeld" ${d.weld ? 'checked' : ''}></label>
@@ -583,7 +669,16 @@ function renderWall(body, w) {
     <div class="row"><label class="fld">색<input type="color" data-k="color" value="${/^#[0-9a-f]{6}$/i.test(w.color) ? w.color : '#ece8e1'}"></label>
     <label class="fld">마감<select data-k="finish">${Object.entries(FINISH).map(([k, n]) => `<option value="${k}" ${w.finish === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
     <p class="hint">길이를 바꾸면 끝점(두 번째 점)이 움직여요. 2D 에서 파란 끝점을 끌면 붙은 벽도 같이 따라와요.</p>
-    <div class="btns"><button class="btn" data-a="split">가운데서 나누기</button><button class="btn danger" data-a="del">삭제</button></div>`;
+    <div class="sec">나누기 · 돌리기 · 잇기</div>
+    <div class="btns"><button class="btn" data-a="split">2등분</button><button class="btn" data-a="split3">3등분</button><button class="btn" data-a="splitAt">시작점에서 …mm 에서 나누기</button></div>
+    <div class="btns"><button class="btn" data-a="rot45">45° 돌리기</button><button class="btn" data-a="rot90">90° 돌리기</button><button class="btn" data-a="rotAt">각도 직접</button><button class="btn" data-a="join">다른 벽과 잇기</button></div>
+    <div class="row" id="wNum" hidden><label class="fld"><span id="wNumL"></span><input type="number" id="wNumV" inputmode="decimal"></label><div class="btns" style="align-items:flex-end"><button class="btn pri" id="wNumOk">적용</button></div></div>
+    <div class="sec">모양 · 마감</div>
+    <div class="btns"><button class="btn pri" data-a="design">벽 디자인 수정 (모서리 점 끌기)</button>${w.form ? '<button class="btn" data-a="formReset">모양 되돌리기</button>' : ''}</div>
+    <div class="row"><label class="fld">시트지 면<select id="shSide"><option value="">없음</option><option value="a" ${w.sheet && w.sheet.side === 'a' ? 'selected' : ''}>앞면</option><option value="b" ${w.sheet && w.sheet.side === 'b' ? 'selected' : ''}>뒷면</option><option value="both" ${w.sheet && w.sheet.side === 'both' ? 'selected' : ''}>양면</option></select></label><label class="fld">시트지 색<input type="color" id="shCol" value="${w.sheet && /^#[0-9a-f]{6}$/i.test(w.sheet.color) ? w.sheet.color : '#d8c7a6'}"></label></div>
+    <div class="btns"><button class="btn" data-a="shImg">${w.sheet && w.sheet.img ? '시트지 이미지 바꾸기' : '시트지에 이미지 (사진 · 패턴)'}</button>${w.sheet && w.sheet.img ? '<button class="btn" data-a="shImgDel">이미지 빼기</button>' : ''}<button class="btn" data-a="art">벽 그림 넣기</button></div>
+    ${(w.arts || []).map((A, i) => `<div class="row2"><span class="hint">그림 ${i + 1} · ${A.w}×${A.h}</span><span><button class="btn" data-art="${i}:big">크게</button><button class="btn" data-art="${i}:small">작게</button><button class="btn" data-art="${i}:left">◀</button><button class="btn" data-art="${i}:right">▶</button><button class="btn" data-art="${i}:up">▲</button><button class="btn" data-art="${i}:down">▼</button><button class="btn danger" data-art="${i}:del">✕</button></span></div>`).join('')}
+    <div class="btns"><button class="btn danger" data-a="del">삭제</button></div>`;
   $$('[data-k]', body).forEach((i) => {
     const k = i.dataset.k;
     if (k === 'color') { i.oninput = () => { w.color = i.value; liveStructure(); }; i.onchange = () => commit(); return; }
@@ -598,13 +693,65 @@ function renderWall(body, w) {
       engine.rebuildStructure(); commit(); renderProps();
     };
   });
-  $$('[data-a]', body).forEach((b) => (b.onclick = () => {
-    if (b.dataset.a === 'del') return plan.erase({ kind: 'wall', id: w.id });
-    const mx = Math.round((w.x1 + w.x2) / 2), my = Math.round((w.y1 + w.y2) / 2), L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1), n = { ...w, id: uid('w'), x1: mx, y1: my };
-    for (const o of level().openings) if (o.wall === w.id) { // 가운데에 걸친 문/창은 가운데가 있는 쪽 절반에 넣고 그 안에 맞춘다
-      if (o.t > L / 2) { o.wall = n.id; o.t -= L / 2; } fitOpening(o, L / 2); }
-    w.x2 = mx; w.y2 = my; level().walls.push(n); engine.rebuildStructure(); commit(); toast('벽을 둘로 나눴어요');
+  const done = (msg) => { engine.rebuildStructure(); commit(); renderProps(); if (msg) toast(msg); };
+  const askNum = (label, v, fn) => { $('#wNum').hidden = false; $('#wNumL').textContent = label; $('#wNumV').value = v; $('#wNumV').focus(); $('#wNumOk').onclick = () => { const x = +$('#wNumV').value; if (Number.isFinite(x)) fn(x); }; };
+  $('#shSide').onchange = (e) => { const v = e.target.value; if (!v) delete w.sheet; else w.sheet = { ...(w.sheet || { color: $('#shCol').value }), side: v }; done(); };
+  $('#shCol').oninput = (e) => { if (!w.sheet) return; w.sheet.color = e.target.value; liveStructure(); }; $('#shCol').onchange = () => { if (w.sheet) commit(); };
+  $$('[data-art]', body).forEach((b) => (b.onclick = () => { const [i, a] = b.dataset.art.split(':'), A = w.arts[+i], L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+    if (a === 'del') w.arts.splice(+i, 1); if (a === 'big' || a === 'small') { const k = a === 'big' ? 1.15 : 1 / 1.15; A.w = Math.round(A.w * k); A.h = Math.round(A.h * k); }
+    if (a === 'left') A.t = Math.max(A.w / 2, A.t - 100); if (a === 'right') A.t = Math.min(L - A.w / 2, A.t + 100); if (a === 'up') A.y = Math.min(w.h - A.h, A.y + 100); if (a === 'down') A.y = Math.max(0, A.y - 100); done(); }));
+  $$('[data-a]', body).forEach((b) => (b.onclick = async () => {
+    const a = b.dataset.a, L0 = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+    if (a === 'del') return plan.erase({ kind: 'wall', id: w.id });
+    if (a === 'split' || a === 'split3') { const n = a === 'split' ? 2 : 3; splitWall(w, [...Array(n - 1).keys()].map((k) => (L0 * (k + 1)) / n)); return done(`벽을 ${n}개로 나눴어요`); }
+    if (a === 'splitAt') return askNum(`시작점에서 몇 mm (0 ~ ${Math.round(L0)})`, Math.round(L0 / 2), (x) => { if (x > 50 && x < L0 - 50) { splitWall(w, [x]); done('벽을 나눴어요'); } });
+    if (a === 'rot45' || a === 'rot90') { rotateWall(w, a === 'rot45' ? 45 : 90); return done(); }
+    if (a === 'rotAt') return askNum('돌릴 각도 (°, 시계 방향 +)', 15, (x) => { rotateWall(w, x); done(); });
+    if (a === 'join') { if (S.pane === '3d') setPane('split'); plan.setTool('pick'); toast('2D 에서 이을 다른 벽을 누르세요 · 두 벽을 늘이거나 줄여서 모서리를 맞춰요', 5000);
+      plan.picker = (p) => { const h = plan.hitWall(p); if (!h || h.w === w) return toast('다른 벽을 눌러 주세요'); plan.picker = null; plan.setTool('select'); if (joinWalls(w, h.w)) done('두 벽을 이었어요'); else toast('나란한 벽은 이을 수 없어요'); }; return; }
+    if (a === 'design') return startWallDesign(w);
+    if (a === 'formReset') { delete w.form; return done('벽 모양을 되돌렸어요'); }
+    if (a === 'shImg' || a === 'art') { const f = (await openFiles({ title: a === 'art' ? '벽 그림' : '시트지 이미지', extensions: ['png', 'jpg', 'jpeg', 'webp'] }))[0]; if (!f) return; const src = await shrinkToDataUrl(f.data, 1600);
+      if (a === 'shImg') { w.sheet = { side: 'a', color: '#ffffff', ...(w.sheet || {}), img: src }; return done('시트지에 이미지를 입혔어요'); }
+      const im = await createImageBitmap(new Blob([f.data])), ww = Math.min(1500, L0 * 0.6), hh = Math.round((ww * im.height) / im.width); (w.arts ||= []).push({ id: uid('a'), img: src, t: Math.round(L0 / 2), y: Math.round(Math.max(0, Math.min(w.h - hh, 1500 - hh / 2))), w: Math.round(ww), h: hh, side: 'a' }); return done('벽 그림을 넣었어요 · ◀ ▶ ▲ ▼ 로 옮겨요'); }
+    if (a === 'shImgDel') { delete w.sheet.img; return done(); }
   }));
+}
+/** 벽을 시작점에서 at(mm 목록) 자리에서 자른다 · 문/창은 들어 있는 조각으로 */
+function splitWall(w, at) {
+  const L = level(), len = Math.hypot(w.x2 - w.x1, w.y2 - w.y1), ux = (w.x2 - w.x1) / len, uy = (w.y2 - w.y1) / len, cuts = [0, ...at.sort((a, b) => a - b), len], pieces = [];
+  for (let k = 1; k < cuts.length; k++) pieces.push(k === 1 ? w : { ...w, id: uid('w'), form: undefined, arts: undefined });
+  pieces.forEach((p, k) => { p.x1 = Math.round(w.x1 + ux * cuts[k]) || p.x1; });
+  const x0 = w.x1, y0 = w.y1; pieces.forEach((p, k) => { p.x1 = Math.round(x0 + ux * cuts[k]); p.y1 = Math.round(y0 + uy * cuts[k]); p.x2 = Math.round(x0 + ux * cuts[k + 1]); p.y2 = Math.round(y0 + uy * cuts[k + 1]); if (k) L.walls.push(p); });
+  for (const o of L.openings) if (o.wall === w.id) { let k = cuts.findIndex((c, i) => i > 0 && o.t <= c); if (k < 1) k = cuts.length - 1; o.wall = pieces[k - 1].id; o.t -= cuts[k - 1]; fitOpening(o, cuts[k] - cuts[k - 1]); }
+  delete w.form;
+}
+/** 벽을 가운데 기준으로 돌린다 (붙어 있던 이웃 끝은 따라오지 않음) */
+function rotateWall(w, deg) { const cx = (w.x1 + w.x2) / 2, cy = (w.y1 + w.y2) / 2, a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), r = (x, y) => [Math.round(cx + (x - cx) * c - (y - cy) * s), Math.round(cy + (x - cx) * s + (y - cy) * c)]; [w.x1, w.y1] = r(w.x1, w.y1); [w.x2, w.y2] = r(w.x2, w.y2); }
+/** 두 벽의 연장선이 만나는 점까지 가까운 끝을 옮겨 모서리를 만든다 */
+function joinWalls(a, b) {
+  const r = [a.x2 - a.x1, a.y2 - a.y1], s = [b.x2 - b.x1, b.y2 - b.y1], den = r[0] * s[1] - r[1] * s[0]; if (Math.abs(den) < 1e-6) return false;
+  const t = ((b.x1 - a.x1) * s[1] - (b.y1 - a.y1) * s[0]) / den, X = Math.round(a.x1 + r[0] * t), Y = Math.round(a.y1 + r[1] * t);
+  for (const w of [a, b]) { const d1 = Math.hypot(w.x1 - X, w.y1 - Y), d2 = Math.hypot(w.x2 - X, w.y2 - Y), L0 = Math.hypot(w.x2 - w.x1, w.y2 - w.y1); if (d1 < d2) { const shift = Math.hypot(w.x2 - X, w.y2 - Y) - L0; w.x1 = X; w.y1 = Y; for (const o of level().openings) if (o.wall === w.id) { o.t += shift; fitOpening(o, L0 + shift); } } else { w.x2 = X; w.y2 = Y; for (const o of level().openings) if (o.wall === w.id) fitOpening(o, Math.hypot(w.x2 - w.x1, w.y2 - w.y1)); } }
+  return true;
+}
+/** 벽 디자인 수정: 벽 하나를 8 꼭짓점 상자 부품으로 바꿔 디자인 편집기(점 끌기)로 고친 뒤, 이동량을 w.form 으로 저장 */
+function startWallDesign(w) {
+  const L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1), t = w.t / 2, H = w.h, o = (w.form && w.form.o) || Array.from({ length: 8 }, () => [0, 0, 0]);
+  const base = (s, sd, lv) => [s ? L : 0, lv ? H : 0, sd ? t : -t], P = (s, sd, lv) => { const b = base(s, sd, lv), q = o[WFI(s, sd, lv)]; return [b[0] + q[0], b[1] + q[2], b[2] + q[1]]; };
+  const ring = (lv) => [P(0, 0, lv), P(1, 0, lv), P(1, 1, lv), P(0, 1, lv)];
+  const part = { n: 4, v: [...ring(0), ...ring(1)].flat(), c: w.color || '#ece8e1', m: 'plain', own: true };
+  const g = engine.structure.getObjectsByProperty('name', '벽').find((x) => x.userData.wallId === w.id); if (!g) return;
+  if (S.pane === '2d') setPane('split'); DE.it = null; DE.wall = w; const d = engine.design; d.onChange = () => renderProps(); d.onSelect = () => renderProps();
+  d.start({ id: 'wall', name: '벽', w: L, d: w.t, h: H }, [part], g); d.weld = false; S.panel = 'design'; S.propsOpen = true; renderProps();
+  toast('파란 점(모서리)을 끌어 벽 모양을 바꿔요 · 위 끝을 내리면 경사 벽, 두께 쪽을 밀면 두꺼워져요', 6000);
+}
+function endWallDesign(save) {
+  const d = engine.design, w = DE.wall; if (!w) return; if (save) { const v = d.result()[0].v, L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1), t = w.t / 2, H = w.h, o = [];
+    const idx = { '0,0,0': 0, '1,0,0': 1, '1,1,0': 2, '0,1,0': 3, '0,0,1': 4, '1,0,1': 5, '1,1,1': 6, '0,1,1': 7 };
+    for (const [k, i] of Object.entries(idx)) { const [s, sd, lv] = k.split(',').map(Number), b = [s ? L : 0, lv ? H : 0, sd ? t : -t], p = v.slice(i * 3, i * 3 + 3); o[WFI(s, sd, lv)] = [Math.round(p[0] - b[0]), Math.round(p[2] - b[2]), Math.round(p[1] - b[1])]; }
+    if (o.some((q) => q[0] || q[1] || q[2])) w.form = { o }; else delete w.form; }
+  d.stop(); DE.wall = null; S.panel = 'props'; engine.rebuildStructure(); if (save) commit(); setSel({ kind: 'wall', id: w.id }); if (save) toast('벽 모양을 저장했어요');
 }
 const OPS = { door1: '외문', door2: '양문', auto: '자동문', slide: '미닫이문', window: '창', full: '통창', pass: '배식구', slidepass: '미닫이 배식구', arch: '아치 (뚫린 문)' };
 function renderOpening(body, o) {

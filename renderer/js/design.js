@@ -36,9 +36,10 @@ export class DesignEditor {
     this._bind();
   }
   /** it: 기물, parts: 이미 실제 크기(mm)로 굽힌 부품 (app 이 넘김) */
-  start(it, parts) {
+  /** group: 기물이 아닌 것(벽 등)을 고칠 때 그 Three 그룹 (위치 · 방향을 따르고 숨김) */
+  start(it, parts, group) {
     this.it = it; this.parts = clone(parts); this.T = this.parts.map(topo); this.sel = 0; this.vSel = null; this.fSel = null; this.undoStack = [];
-    const g = this.e.itemGroup(it.id); this.hidden = g; if (g) { g.visible = false; this.root.position.copy(g.position); this.root.rotation.copy(g.rotation); }
+    const g = group || this.e.itemGroup(it.id); this.hidden = g; if (g) { g.visible = false; this.root.position.copy(g.position); this.root.rotation.copy(g.rotation); }
     this.root.visible = true; this.active = true; this.e.select(null); const cv = this.e.canvas.getBoundingClientRect(), card = document.querySelector('#props'), cr = card && !card.hidden ? card.getBoundingClientRect() : null, ov = cr && cr.width ? Math.max(0, cv.right - cr.left) : Math.min(340, cv.width * 0.3); this.e.setShift(ov > 0 && ov < cv.width * 0.75 ? Math.round(ov / 2) : 0); /* 오른쪽 패널에 가리지 않게 */ this.rebuild(); this._frame();
   }
   stop() { this.active = false; this.e.setShift(0); this.root.visible = false; this._clear(); if (this.hidden) this.hidden.visible = true; this.hidden = null; }

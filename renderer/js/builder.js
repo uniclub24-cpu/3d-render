@@ -147,6 +147,8 @@ export function buildWalls(level) {
     if (steel.length) g.add(meshOf(steel, material('steel', '#c9ced4')));
     if (glass.length) g.add(meshOf(glass, material('glass', '#bfe3f2'), false));
     if (frost.length) g.add(meshOf(frost, material('frost', '#eef2f4'), false));
+    if (w.form && w.form.o && w.form.o.some((q) => q[0] || q[1] || q[2])) deformWall(g, w, len, w.h, w.t / 2); // 벽 디자인 수정 (8 모서리 끌기)
+    addSheet(g, w, len, ops); // 시트지 · 벽 그림
     root.add(g);
   }
   return root;
@@ -219,4 +221,29 @@ export function buildCeiling(level) {
     const m = new THREE.Mesh(g, mat); m.castShadow = false; m.receiveShadow = true; m.name = '가벽'; root.add(m);
   }
   return root;
+}
+
+/** 벽 디자인 수정: w.form.o = 8 × [du(길이 방향), dv(두께 방향), dy(위)] mm · 번호 = 끝(0 시작 · 1 끝) × 4 + 면(0 −쪽 · 1 +쪽) × 2 + 위아래(0 바닥 · 1 위)
+ *  벽 안 모든 점을 8 모서리 이동량의 3중 선형 보간만큼 옮긴다 (문 · 창 자리도 같이 휜다) */
+export const WFI = (s, sd, lv) => s * 4 + sd * 2 + lv;
+export function wallDeform(o, L, H, t, x, y, z) { const u = Math.min(1, Math.max(0, x / L)), sd = Math.min(1, Math.max(0, (z + t) / (2 * t))), v = Math.min(1, Math.max(0, y / H)); const d = [0, 0, 0];
+  for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) for (let c = 0; c < 2; c++) { const k = (a ? u : 1 - u) * (b ? sd : 1 - sd) * (c ? v : 1 - v); if (!k) continue; const q = o[WFI(a, b, c)]; d[0] += q[0] * k; d[1] += q[1] * k; d[2] += q[2] * k; }
+  return [x + d[0], y + d[2], z + d[1]]; }
+function deformWall(g, w, L, H, t) {
+  g.traverse((m) => { if (!m.isMesh) return; const p = m.geometry.attributes.position; for (let i = 0; i < p.count; i++) { const r = wallDeform(w.form.o, L, H, t, p.getX(i) / MM, p.getY(i) / MM, p.getZ(i) / MM); p.setXYZ(i, r[0] * MM, r[1] * MM, r[2] * MM); } p.needsUpdate = true; m.geometry.computeVertexNormals(); m.geometry.computeBoundingSphere(); });
+}
+/** 시트지(벽 한 면 전체 색 · 이미지) · 벽 그림(이미지 판) — w.sheet = { side: 'a' | 'b' | 'both', color, img, opacity }, w.arts = [{ id, img, t, y, w, h, side }] */
+const texCache = new Map();
+function texOf(src) { if (!src) return null; if (!texCache.has(src)) { const t = new THREE.TextureLoader().load(src); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; texCache.set(src, t); } return texCache.get(src); }
+function addSheet(g, w, len, ops) {
+  const t = (w.t / 2) * MM, H = w.h * MM, L = len * MM, sides = (s) => (s === 'both' ? [1, -1] : s === 'b' ? [-1] : [1]);
+  if (w.sheet) { const S = w.sheet, map = texOf(S.img), mat = new THREE.MeshStandardMaterial({ color: map ? '#ffffff' : S.color || '#d8c7a6', map, roughness: 0.6, transparent: (S.opacity ?? 1) < 1, opacity: S.opacity ?? 1, polygonOffset: true, polygonOffsetFactor: -2 });
+    for (const sd of sides(S.side)) { // 문 · 창 자리는 비운 판
+      const shape = new THREE.Shape([[0, 0], [L, 0], [L, H], [0, H]].map(([x, y]) => new THREE.Vector2(x, y)));
+      for (const q of ops) shape.holes.push(new THREE.Path([[q.a, q.y0], [q.b, q.y0], [q.b, q.y1], [q.a, q.y1]].map(([x, y]) => new THREE.Vector2(x, y))));
+      const geo = new THREE.ShapeGeometry(shape); const uv = geo.attributes.uv, pos = geo.attributes.position; for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / L, pos.getY(i) / H);
+      const m = new THREE.Mesh(geo, mat); m.position.z = sd * (t + 0.002); if (sd < 0) { m.rotation.y = Math.PI; m.position.x = L; } m.receiveShadow = true; m.name = '시트지'; g.add(m); }
+  }
+  for (const A of w.arts || []) { const map = texOf(A.img); if (!map) continue; const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.55, transparent: true, polygonOffset: true, polygonOffsetFactor: -4 });
+    for (const sd of sides(A.side)) { const m = new THREE.Mesh(new THREE.PlaneGeometry(A.w * MM, A.h * MM), mat); m.position.set((sd > 0 ? A.t : len - A.t) * MM + (sd < 0 ? 0 : 0), (A.y + A.h / 2) * MM, sd * (t + 0.004)); if (sd < 0) { m.rotation.y = Math.PI; m.position.x = A.t * MM; } m.name = '벽 그림'; m.userData.artId = A.id; g.add(m); } }
 }

@@ -187,7 +187,8 @@ export class Engine {
   applyFocus() {
     const F = this.focusPts, near = (x, y) => !F || pointInPoly(x, y, F) || F.some((p, i) => { const q = F[(i + 1) % F.length], dx = q[0] - p[0], dy = q[1] - p[1], L = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - p[0]) * dx + (y - p[1]) * dy) / L)); return Math.hypot(p[0] + dx * t - x, p[1] + dy * t - y) < 400; });
     if (!this.level) return;
-    for (const g of this.items.children) { const it = this.level.items.find((q) => q.id === g.userData.itemId); g.visible = !it || near(it.x, it.y); }
+    const hiddenIn = (it) => { const Lb = this.ctx.lib[it.type], ly = Lb ? (Lb.layer === 'ceiling' ? 'ceil' : Lb.layer || 'floor') : 'floor'; for (const r of this.level.rooms || []) if (r.vis && r.vis[ly] === false && pointInPoly(it.x, it.y, r.pts)) return true; return false; };
+    for (const g of this.items.children) { const it = this.level.items.find((q) => q.id === g.userData.itemId); g.visible = !it || (near(it.x, it.y) && !hiddenIn(it)); }
     if (this.structure) for (const g of this.structure.getObjectsByProperty('name', '벽')) { const w = g.userData.wallId && this.level.walls.find((q) => q.id === g.userData.wallId); if (w) g.visible = near((w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2) || (near(w.x1, w.y1) && near(w.x2, w.y2)); }
     if (this.envGroup) this.envGroup.visible = !F;
   }
