@@ -32,6 +32,12 @@ function createWindow() {
     width: 1440, height: 900, minWidth: 900, minHeight: 600, backgroundColor: '#1b1d21', autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
+  // 창 닫기(X) · Alt+F4: 종료할지 묻는다 (작업은 자동 저장돼 있음). 앱 안 "종료" 메뉴는 이미 물었으니 바로 닫는다(__quit).
+  win.on('close', (e) => {
+    if (win.__quit || SMOKE) return; e.preventDefault();
+    dialog.showMessageBox(win, { type: 'question', buttons: ['종료', '취소'], defaultId: 1, cancelId: 1, title: 'BYR2', message: 'BYR2 를 종료할까요?', detail: '작업은 이 PC 에 자동 저장돼 있어요. 다시 켜면 이어서 할 수 있어요.' })
+      .then((r) => { if (r.response === 0) { win.__quit = true; win.close(); } });
+  });
   win.loadURL('app://byr/index.html');
   if (SMOKE) smoke(win);
   // 외부 링크로 창이 넘어가지 않게
@@ -48,6 +54,7 @@ app.whenReady().then(() => {
   });
 
   // 파일 열기: [{ name, path, data(Uint8Array) }]
+  ipcMain.handle('app:quit', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { w.__quit = true; w.close(); } });
   ipcMain.handle('file:open', async (e, opt = {}) => {
     const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
       title: opt.title, filters: opt.filters, properties: ['openFile', ...(opt.multi ? ['multiSelections'] : [])],

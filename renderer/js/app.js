@@ -10,7 +10,7 @@ import * as lib2 from './store.js';
 import * as SL from './slope.js';
 import { ENVTYPES, ENVCOL, ENVLV, envOf, envFront } from './env.js';
 import { bakeParts, applyParts } from './design.js';
-export const APP_VERSION = '2.1.1';
+export const APP_VERSION = '2.1.2';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -148,9 +148,11 @@ const safeName = () => (S.model.name || 'byr').replace(/[\\/:*?"<>|]/g, '_');
 const ACT = {
   new: async () => {
     const empty = !S.model || (S.model.levels.every((L) => !L.items.length && !L.rooms.length && L.walls.length <= 4) && !S.undo.length);
-    if (!empty && !confirm(`"${S.model.name}" 은 내 프로젝트에 저장돼 있어요.\n새 프로젝트를 시작할까요? (지금 화면의 되돌리기 기록은 없어져요)`)) return;
+    if (!empty && !(await ask('새 프로젝트를 시작할까요?', `"${S.model.name}" 은 내 프로젝트에 저장돼 있어요. 지금 화면의 되돌리기 기록은 없어져요.`, [{ label: '취소', value: false }, { label: '새로 시작', value: true, kind: 'pri' }]))) return;
     await lib2.flush(); await setModel(emptyProject()); toast('새 프로젝트 · 이전 작업은 "내 프로젝트"에 있어요');
   },
+  home: () => showHome(),
+  quit: () => quitApp(),
   library: () => { S.panel = 'library'; S.propsOpen = true; renderProps(); },
   rooms: () => { S.panel = 'rooms'; S.propsOpen = true; renderProps(); },
   bg: () => { S.panel = 'bg'; S.propsOpen = true; renderProps(); },
@@ -637,7 +639,118 @@ function closeDrawer() { $('#drawer').classList.remove('open'); $('#drawer').set
 function setMode(m) { engine.mode = m; $$('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m))); }
 
 /* ---------- 시작 ---------- */
+/* ---------- 도구 막대: 한 줄 = 버튼 하나 (2차 · 3차 도구는 soon 을 지우고 run 만 붙이면 된다) ---------- */
+const SV = (d) => `<svg viewBox="0 0 24 24">${d}</svg>`;
+const DOCK = [
+  { id: 'btnDrawer', label: '기물', icon: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><path d="M16.5 13.5v6M13.5 16.5h6"/>', attrs: 'aria-expanded="false"' },
+  '|',
+  { mode: 'select', label: '선택', icon: '<path d="M6 3l13 8-6 1.8L10.5 19z"/>' },
+  { mode: 'move', label: '이동', icon: '<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>' },
+  { mode: 'orbit', label: '둘러보기', icon: '<circle cx="12" cy="12" r="3"/><path d="M2.5 12c2.4-4.4 5.6-6.6 9.5-6.6s7.1 2.2 9.5 6.6c-2.4 4.4-5.6 6.6-9.5 6.6S4.9 16.4 2.5 12z"/>' },
+  '|',
+  { act: 'rooms', label: '공간', icon: '<path d="M4 4h16v16H4z" stroke-dasharray="3 2.5"/><path d="M9 12h6"/>' },
+  { run: () => slopeTool(), label: '구배', icon: '<path d="M3 17L21 9M3 17h18"/><path d="M15 7l3 2.6-3.6 1.1"/>' },
+  { act: 'bg', label: '배경', icon: '<path d="M3 20h18M5 20V10h4v10M11 20V5h5v15M18 20v-7h2"/>' },
+  '|',
+  { id: 'btnStyle', label: '스타일', icon: '<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.6-.9 1.2-1.8-.5-1-.1-2.2 1.2-2.2H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/>', attrs: 'aria-haspopup="menu" aria-expanded="false"' },
+  { view: 'iso', label: '비스듬히', icon: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5"/>' },
+  { view: 'top', label: '위에서', icon: '<rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 10h7v10M11 14h9"/>' },
+  '|',
+  { act: 'ai', label: 'AI', icon: '<path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4z"/><path d="M18 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>' },
+  '|',
+  { soon: '2차', label: '천장', icon: '<path d="M3 6h18M6 6v3M12 6v3M18 6v3"/><circle cx="12" cy="13" r="2.5"/>' },
+  { soon: '2차', label: '걷기', icon: '<circle cx="13" cy="4.5" r="1.8"/><path d="M10 21l2-6-2.5-2.5L11 8l3 2 3 1M12 15l3 6M9.5 12.5L7 14"/>' },
+  { soon: '3차', label: '설치물', icon: '<path d="M3 18h18M5 18v-4h14v4"/><path d="M8 14V9h8v5" stroke-dasharray="2 2"/>' },
+  { soon: '3차', label: '공기', icon: '<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h8"/>' },
+  { soon: '3차', label: '동선', icon: '<circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h6a3 3 0 0 0 0-6h-2a3 3 0 0 1 0-6h6" stroke-dasharray="2.5 2"/>' },
+];
+function buildDock() {
+  $('#dockIn').innerHTML = DOCK.map((d) => d === '|' ? '<span class="dsep" aria-hidden="true"></span>'
+    : `<button class="dk${d.soon ? ' soon' : ''}" ${d.id ? `id="${d.id}"` : ''} ${d.mode ? `data-mode="${d.mode}" aria-pressed="false"` : ''} ${d.view ? `data-view="${d.view}"` : ''} ${d.act ? `data-dact="${d.act}"` : ''} ${d.attrs || ''} title="${d.label}${d.soon ? ` (${d.soon} 업데이트)` : ''}" aria-label="${d.label}">${SV(d.icon)}<span>${d.label}</span></button>`).join('');
+  [...$('#dockIn').children].filter((e) => e.tagName === 'BUTTON').forEach((b, i) => { const d = DOCK.filter((x) => x !== '|')[i];
+    if (d.soon) b.onclick = () => toast(`"${d.label}" 은 ${d.soon} 업데이트에서 들어와요`);
+    else if (d.act) b.onclick = () => { closeHome(); ACT[d.act](); };
+    else if (d.run) b.onclick = () => { closeHome(); d.run(); }; });
+}
+/** 구배 단추: 공간을 고른 상태면 그 공간의 구배, 아니면 공간 고르기부터 */
+function slopeTool() {
+  const r = selRoom(); if (r) { S.panel = 'props'; S.propsOpen = true; renderProps(); setTimeout(() => { const el = $('#propsBody .sec:nth-of-type(4)') || $('#swPct'); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 50); return; }
+  if (level().rooms.length) { ACT.rooms(); toast('구배를 잡을 공간을 고르세요 (주방 · 화장실 등)'); return; }
+  if (S.pane === '3d') setPane('split'); plan.setTool('roomRect'); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q.dataset.tool === 'roomRect')));
+  toast('먼저 2D 에서 구배를 잡을 공간을 끌어서 그리세요 (사각형)', 6000);
+}
+
+/* ---------- 확인 창 ---------- */
+function ask(title, msg, buttons = [{ label: '취소', value: false }, { label: '확인', value: true, kind: 'pri' }]) {
+  return new Promise((ok) => {
+    const d = $('#dlg'); $('#dlgT').textContent = title; $('#dlgM').textContent = msg || '';
+    $('#dlgB').innerHTML = buttons.map((b, i) => `<button class="btn ${b.kind || ''}" data-i="${i}">${esc(b.label)}</button>`).join('');
+    const done = (v) => { d.hidden = true; d.onclick = null; S.dlgClose = null; ok(v); };
+    S.dlgClose = () => done(buttons[0].value);
+    d.onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) done(buttons[+b.dataset.i].value); else if (e.target === d) done(buttons[0].value); };
+    d.hidden = false; setTimeout(() => { const last = $('#dlgB').lastElementChild; if (last) last.focus(); }, 30);
+  });
+}
+const IS_APP = () => !!(window.byr || (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()));
+async function quitApp() {
+  if (!(await ask('BYR2 를 종료할까요?', '작업은 이 기기에 자동 저장돼 있어요. 다시 켜면 이어서 할 수 있어요.', [{ label: '취소', value: false }, { label: '종료', value: true, kind: 'danger' }]))) return;
+  await lib2.flush(); if (cloud.session()) await lib2.syncNow().catch(() => {});
+  if (window.byr && window.byr.quit) window.byr.quit(); else if (window.Capacitor && window.Capacitor.Plugins.App) window.Capacitor.Plugins.App.exitApp(); else toast('브라우저 탭을 닫으면 돼요 · 작업은 저장돼 있어요');
+}
+/** 뒤로 가기 (안드로이드 뒤로 단추 · Esc): 열린 것부터 하나씩 닫고, 마지막엔 홈 → 종료 확인 */
+async function goBack() {
+  if (S.dlgClose) return S.dlgClose();
+  for (const id of ['#fileMenu', '#styleMenu']) if (!$(id).hidden) { $(id).hidden = true; return; }
+  if ($('#drawer').classList.contains('open')) return closeDrawer();
+  if (engine.design.active) { if (await ask('디자인 수정을 그만할까요?', '저장하지 않은 모양 변경은 버려져요.', [{ label: '계속 수정', value: false }, { label: '그만하기', value: true, kind: 'danger' }])) endDesign(false); return; }
+  if (SW.pick) { endPick(); renderProps(); return; }
+  if (S.aiPrev) { S.aiPrev = null; plan.preview = null; plan.redraw(); renderProps(); return; }
+  if (S.propsOpen) { S.propsOpen = false; renderProps(); return; }
+  if (plan.tool !== 'select') { plan.setTool('select'); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q.dataset.tool === 'select'))); return; }
+  if (S.focus) { setFocus(null); return; }
+  if (S.sel) { setSel(null); return; }
+  if ($('#home').hidden) return showHome();
+  return quitApp();
+}
+
+/* ---------- 홈 (대시보드) ---------- */
+const HI = {
+  cont: '<path d="M8 5l11 7-11 7z"/>', new: '<path d="M12 5v14M5 12h14"/>', open: '<path d="M4 6h6l2 2h8v11H4z"/>', legacy: '<path d="M4 4h12l4 4v12H4z"/><path d="M8 13h8M8 17h5"/>',
+  cloud: '<path d="M7 18a4 4 0 0 1-.5-8 6 6 0 0 1 11.5 1.5A3.5 3.5 0 0 1 17.5 18z"/>', sample: '<path d="M3 21h18M5 21V9l7-5 7 5v12"/><path d="M9 21v-6h6v6"/>', model: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5"/>', ai: '<path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4z"/>',
+};
+function showHome() { $('#home').hidden = false; renderHome(); }
+function closeHome() { $('#home').hidden = true; }
+async function renderHome() {
+  const s = cloud.session(), pv = cloud.aiProvider(), key = cloud.aiKey(), last = lib2.lastSync(), list = await lib2.listLocal().catch(() => []), cur = S.model;
+  $('#homeVer').textContent = `BYR Next ${APP_VERSION} · ${IS_APP() ? (window.byr ? 'PC' : '모바일') : '웹'}`;
+  $('#homeBody').innerHTML = `
+    <button class="hcont" data-h="cont">${SV(HI.cont)}<div><b>이어서 작업</b><small>${esc(cur ? cur.name : '')} · ${cur ? `벽 ${cur.levels[cur.activeLevel].walls.length} · 기물 ${cur.levels[cur.activeLevel].items.length}` : ''}</small></div></button>
+    <div class="hacts">
+      <button data-h="new">${SV(HI.new)}새 프로젝트</button><button data-h="open">${SV(HI.open)}파일 열기</button>
+      <button data-h="legacy">${SV(HI.legacy)}기존 앱 파일 (JSON)</button><button data-h="account">${SV(HI.cloud)}기존 앱 계정에서</button>
+      <button data-h="asset">${SV(HI.model)}3D 모델 가져오기</button><button data-h="sample">${SV(HI.sample)}샘플 매장</button>
+    </div>
+    <section class="hsec"><div class="row2"><b>내 프로젝트 · ${list.length}개</b>${list.length > 6 ? '<button class="btn" data-h="library">전체 · 정리</button>' : ''}</div>
+      <div class="hgrid">${list.slice(0, 6).map((p) => `<button class="hp ${cur && p.id === cur.id ? 'on' : ''}" data-op="${p.id}"><b>${esc(p.name)}</b><small>${new Date(p.updated).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${s ? (p.dirty ? ' · 올릴 예정' : ' · 동기화됨') : ''}${cur && p.id === cur.id ? ' · 지금 열림' : ''}</small></button>`).join('') || '<p class="hint">아직 저장된 프로젝트가 없어요</p>'}</div></section>
+    <section class="hsec"><div class="row2"><b>계정 · 동기화</b><span class="stat ${s ? 'ok' : ''}"><i></i>${s ? '로그인됨' : '로그인 안 함'}</span></div>
+      <p class="hint">${s ? `${esc(s.email || '')} · PC · 폰에서 같은 계정으로 로그인하면 내 프로젝트가 자동으로 맞춰져요${last ? ` · 마지막 ${new Date(last).toLocaleString('ko-KR')}` : ''}` : '기존 BYR 앱과 같은 이메일 · 비밀번호로 로그인하면, PC 에서 하던 작업을 폰에서 이어 하고 기존 앱 프로젝트도 불러올 수 있어요.'}</p>
+      <div class="btns">${s ? '<button class="btn pri" data-h="sync">지금 동기화</button><button class="btn" data-h="account">기존 앱 프로젝트</button><button class="btn" data-h="logout">로그아웃</button>' : '<button class="btn pri" data-h="login">로그인</button>'}</div><p class="hint" id="hMsg"></p></section>
+    <section class="hsec"><div class="row2"><b>AI 연결</b><span class="stat ${key ? 'ok' : ''}"><i></i>${esc(cloud.PROVIDERS[pv].name)} ${key ? '· 키 있음' : '· 키 없음'}</span></div>
+      <p class="hint">도면 사진 · PDF → 벽, 현장 사진 → 기물 인식에 써요. 본인 Claude · ChatGPT · Gemini API 키로 연결해요.</p>
+      <div class="btns"><button class="btn" data-h="ai">${SV(HI.ai)} AI 설정</button></div></section>`;
+  const act = async (h) => {
+    if (h === 'cont') return closeHome();
+    if (h === 'new') { closeHome(); return ACT.new(); }
+    if (h === 'sync') { $('#hMsg').textContent = '동기화 중…'; try { const r = await lib2.syncNow(); await reloadIfChanged(r); $('#hMsg').textContent = `올림 ${r.up} · 받음 ${r.down}${r.conflict ? ` · 충돌 사본 ${r.conflict}` : ''}`; setTimeout(renderHome, 1200); } catch (e) { $('#hMsg').textContent = '동기화 실패: ' + (e.message || e); } return; }
+    if (h === 'logout') { if (await ask('로그아웃할까요?', '이 기기의 프로젝트는 그대로 남아요. 계정에서 받아 온 AI 키는 이 기기에서 지워져요.')) { cloud.logout(); renderHome(); } return; }
+    closeHome(); const map = { open: 'open', legacy: 'legacy', account: 'account', login: 'account', asset: 'asset', sample: 'sample', library: 'library', ai: 'ai' }; await ACT[map[h]]();
+  };
+  $$('[data-h]', $('#homeBody')).forEach((b) => (b.onclick = () => act(b.dataset.h)));
+  $$('[data-op]', $('#homeBody')).forEach((b) => (b.onclick = async () => { if (cur && b.dataset.op === cur.id) return closeHome(); const m = await lib2.loadLocal(b.dataset.op); if (m) { closeHome(); await setModel(m); toast(`"${m.name}" 을 열었어요`); } }));
+}
+
 async function boot() {
+  buildDock();
   const [lib, shapes] = await Promise.all([fetch('./data/legacy-lib.json').then((r) => r.json()), fetch('./data/legacy-shapes.json').then((r) => r.json())]);
   S.lib = lib.items; S.shapes = shapes; loadMyLib();
   engine = new Engine($('#view'), { lib: S.lib, shapes: S.shapes, assets: S.assets, zOf: (it) => SL.itemZ(level(), it, S.lib) });
@@ -679,7 +792,13 @@ async function boot() {
   fb.onclick = () => { fm.hidden = !fm.hidden; fb.setAttribute('aria-expanded', String(!fm.hidden)); };
   fm.onclick = async (e) => { const a = e.target.closest('[data-act]'); if (!a) return; fm.hidden = true; fb.setAttribute('aria-expanded', 'false'); try { await ACT[a.dataset.act](); } catch (er) { console.error(er); toast('작업을 마치지 못했어요: ' + (er.message || er)); } };
   document.addEventListener('pointerdown', (e) => { if (!fm.hidden && !e.target.closest('#fileMenu, #btnFile')) { fm.hidden = true; fb.setAttribute('aria-expanded', 'false'); } });
+  $('#btnHome').onclick = () => ($('#home').hidden ? showHome() : closeHome());
+  $('#homeClose').onclick = closeHome;
+  if (!IS_APP()) $('#miQuit').hidden = true;
+  // 안드로이드 뒤로 단추 (Capacitor App 플러그인)
+  try { const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App; if (A) A.addListener('backButton', () => { goBack(); }); } catch (e) { console.warn(e); }
   window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && (S.dlgClose || !$('#home').hidden && !S.propsOpen)) { e.preventDefault(); if (S.dlgClose) S.dlgClose(); else closeHome(); return; }
     if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (engine.design.active) { engine.design.undo(); return; } e.shiftKey ? redo() : undo(); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); ACT.save(); }
@@ -697,10 +816,11 @@ async function boot() {
   // 마지막으로 작업하던 프로젝트를 연다 (자동 저장)
   let first = null; try { const id = lib2.lastId(); first = id && (await lib2.loadLocal(id)); } catch (e) { console.warn(e); }
   await setModel(first || emptyProject());
-  window.BYR = { S, engine, plan, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick }; // 디버깅 · 자동 테스트용
-  toast(first ? `"${first.name}" 을 이어서 열었어요 · 고칠 때마다 자동 저장돼요` : '왼쪽 2D 도면에서 벽을 그리면 오른쪽 3D 에 바로 세워져요 · 고칠 때마다 자동 저장돼요 · 파일 메뉴에서 기존 앱 작업물을 불러오세요', 8000);
+  window.__goBack = goBack; window.BYR = { S, engine, plan, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick }; // 디버깅 · 자동 테스트용
+  showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
+  const intro = $('#intro'), wait = Math.max(0, 1400 - performance.now()); setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
   // 계정 동기화: 켤 때 · 1분마다 · 앱으로 돌아올 때
   const sync = () => { if (!cloud.session() || document.visibilityState === 'hidden') return; lib2.syncNow().then(reloadIfChanged).catch(() => {}); };
   sync(); setInterval(sync, 60000); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
 }
-boot().catch((e) => { console.error(e); document.body.insertAdjacentHTML('beforeend', `<pre style="position:fixed;inset:auto 12px 12px 12px;background:#300;color:#fff;padding:12px;border-radius:8px;white-space:pre-wrap;z-index:99">시작하지 못했어요: ${esc(e.message || e)}</pre>`); });
+boot().catch((e) => { console.error(e); const it = document.querySelector('#intro'); if (it) it.remove(); document.body.insertAdjacentHTML('beforeend', `<pre style="position:fixed;inset:auto 12px 12px 12px;background:#300;color:#fff;padding:12px;border-radius:8px;white-space:pre-wrap;z-index:99">시작하지 못했어요: ${esc(e.message || e)}</pre>`); });

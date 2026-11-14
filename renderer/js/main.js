@@ -226,7 +226,7 @@ export class Engine {
 
   /* ---------- 시점 ---------- */
   view(kind = 'iso') {
-    const b = this.bounds || { cx: 4, cz: 3, r: 8 }, t = new THREE.Vector3(b.cx, 0.6, b.cz), d = b.r * 2.1;
+    const b = this.bounds || { cx: 4, cz: 3, r: 8 }, t = new THREE.Vector3(b.cx, 0.6, b.cz), asp = this.canvas.clientWidth / Math.max(1, this.canvas.clientHeight) || this.aspect || 1, d = b.r * 2.1 * (asp < 1 ? Math.min(2.2, 0.9 / asp) : 1); /* 세로 화면은 더 멀리 */
     const dir = kind === 'top' ? new THREE.Vector3(0.0001, 1, 0.0001) : kind === 'front' ? new THREE.Vector3(0, 0.35, 1) : new THREE.Vector3(0.62, 0.78, 0.85);
     this.controls.target.copy(t);
     if (this.camera.isOrthographicCamera) { this.camera.zoom = 1; this.orthoSize = b.r * 0.95; this._fitOrtho(); this.camera.position.copy(t).addScaledVector(dir.normalize(), Math.max(40, d * 2)); }

@@ -1,7 +1,7 @@
 {
   "name": "byr-next",
-  "productName": "BYR Next",
-  "version": "2.1.1",
+  "productName": "BYR2",
+  "version": "2.1.2",
   "description": "BYR Next 2.1 — 2D↔3D · 보기 스타일 · 구배 · 공간 태그 · 디자인 수정 · 배경 · 자동 저장/동기화",
   "main": "electron/main.js",
   "scripts": {
@@ -20,7 +20,8 @@
     "@capacitor/core": "^6.1.0",
     "@capacitor/android": "^6.1.0",
     "@capacitor/filesystem": "^6.0.0",
-    "@capacitor/share": "^6.0.0"
+    "@capacitor/share": "^6.0.0",
+    "@capacitor/app": "^6.0.0"
   },
   "build": {
     "appId": "com.byr.next",
@@ -32,6 +33,6 @@
     "win": {
       "target": "portable"
     },
-    "productName": "BYR Next"
+    "productName": "BYR2"
   }
 }
