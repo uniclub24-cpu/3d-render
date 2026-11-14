@@ -105,6 +105,7 @@ export class Engine {
     const now = performance.now(), dt = Math.min(0.1, ((now - (this._t || now)) / 1000)); this._t = now;
     this.air.update(dt); this.sim.update(dt); if (this.onTick) this.onTick(dt); // 2D 만 볼 때도 시뮬레이션은 돈다
     if (!this.canvas.clientWidth) return; // 2D 만 볼 때는 3D 를 그리지 않는다
+    if (this._fly) { const f = this._fly; f.t += dt * 1000; const k = Math.min(1, f.t / f.ms); f.step(k); if (k >= 1) { this._fly = null; f.done(true); } }
     if (this.walker.active) this.walker.update(dt); else this.controls.update();
     if (this.selBox.visible) this.selBox.update();
     this.ssaoPass.enabled = this.opt.ssao && STYLES[this.style].ssao && !this.camera.isOrthographicCamera; this.fxaaPass.enabled = this.opt.fxaa;
@@ -114,6 +115,31 @@ export class Engine {
   }
   /** 화면을 PNG dataURL 로 */
   snapshot() { this.composer.render(); return this.canvas.toDataURL('image/png'); }
+  /** 정한 해상도로 한 장 (렌더 해상도) — type: image/png | image/jpeg */
+  snapshotAt(W, H, type = 'image/png') {
+    const r = this.renderer, pr = r.getPixelRatio(), sh = this.shift; this.shift = 0;
+    try { r.setPixelRatio(1); r.setSize(W, H, false); this.composer.setPixelRatio && this.composer.setPixelRatio(1); this.composer.setSize(W, H); this.ssaoPass.setSize(W, H); this.stylePass.setSize(W, H); this.fxaaPass.material.uniforms.resolution.value.set(1 / W, 1 / H);
+      this.persp.aspect = W / H; this.persp.clearViewOffset(); this.persp.updateProjectionMatrix(); this.aspect = W / H; this._fitOrtho(); this.ortho.clearViewOffset(); this.composer.render(); return this.canvas.toDataURL(type, 0.92); }
+    finally { r.setPixelRatio(pr); this.composer.setPixelRatio && this.composer.setPixelRatio(pr); this.shift = sh; this.resize(); }
+  }
+  /* ---------- 단면 보기 (기존 앱 v12): h = 높이에서 자르기 · x / z = 세로로 자르기 ---------- */
+  setSection(sec) {
+    this.section = sec && sec.mode !== 'off' ? sec : null; const r = this.renderer;
+    if (!this.section) { r.clippingPlanes = []; return; }
+    const { mode, at = 1200, flip = false } = this.section, s = flip ? -1 : 1, v = at * MM;
+    const pl = mode === 'h' ? new THREE.Plane(new THREE.Vector3(0, -1, 0), v) : mode === 'x' ? new THREE.Plane(new THREE.Vector3(-s, 0, 0), s * v) : new THREE.Plane(new THREE.Vector3(0, 0, -s), s * v);
+    r.clippingPlanes = [pl];
+  }
+  /* ---------- 시점 저장 · 투어 · 360° ---------- */
+  getView() { const c = this.camera, t = this.controls.target; return { p: c.position.toArray().map((v) => +v.toFixed(3)), t: t.toArray().map((v) => +v.toFixed(3)), zoom: c.zoom || 1, ortho: !!c.isOrthographicCamera, size: this.orthoSize }; }
+  /** ms 동안 부드럽게 옮긴다 → Promise */
+  flyTo(v, ms = 1200) {
+    const c = this.camera, p0 = c.position.clone(), t0 = this.controls.target.clone(), p1 = new THREE.Vector3(...v.p), t1 = new THREE.Vector3(...v.t), z0 = c.zoom || 1, z1 = v.zoom || 1;
+    if (this._fly) this._fly.done();
+    return new Promise((ok) => { this._fly = { t: 0, ms: Math.max(1, ms), done: ok, step: (k) => { const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2; c.position.lerpVectors(p0, p1, e); this.controls.target.lerpVectors(t0, t1, e); if (c.isOrthographicCamera) { c.zoom = z0 + (z1 - z0) * e; c.updateProjectionMatrix(); } } }; });
+  }
+  stopFly() { if (this._fly) { const f = this._fly; this._fly = null; f.done(false); } }
+  setSpin(on, speed = 1.2) { this.controls.autoRotate = !!on; this.controls.autoRotateSpeed = speed; }
 
   /* ---------- 옵션 ---------- */
   setOption(k, v) {

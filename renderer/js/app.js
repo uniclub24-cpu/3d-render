@@ -15,7 +15,8 @@ import { ROLES, FAMN, SIMCOL } from './sim.js';
 import { findFaces } from './rooms.js';
 import { WFI } from './builder.js';
 import * as SH from './shop.js';
-export const APP_VERSION = '2.1.6';
+import * as CAD from './cad.js';
+export const APP_VERSION = '2.1.7';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -146,7 +147,7 @@ async function importAsset(name, bytes, resFiles = []) {
 }
 async function handleFiles(files) {
   const res = files.filter((f) => RES_EXT.includes(extOf(f.name))); // .bin · 텍스처는 같이 고른 모델의 연결 파일로
-  for (const f of files) { const ext = extOf(f.name); if (ext === 'json') await openJson(f.name, f.data); else if (ASSET_EXT.includes(ext)) await importAsset(f.name, f.data, ext === 'glb' ? [] : res); else if (!RES_EXT.includes(ext)) toast(`${f.name}: 지원하지 않는 형식이에요`); }
+  for (const f of files) { const ext = extOf(f.name); if (ext === 'json') await openJson(f.name, f.data); else if (ext === 'dxf') dxfLoad(f.name, f.data); else if (ASSET_EXT.includes(ext)) await importAsset(f.name, f.data, ext === 'glb' ? [] : res); else if (!RES_EXT.includes(ext)) toast(`${f.name}: 지원하지 않는 형식이에요`); }
   if (res.length && !files.some((f) => ASSET_EXT.includes(extOf(f.name)))) toast('텍스처 · .bin 은 모델 파일(.gltf · .obj · .fbx)과 함께 골라 주세요');
 }
 const safeName = () => (S.model.name || 'byr').replace(/[\\/:*?"<>|]/g, '_');
@@ -168,6 +169,12 @@ const ACT = {
   check: () => { S.panel = 'check'; S.propsOpen = true; renderProps(); },
   quote: () => { S.panel = 'quote'; S.propsOpen = true; renderProps(); },
   auto: () => { S.panel = 'auto'; S.propsOpen = true; renderProps(); },
+  view: () => { S.panel = 'view'; S.propsOpen = true; renderProps(); },
+  dxfIn: async () => { const f = (await openFiles({ title: 'DXF 도면', extensions: ['dxf'] }))[0]; if (f) dxfLoad(f.name, f.data); },
+  dxfOut: async () => { const t = CAD.dxfDoc([{ level: level() }], S.lib, (L, it) => SL.itemZ(L, it, S.lib)); if (await saveFile({ title: 'DXF 도면', defaultName: `${safeName()}-${level().name || '층'}.dxf`, extensions: ['dxf'], data: t })) toast('DXF 로 내보냈어요 · 기물은 블록(이름 · 규격 속성)으로 들어가요'); },
+  dxfAll: async () => { const t = CAD.dxfDoc(S.model.levels.map((L, i) => ({ level: L, pre: `F${i + 1}_` })), S.lib, (L, it) => SL.itemZ(L, it, S.lib)); if (await saveFile({ title: 'DXF 도면', defaultName: `${safeName()}-전체층.dxf`, extensions: ['dxf'], data: t })) toast(`${S.model.levels.length}개 층을 DXF 한 파일로 (층마다 F1_ · F2_ 레이어)`); },
+  planImg: async () => { if (S.pane === '3d') { setPane('split'); await new Promise((r) => setTimeout(r, 120)); } const cv = $('#plan canvas') || plan.cv, c = document.createElement('canvas'); c.width = cv.width; c.height = cv.height; const g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(cv, 0, 0);
+    const b = Uint8Array.from(atob(c.toDataURL('image/jpeg', 0.92).split(',')[1]), (x) => x.charCodeAt(0)); if (await saveFile({ title: 'JPEG 이미지', defaultName: safeName() + '-평면도.jpg', extensions: ['jpg'], data: b })) toast('평면도를 JPEG 로 저장했어요'); },
   open: async () => handleFiles(await openFiles({ title: 'BYR 프로젝트', extensions: ['json'] })),
   save: async () => { const p = await saveFile({ title: 'BYR 프로젝트', defaultName: safeName() + '.byr.json', extensions: ['json'], data: JSON.stringify(S.model) }); if (p) toast('저장했어요'); },
   legacy: async () => handleFiles(await openFiles({ title: '기존 앱 JSON', extensions: ['json'], multi: false })),
@@ -208,6 +215,8 @@ function renderProps() {
   if (S.panel === 'quote') return renderQuote(body);
   if (S.panel === 'auto') return renderAuto(body);
   if (S.panel === 'cmp') return renderCmp(body);
+  if (S.panel === 'view') return renderView(body);
+  if (S.panel === 'dxf') return renderDxf(body);
   if (selRoom()) return renderRoom(body, selRoom());
   if (S.panel === 'account') return renderAccount(body);
   if (selWall()) return renderWall(body, selWall());
@@ -581,6 +590,79 @@ function renderCmp(body) {
   SH.thumb($('#cvA'), varLevel(va), S.lib); SH.thumb($('#cvB'), varLevel(vb), S.lib);
   $('#cA').onchange = (e) => { S.cmp = { ...c, a: e.target.value, b: vb.id }; renderProps(); }; $('#cB').onchange = (e) => { S.cmp = { ...c, a: va.id, b: e.target.value }; renderProps(); };
   $('#cBack').onclick = () => ACT.auto(); $('#cUse').onclick = () => { varSwitch(vb.id); S.panel = 'cmp'; renderProps(); };
+}
+
+/* ----- 6차: 단면 보기 · 시점 저장 · 자동 투어 · 360° · 렌더 해상도 (기존 앱 v12 · v14) ----- */
+const SEC = { mode: 'off', at: 1200, flip: false }, RES = { size: 'fhd', type: 'png' };
+const RESN = { screen: ['지금 화면 크기', 0, 0], fhd: ['FHD 1920×1080', 1920, 1080], qhd: ['QHD 2560×1440', 2560, 1440], uhd: ['4K 3840×2160', 3840, 2160], sq: ['정사각 2048×2048', 2048, 2048], a4: ['A4 가로 3508×2480 (300dpi)', 3508, 2480] };
+let tourOn = false;
+function secRange() { const b = SH.bounds(level()); return SEC.mode === 'h' ? [100, (level().ceilingH || 2700) + 300] : SEC.mode === 'x' ? [b[0], b[2]] : [b[1], b[3]]; }
+function applySection() { engine.setSection(SEC.mode === 'off' ? null : { ...SEC }); }
+async function tour() {
+  const V = S.model.views || []; if (tourOn) { tourOn = false; engine.stopFly(); renderProps(); return; }
+  if (S.pane === '2d') setPane('split'); tourOn = true; renderProps(); const b = SH.bounds(level()), cx = (b[0] + b[2]) / 2 * 0.001, cz = (b[1] + b[3]) / 2 * 0.001, r = Math.max(4, Math.hypot(b[2] - b[0], b[3] - b[1]) * 0.001);
+  const list = V.length ? V.map((v) => v.v) : [0, 1, 2, 3].map((k) => { const a = (k * Math.PI) / 2 + 0.6; return { p: [cx + Math.cos(a) * r * 0.9, r * 0.75, cz + Math.sin(a) * r * 0.9], t: [cx, 0.8, cz], zoom: 1 }; });
+  for (let k = 0; tourOn; k = (k + 1) % list.length) { const ok = await engine.flyTo(list[k], 2600); if (!ok || !tourOn) break; await new Promise((r2) => setTimeout(r2, 1100)); if (!V.length && k === list.length - 1) { /* 한 바퀴 */ } }
+  tourOn = false; if (S.panel === 'view') renderProps();
+}
+function renderView(body) {
+  const M = S.model, V = M.views || [], rg = secRange();
+  $('#propsTitle').textContent = '단면 · 시점 · 이미지';
+  body.innerHTML = `<div class="sec">단면 보기 · 잘라서 속 보기</div>
+    <div class="chips">${[['off', '끄기'], ['h', '높이에서 (위를 걷어냄)'], ['x', '세로 (좌우)'], ['z', '세로 (앞뒤)']].map(([k, n]) => `<button data-sec="${k}" aria-pressed="${SEC.mode === k}">${n}</button>`).join('')}</div>
+    ${SEC.mode !== 'off' ? `<label class="fld">자르는 위치 <b id="secV">${Math.round(SEC.at)} mm</b><input type="range" id="secAt" min="${Math.round(rg[0])}" max="${Math.round(rg[1])}" step="10" value="${Math.round(clamp(SEC.at, rg[0], rg[1]))}"></label>${SEC.mode !== 'h' ? `<label class="chk"><input type="checkbox" id="secFlip" ${SEC.flip ? 'checked' : ''}> 반대쪽 보기</label>` : ''}` : ''}
+    <div class="sec">시점 저장 · ${V.length}개</div>
+    ${V.map((v) => `<div class="lvrow"><button class="lvgo" data-vgo="${v.id}">${esc(v.name)}</button><button class="qb danger" data-vx="${v.id}">지우기</button></div>`).join('') || '<p class="hint">지금 보고 있는 시점을 이름 붙여 저장해 두면 누르는 순간 그 자리로 가요.</p>'}
+    <div class="row"><input id="vName" placeholder="시점 이름 (예: 입구에서)" aria-label="시점 이름"><button class="btn" id="vSave">+ 지금 시점 저장</button></div>
+    <div class="btns"><button class="btn ${tourOn ? 'pri' : ''}" id="vTour">${tourOn ? '■ 투어 멈춤' : `▶ 자동 투어${V.length ? ` (${V.length}곳)` : ' (네 방향)'}`}</button><button class="btn ${engine.controls.autoRotate ? 'pri' : ''}" id="vSpin">${engine.controls.autoRotate ? '■ 360° 멈춤' : '↻ 360° 돌려 보기'}</button></div>
+    <div class="sec">이미지 저장 · 렌더 해상도</div>
+    <label class="fld">크기<select id="rSize">${Object.entries(RESN).map(([k, v]) => `<option value="${k}" ${RES.size === k ? 'selected' : ''}>${v[0]}</option>`).join('')}</select></label>
+    <div class="chips">${[['png', 'PNG'], ['jpeg', 'JPEG']].map(([k, n]) => `<button data-rt="${k}" aria-pressed="${RES.type === k}">${n}</button>`).join('')}</div>
+    <div class="btns"><button class="btn pri" id="rGo">3D 이미지 저장</button><button class="btn" data-dact="planImg">평면도 JPEG</button></div>
+    <p class="hint">큰 크기는 지금 보기 스타일 그대로 다시 그려서 저장해요. 단면을 켠 채로 저장하면 단면 그림이 돼요.</p>`;
+  $$('[data-sec]', body).forEach((b) => (b.onclick = () => { SEC.mode = b.dataset.sec; const r2 = secRange(); SEC.at = SEC.mode === 'h' ? 1500 : (r2[0] + r2[1]) / 2; applySection(); renderProps(); }));
+  const sa = $('#secAt'); if (sa) sa.oninput = () => { SEC.at = +sa.value; $('#secV').textContent = `${SEC.at} mm`; applySection(); };
+  const sf = $('#secFlip'); if (sf) sf.onchange = () => { SEC.flip = sf.checked; applySection(); };
+  $$('[data-vgo]', body).forEach((b) => (b.onclick = () => { const v = (M.views || []).find((q) => q.id === b.dataset.vgo); if (v) { if (S.pane === '2d') setPane('split'); engine.flyTo(v.v, 900); } }));
+  $$('[data-vx]', body).forEach((b) => (b.onclick = () => { M.views = (M.views || []).filter((q) => q.id !== b.dataset.vx); commit(); renderProps(); }));
+  $('#vSave').onclick = () => { M.views ||= []; M.views.push({ id: uid('v'), name: $('#vName').value.trim().slice(0, 30) || `시점 ${M.views.length + 1}`, v: engine.getView() }); commit(); renderProps(); toast('시점을 저장했어요'); };
+  $('#vTour').onclick = () => tour();
+  $('#vSpin').onclick = () => { engine.setSpin(!engine.controls.autoRotate); if (engine.controls.autoRotate && S.pane === '2d') setPane('split'); renderProps(); };
+  $('#rSize').onchange = (e) => (RES.size = e.target.value);
+  $$('[data-rt]', body).forEach((b) => (b.onclick = () => { RES.type = b.dataset.rt; renderProps(); }));
+  $('#rGo').onclick = async () => { if (S.pane === '2d') { setPane('split'); await new Promise((r2) => setTimeout(r2, 150)); } setSel(null); const [, W, H] = RESN[RES.size], ty = 'image/' + RES.type, url = W ? engine.snapshotAt(W, H, ty) : engine.snapshot();
+    const b = Uint8Array.from(atob(url.split(',')[1]), (x) => x.charCodeAt(0)), ext = RES.type === 'jpeg' ? 'jpg' : 'png'; if (await saveFile({ title: '이미지', defaultName: `${safeName()}${W ? `-${W}x${H}` : ''}.${ext}`, extensions: [ext], data: b })) toast(`이미지를 저장했어요 (${(b.length / 1e6).toFixed(1)}MB)`); };
+  $$('[data-dact]', body).forEach((b) => (b.onclick = () => ACT[b.dataset.dact]()));
+}
+/* ----- DXF 가져오기 (캐드 선 → 벽) ----- */
+const DXFO = { unit: 'auto', merge: true, rest: true, replace: true };
+function dxfLoad(name, bytes) {
+  let txt = new TextDecoder('utf-8').decode(bytes); if (txt.includes('�')) { try { txt = new TextDecoder('euc-kr').decode(bytes); } catch {} }
+  if (/^AC10\d\d/.test(txt.slice(0, 6))) return toast('이진(binary) DXF 는 읽지 못해요 · 캐드에서 ASCII DXF 로 저장해 주세요');
+  const D = CAD.parseDxf(txt); if (!D.segs.length) return toast('DXF 에서 선을 찾지 못했어요 (LINE · POLYLINE · ARC)');
+  const cnt = {}; for (const sg of D.segs) cnt[sg.layer] = (cnt[sg.layer] || 0) + 1;
+  S.dxf = { name, D, cnt, on: new Set(D.layers.filter((l) => /wall|벽|a-wall|^0$/i.test(l)).length ? D.layers.filter((l) => /wall|벽|a-wall|^0$/i.test(l)) : D.layers) };
+  S.panel = 'dxf'; S.propsOpen = true; renderProps();
+}
+function renderDxf(body) {
+  const X = S.dxf; if (!X) { S.panel = 'props'; return renderProps(); }
+  const r = CAD.dxfWalls(X.D, { unit: DXFO.unit, layers: [...X.on], merge: DXFO.merge, rest: DXFO.rest, wallT: S.model.wallT || 150 }), sc = CAD.dxfScale(X.D, DXFO.unit);
+  $('#propsTitle').textContent = 'DXF 가져오기';
+  body.innerHTML = `<p class="hint">${esc(X.name)} · 선 ${X.D.segs.length}개 · 레이어 ${X.D.layers.length}개 · 단위 ×${sc} mm</p>
+    <div class="sec">벽으로 쓸 레이어</div><div class="chips">${X.D.layers.map((l) => `<button data-dl="${esc(l)}" aria-pressed="${X.on.has(l)}">${esc(l)} <small>${X.cnt[l]}</small></button>`).join('')}</div>
+    <label class="fld">단위<select id="dxU">${[['auto', '자동'], ['1', 'mm'], ['10', 'cm'], ['1000', 'm'], ['25.4', 'inch']].map(([v, n]) => `<option value="${v}" ${DXFO.unit === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label class="chk"><input type="checkbox" id="dxM" ${DXFO.merge ? 'checked' : ''}> 평행한 두 줄은 벽 하나로 (두께 자동)</label>
+    <label class="chk"><input type="checkbox" id="dxR" ${DXFO.rest ? 'checked' : ''}> 짝이 없는 선도 벽으로</label>
+    <label class="chk"><input type="checkbox" id="dxP" ${DXFO.replace ? 'checked' : ''}> 지금 층의 벽 · 문/창을 바꿔 넣기 (끄면 더하기)</label>
+    <div class="cmpv"><canvas id="dxC" width="300" height="220"></canvas><div class="hint" style="align-self:center">벽 ${r.walls.length}개가 만들어져요.<br>두께: ${[...new Set(r.walls.map((w) => w.t))].slice(0, 5).join(' · ')} mm</div></div>
+    <div class="btns"><button class="btn" id="dxX">취소</button><button class="btn pri" id="dxGo" ${r.walls.length ? '' : 'disabled'}>벽 ${r.walls.length}개 만들기</button></div>`;
+  SH.thumb($('#dxC'), { walls: r.walls, items: [], rooms: [] }, S.lib);
+  $$('[data-dl]', body).forEach((b) => (b.onclick = () => { const l = b.dataset.dl; X.on.has(l) ? X.on.delete(l) : X.on.add(l); renderProps(); }));
+  $('#dxU').onchange = (e) => { DXFO.unit = e.target.value; renderProps(); };
+  $('#dxM').onchange = (e) => { DXFO.merge = e.target.checked; renderProps(); }; $('#dxR').onchange = (e) => { DXFO.rest = e.target.checked; renderProps(); }; $('#dxP').onchange = (e) => (DXFO.replace = e.target.checked);
+  $('#dxX').onclick = () => { S.dxf = null; S.panel = 'props'; S.propsOpen = false; renderProps(); };
+  $('#dxGo').onclick = () => { const L = level(), H = L.ceilingH || 2700, made = r.walls.map((w) => ({ id: uid('w'), x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2, t: w.t, h: H, color: '#ece8e1', finish: 'paint' }));
+    if (DXFO.replace) { L.walls = made; L.openings = []; } else L.walls.push(...made); S.dxf = null; S.panel = 'props'; S.sel = null; engine.setLevel(L); applyEnv(); plan.fit(); commit(); renderProps(); toast(`DXF 에서 벽 ${made.length}개를 만들었어요 · 공간 → "벽 따라 공간 자동 찾기" 로 바닥을 만들 수 있어요`, 7000); };
 }
 /* ----- 공기 흐름 · 열/연기 ----- */
 function toggleAir() {
@@ -1030,6 +1112,7 @@ const DOCK = [
   { run: () => startWalk(), label: '걷기', icon: '<circle cx="13" cy="4.5" r="1.8"/><path d="M10 21l2-6-2.5-2.5L11 8l3 2 3 1M12 15l3 6M9.5 12.5L7 14"/>' },
   { id: 'dkXr', act: 'xray', label: '설치물', icon: '<path d="M3 18h18M5 18v-4h14v4"/><path d="M8 14V9h8v5" stroke-dasharray="2 2"/>' },
   { id: 'dkAir', run: () => toggleAir(), label: '공기', icon: '<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h8"/>' },
+  { act: 'view', label: '단면 · 시점', icon: '<path d="M4 7l8-4 8 4v10l-8 4-8-4z"/><path d="M4 12h16" stroke-dasharray="2.5 2"/>' },
   { act: 'check', label: '점검', icon: '<path d="M9 11l2.5 2.5L16 9"/><rect x="4" y="3.5" width="16" height="17" rx="2"/>' },
   { act: 'quote', label: '견적', icon: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>' },
   { act: 'auto', label: '자동 배치', icon: '<rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M3.5 10h17M10 10v10.5"/><path d="M14 14h3v3h-3z"/>' },
@@ -1198,6 +1281,14 @@ async function boot() {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (engine.design.active) { engine.design.undo(); return; } e.shiftKey ? redo() : undo(); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); ACT.save(); }
     if (engine.design.active) return;
+    if (engine.walker.active) return;
+    const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase(), it = selItem();
+    if (mod && k === 'c' && it) { S.clip = JSON.parse(JSON.stringify(it)); toast('복사했어요 · Ctrl+V 로 붙여넣기'); return; }
+    if (mod && (k === 'v' || k === 'd') && (k === 'd' ? it : S.clip)) { e.preventDefault(); const src = k === 'd' ? it : S.clip, n = { ...JSON.parse(JSON.stringify(src)), id: uid('i'), x: src.x + 300, y: src.y + 300 }; if (k === 'v') S.clip = { ...S.clip, x: n.x, y: n.y }; level().items.push(n); engine.rebuildItem(n); commit(); setSel({ kind: 'item', id: n.id }); return; }
+    if (!mod && it && k === 'r') { patchSel({ rot: ((it.rot || 0) + (e.shiftKey ? 270 : 90)) % 360 }, false); renderProps(); return; }
+    if (!mod && it && /^arrow/.test(k)) { e.preventDefault(); const st = e.shiftKey ? 100 : 10, d = { arrowleft: [-st, 0], arrowright: [st, 0], arrowup: [0, -st], arrowdown: [0, st] }[k]; patchSel({ x: it.x + d[0], y: it.y + d[1] }, false); return; }
+    if (!mod && !e.altKey && k === 'g') { startWalk(); return; }
+    if (!mod && !e.altKey && k === 'm') { setPlanTool('measure'); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel) plan.erase(S.sel);
     if (e.key === 'Escape') { if (SW.pick) { endPick(); renderProps(); return; } setSel(null); closeDrawer(); }
   });
@@ -1211,7 +1302,7 @@ async function boot() {
   // 마지막으로 작업하던 프로젝트를 연다 (자동 저장)
   let first = null; try { const id = lib2.lastId(); first = id && (await lib2.loadLocal(id)); } catch (e) { console.warn(e); }
   await setModel(first || emptyProject());
-  window.__goBack = goBack; window.BYR = { S, engine, plan, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick }; // 디버깅 · 자동 테스트용
+  window.__goBack = goBack; window.BYR = { S, engine, plan, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
   showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
   const intro = $('#intro'), wait = Math.max(0, 1400 - performance.now()); setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
   // 계정 동기화: 켤 때 · 1분마다 · 앱으로 돌아올 때

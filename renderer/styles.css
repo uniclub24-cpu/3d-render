@@ -211,3 +211,4 @@ button { cursor: pointer; }
 .lvrow .lvgo { flex: 1; text-align: left; min-height: 40px; background: none; border: 0; } .lvrow small { color: var(--muted); font-size: 11.5px; }
 .qb { min-height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.05); font-size: 12px; } .qb.danger { color: #e2786f; }
 .cmpv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; } .cmpv canvas { width: 100%; height: auto; background: #f1efe9; border-radius: 10px; }
+#props .row > input:not([type]), #props .row > input[type="text"] { flex: 1; min-width: 0; min-height: var(--hit); background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; color: var(--fg); font-size: 15px; }
