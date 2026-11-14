@@ -14,7 +14,8 @@ import { LINEKINDS, lineCat, XRN } from './lines.js';
 import { ROLES, FAMN, SIMCOL } from './sim.js';
 import { findFaces } from './rooms.js';
 import { WFI } from './builder.js';
-export const APP_VERSION = '2.1.5';
+import * as SH from './shop.js';
+export const APP_VERSION = '2.1.6';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -164,6 +165,9 @@ const ACT = {
   levels: () => { S.panel = 'levels'; S.propsOpen = true; renderProps(); },
   rooms: () => { S.panel = 'rooms'; S.propsOpen = true; renderProps(); },
   bg: () => { S.panel = 'bg'; S.propsOpen = true; renderProps(); },
+  check: () => { S.panel = 'check'; S.propsOpen = true; renderProps(); },
+  quote: () => { S.panel = 'quote'; S.propsOpen = true; renderProps(); },
+  auto: () => { S.panel = 'auto'; S.propsOpen = true; renderProps(); },
   open: async () => handleFiles(await openFiles({ title: 'BYR 프로젝트', extensions: ['json'] })),
   save: async () => { const p = await saveFile({ title: 'BYR 프로젝트', defaultName: safeName() + '.byr.json', extensions: ['json'], data: JSON.stringify(S.model) }); if (p) toast('저장했어요'); },
   legacy: async () => handleFiles(await openFiles({ title: '기존 앱 JSON', extensions: ['json'], multi: false })),
@@ -200,6 +204,10 @@ function renderProps() {
   if (S.panel === 'xray') return renderXray(body);
   if (S.panel === 'sim') return renderSim(body);
   if (S.panel === 'bg') return renderBg(body);
+  if (S.panel === 'check') return renderCheck(body);
+  if (S.panel === 'quote') return renderQuote(body);
+  if (S.panel === 'auto') return renderAuto(body);
+  if (S.panel === 'cmp') return renderCmp(body);
   if (selRoom()) return renderRoom(body, selRoom());
   if (S.panel === 'account') return renderAccount(body);
   if (selWall()) return renderWall(body, selWall());
@@ -388,7 +396,7 @@ const FILLS = { concrete: ['콘크리트', '#a9a9a4'], mortar: ['시멘트 몰�
 const FILLSETS = { kitchen: ['주방 (방수 + 몰탈 + 타일)', [['concrete', 60], ['waterproof', 3], ['mortar', 50], ['tilebed', 20]]], raise: ['단 올림 (모래 + 몰탈)', [['sand', 80], ['mortar', 50]]], light: ['경량 단 올림 (기포 + 몰탈)', [['foam', 100], ['mortar', 40]]], heat: ['주거 난방 (단열 + 기포 + 배관 + 몰탈)', [['xps', 30], ['foam', 40], ['heating', 20], ['mortar', 40]]], factory: ['공장 (콘크리트 + 메쉬 + 에폭시)', [['gravel', 100], ['concrete', 150], ['mesh', 5], ['epoxy', 3]]] };
 const LAYERN = { floor: '바닥 기물', upper: '벽 상부', ceil: '천장 설비', elec: '전기', plumb: '배관 · 수전', deco: '장식' };
 const SPBUILT = {
-  주방: [{ n: '기본 주방 (벽 따라: 작업대 · 싱크 · 냉장고 · 레인지)', wall: ['k_reach', 'k_work18', 'sink2', 'k_work09', 'range', 'k_dwU', 'k_upper'] }],
+  주방: [{ n: '기본 주방 (벽 따라: 작업대 · 싱크 · 냉장고 · 레인지)', wall: ['k_reach', 'k_work18', 'sink2', 'k_work09', 'range', 'k_dwU', 'k_upper'] }, { n: '페리카나 배달 주방', biz: 'pel_delivery' }, { n: '페리카나 홀 주방', biz: 'pel_hall' }, { n: '치킨 주방', biz: 'chicken' }, { n: '카페 바', biz: 'cafe' }, { n: '분식 주방', biz: 'snack' }, { n: '한식 주방', biz: 'korean' }],
   홀: [{ n: '4인 테이블 배치', grid: { t: 't4', ch: 'chair', gap: 900 } }, { n: '2인 테이블 배치', grid: { t: 't2', ch: 'chair', gap: 800 } }],
   화장실: [{ n: '남녀 공용 (양변기 · 소변기 · 세면대)', wall: ['toilet', 'b_urinal', 'washbasin', 'b_handdry', 'b_paper'] }, { n: '칸막이 화장실 2칸 + 세면대', wall: ['b_stall', 'b_stall', 'b_basin2', 'b_handdry'] }, { n: '가정 욕실 (변기 · 세면장 · 샤워)', wall: ['b_toiletB', 'b_vanity9', 'b_showerB'] }],
   거실: [{ n: '거실 (소파 · TV장 · 테이블)', living: 1 }],
@@ -424,7 +432,8 @@ function spApply(r, v, clear) {
     for (const q of p.items) { const it = { ...JSON.parse(JSON.stringify(q.it)), id: uid('i'), x: Math.round(B.x0 + q.u * B.W), y: Math.round(B.y0 + q.v * B.D), room: r.id }; if (SL.pointInPoly(it.x, it.y, r.pts)) { L.items.push(it); rep.placed++; } else rep.miss.push(it.name || it.type); }
     if (p.floor) Object.assign(r, JSON.parse(JSON.stringify(p.floor))); }
   else { const b = (SPBUILT[r.kind] || [])[+v.slice(1)]; if (!b) return; if (clear) L.items = L.items.filter((it) => !inR(it));
-    if (b.wall) spPlaceWall(r, b.wall, rep); if (b.center) spPlaceCenter(r, b.center, rep); if (b.grid) spPlaceGrid(r, b.grid, rep);
+    if (b.wall) spPlaceWall(r, b.wall, rep);
+    if (b.biz) spPlaceWall(r, SH.BIZ[b.biz].kitchen.flatMap(([t, , , q]) => Array(q).fill(t)), rep); if (b.center) spPlaceCenter(r, b.center, rep); if (b.grid) spPlaceGrid(r, b.grid, rep);
     if (b.living) { spPlaceWall(r, ['f_tv18'], rep); const B = spBox(r), Sf = S.lib.f_sofa2, T = S.lib.f_ctable; if (Sf && T) { const y = B.y1 - Sf.d / 2 - 150, x = B.x0 + B.W / 2; L.items.push(spItem('f_sofa2', x, y, 0, r), spItem('f_ctable', x, y - Sf.d / 2 - 500, 0, r)); rep.placed += 2; } }
     if (b.office) { spPlaceWall(r, ['f_book12', 'f_cabinet', 'f_file'], rep); const B = spBox(r), D = S.lib.f_desk14, C = S.lib.f_och; if (D && C) for (let y = B.y0 + 1500; y + D.d < B.y1 - 900; y += D.d + 1300) for (let x = B.x0 + 800 + D.w / 2; x + D.w / 2 < B.x1 - 600; x += D.w + 300) { if (!SL.pointInPoly(x, y, r.pts)) continue; L.items.push(spItem('f_desk14', x, y, 0, r), spItem('f_och', x, y + D.d / 2 + 350, 0, r)); rep.placed += 2; } }
     if (b.corridor) { const B = spBox(r), Ll = S.lib.l_line, long = B.W >= B.D; if (Ll) { const n = Math.max(1, Math.floor((long ? B.W : B.D) / 2500)); for (let k = 0; k < n; k++) { const t = (k + 0.5) / n; L.items.push(spItem('l_line', long ? B.x0 + B.W * t : B.x0 + B.W / 2, long ? B.y0 + B.D / 2 : B.y0 + B.D * t, long ? 0 : 90, r)); rep.placed++; } } spPlaceWall(r, ['l_exit', 'm_ext'], rep); } }
@@ -471,6 +480,107 @@ function renderXray(body) {
   $$('[data-xr]', body).forEach((b) => (b.onclick = () => { setXray(b.dataset.xr || null); renderProps(); }));
   $$('[data-lk]', body).forEach((b) => (b.onclick = () => { plan.lineKind = b.dataset.lk; setPlanTool('line'); const c = lineCat(LINEKINDS[b.dataset.lk]); if (engine.xray && c && engine.xray !== c) setXray(c); renderProps(); toast(`${LINEKINDS[b.dataset.lk].name} · 2D 에서 점을 차례로 누르세요`); }));
   $$('[data-k]', body).forEach((i) => (i.onchange = () => { LOPT[i.dataset.k] = Math.max(0, Math.round(+i.value || 0)); }));
+}
+
+/* ----- 5차: 설비 점검 · 전력 · 견적 · 자동 배치 · A안/B안 (기존 앱 v7~v10) ----- */
+const aisleOf = () => S.model.aisle || 900;
+function mkItem(type, x, y, rot, over = {}) { const L = S.lib[type], it = spItem(type, x, y, rot, {}); delete it.room; if (L.parts) { it.parts = JSON.parse(JSON.stringify(L.parts)); it.pb = { w: L.w, d: L.d, h: L.h }; } return Object.assign(it, over); }
+function goItem(id) { const it = level().items.find((q) => q.id === id); if (!it) return; setSel({ kind: 'item', id }); engine.frame([[it.x - 1500, it.y - 1500], [it.x + 1500, it.y + 1500]]); }
+function renderCheck(body) {
+  const L = level(), a = SH.analyze(L, S.lib, aisleOf()), cnt = (l) => a.checks.filter((c) => c.lvl === l).length, ic = { bad: '⛔', warn: '⚠', work: '🛠' };
+  $('#propsTitle').textContent = '설비 점검 · 전력';
+  body.innerHTML = `<div class="sec">전력 합계</div><p class="big"><b>${a.kw.toFixed(1)} kW</b> <small class="muted">${Object.entries(a.byCat).map(([k, v]) => `${esc(k)} ${v.toFixed(1)}`).join(' · ') || '전력 쓰는 기물 없음'}</small></p>
+    <p class="hint">가스 기물 ${a.n.gas} · 배수 필요 ${a.n.drain} · 후드 필요 ${a.n.hot} · 3kW 이상 ${a.n.kw3}${a.kw > 20 ? ' · 20kW 넘음: 전기 증설(계약 전력) 확인' : ''}</p>
+    <div class="row">${num('주방 통로 기준 폭', 'aisle', aisleOf(), 50)}</div>
+    <div class="sec">점검 결과 · 겹침 ${cnt('bad')} · 확인 ${cnt('warn')} · 공사 ${cnt('work')}</div>
+    ${a.checks.length ? `<ul class="clist">${a.checks.map((c) => `<li class="${c.lvl}"><button data-ci="${c.id}">${ic[c.lvl] || ''} ${esc(c.t)}</button></li>`).join('')}</ul>` : '<p class="hint">문제 없어요 ✓</p>'}
+    <p class="hint">배수구 · 가스 밸브 · 3상 콘센트는 기물(바닥·배관 / 전기)이나 설치물 선(배수 · 가스 · 배선)으로 놓으면 인정돼요. 누르면 그 기물로 가요.</p>
+    <div class="btns"><button class="btn" data-dact="quote">견적 보기</button></div>`;
+  $$('[data-ci]', body).forEach((b) => (b.onclick = () => goItem(b.dataset.ci)));
+  $$('[data-dact]', body).forEach((b) => (b.onclick = () => ACT[b.dataset.dact]()));
+  $('[data-k=aisle]', body).onchange = (e) => { S.model.aisle = clamp(Math.round(+e.target.value || 900), 400, 2000); commit(); renderProps(); };
+}
+const PRICE = () => store.get('byr.price', {}) || {};
+function renderQuote(body) {
+  const L = level(), rows = SH.bomRows(L, S.lib), P = PRICE(), etc = store.get('byr.etc', 0), vat = store.get('byr.vat', true), t = SH.bomTotals(rows, P, etc, vat), a = SH.analyze(L, S.lib, aisleOf()); let g = '';
+  $('#propsTitle').textContent = '견적 · 물량 · 단가';
+  body.innerHTML = `<p class="hint">${esc(S.model.name)} · ${esc(varCur().name)} · ${esc(L.name || '')} · 전력 ${a.kw.toFixed(1)} kW · 단가는 이 기기에 저장돼 다음 견적에도 그대로 써요</p>
+    <div class="tblw"><table class="qt"><thead><tr><th>항목</th><th>규격</th><th>수량</th><th>단가</th><th>금액</th></tr></thead><tbody>${rows.map((r) => { const h = r.g !== g ? `<tr class="qg"><th colspan="5">${esc(r.g)}</th></tr>` : ''; g = r.g;
+      return h + `<tr><td>${esc(r.n)}${r.note ? ` <small class="muted">${esc(r.note)}</small>` : ''}</td><td>${esc(r.sp)}</td><td class="n">${r.q.toLocaleString()} ${r.u}</td><td><input type="number" inputmode="numeric" min="0" step="100" data-pk="${esc(r.key)}" value="${P[r.key] || ''}" placeholder="단가"></td><td class="n">${Math.round(r.q * (P[r.key] || 0)).toLocaleString()}</td></tr>`; }).join('')}</tbody>
+    <tfoot><tr><th colspan="4">소계</th><td class="n">${t.sub.toLocaleString()}</td></tr><tr><th colspan="4">공과잡비 <input type="number" id="qEtc" min="0" max="30" value="${etc}" style="width:56px"> %</th><td class="n">${t.etc.toLocaleString()}</td></tr>
+    <tr><th colspan="4"><label class="chk"><input type="checkbox" id="qVat" ${vat ? 'checked' : ''}> 부가세 10%</label></th><td class="n">${t.vat.toLocaleString()}</td></tr><tr class="qsum"><th colspan="4">합계</th><td class="n"><b>${t.all.toLocaleString()}</b></td></tr></tfoot></table></div>
+    <div class="btns"><button class="btn pri" id="qX">엑셀 (xlsx)</button><button class="btn" id="qC">CSV</button><button class="btn" data-dact="check">설비 점검</button></div>`;
+  $$('[data-pk]', body).forEach((i) => (i.onchange = () => { const P2 = PRICE(), v = Math.max(0, +i.value || 0); if (v) P2[i.dataset.pk] = v; else delete P2[i.dataset.pk]; store.set('byr.price', P2); renderProps(); }));
+  $('#qEtc').onchange = (e) => { store.set('byr.etc', clamp(+e.target.value || 0, 0, 30)); renderProps(); };
+  $('#qVat').onchange = (e) => { store.set('byr.vat', e.target.checked); renderProps(); };
+  const nm = `${safeName()}_${varCur().name}_견적`;
+  $('#qX').onclick = async () => { const data = SH.bomXlsx(rows, PRICE(), { title: `${S.model.name} · ${varCur().name} 견적서`, sub: `${new Date().toLocaleDateString('ko-KR')} · BYR2 · 전력 ${a.kw.toFixed(1)} kW`, etcPct: store.get('byr.etc', 0), vat: store.get('byr.vat', true) }); if (await saveFile({ title: '견적 엑셀', defaultName: nm + '.xlsx', extensions: ['xlsx'], data })) toast('견적 엑셀을 저장했어요 · 금액 칸은 수식이라 단가를 바꾸면 다시 계산돼요'); };
+  $('#qC').onclick = async () => { if (await saveFile({ title: '견적 CSV', defaultName: nm + '.csv', extensions: ['csv'], data: SH.bomCsv(rows, PRICE()) })) toast('CSV 로 저장했어요'); };
+  $$('[data-dact]', body).forEach((b) => (b.onclick = () => ACT[b.dataset.dact]()));
+}
+/* 안 (같은 층의 여러 배치안) */
+function varEnsure() { const M = S.model; if (!M.variants || !M.variants.length) { M.variants = [{ id: 'va', name: 'A안', lv: M.activeLevel, data: null }]; M.varId = 'va'; } if (!M.variants.find((v) => v.id === M.varId)) M.varId = M.variants[0].id; }
+const varCur = () => (varEnsure(), S.model.variants.find((v) => v.id === S.model.varId));
+const varLevel = (v) => (v.id === S.model.varId ? level() : v.data);
+function varAdd(name) { varEnsure(); const used = new Set(S.model.variants.map((v) => v.name)), nm = name || [...'ABCDEFGHIJ'].map((c) => c + '안').find((n) => !used.has(n)) || `안 ${S.model.variants.length + 1}`;
+  const cur = varCur(); cur.data = JSON.parse(JSON.stringify(level())); cur.lv = S.model.activeLevel; const v = { id: uid('v'), name: nm, lv: S.model.activeLevel, data: null }; S.model.variants.push(v); S.model.varId = v.id; commit(); return v; }
+function varSwitch(id) { varEnsure(); const M = S.model; if (id === M.varId) return; const v = M.variants.find((x) => x.id === id); if (!v || !v.data) return; const cur = varCur(); cur.data = JSON.parse(JSON.stringify(level())); cur.lv = M.activeLevel;
+  M.levels[v.lv] = JSON.parse(JSON.stringify(v.data)); v.data = null; M.varId = id; switchLevel(v.lv); commit(); renderProps(); toast(`${v.name}으로 바꿨어요`); }
+function varDel(id) { varEnsure(); const M = S.model; if (M.variants.length < 2) return; if (id === M.varId) { const o = M.variants.find((x) => x.id !== id); varSwitch(o.id); } M.variants = M.variants.filter((x) => x.id !== id); commit(); renderProps(); }
+const AUTO = { kind: 'pel_delivery', ratio: null, front: 'auto', clear: false, newVar: false, scope: { kitchen: 1, hall: 1, mep: 1, finish: 1 } };
+function renderAuto(body) {
+  varEnsure(); const M = S.model, pr = SH.BIZ[AUTO.kind], ratio = AUTO.ratio ?? pr.ratio, fd = SH.frontSide(level()), FN = { N: '위', S: '아래', E: '오른쪽', W: '왼쪽' };
+  $('#propsTitle').textContent = '자동 배치 · A안/B안';
+  body.innerHTML = `<div class="sec">업종</div><div class="chips">${Object.entries(SH.BIZ).map(([k, b]) => `<button data-bz="${k}" aria-pressed="${AUTO.kind === k}">${esc(b.name)}</button>`).join('')}</div>
+    <label class="fld">주방 비율 <b>${Math.round(ratio * 100)}%${ratio >= 0.95 ? ' · 배달 전용 (홀 없음)' : ''}</b><input type="range" id="auR" min="15" max="100" step="1" value="${Math.round(ratio * 100)}"></label>
+    <div class="chips"><button data-rq="${pr.ratio}">기본 ${Math.round(pr.ratio * 100)}%</button><button data-rq="0.5">50%</button><button data-rq="0.7">70%</button><button data-rq="1">100% 배달 전용</button></div>
+    <label class="fld">정면 (출입구 쪽, 2D 기준)<select id="auF"><option value="auto">자동${fd ? ` · 문이 있는 ${FN[fd.side]}` : ' · 아래'}</option>${Object.entries(FN).map(([k, n]) => `<option value="${k}" ${AUTO.front === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <div class="row">${num('주방 통로 폭', 'aisle', aisleOf(), 50)}</div>
+    <div class="sec">넣을 것</div><div class="chips">${[['kitchen', '주방 기물'], ['hall', '홀 (카운터 · 테이블)'], ['mep', '설비 (후드 · 배수 · 가스 · 3상)'], ['finish', '마감 색']].map(([k, n]) => `<button data-sc="${k}" aria-pressed="${!!AUTO.scope[k]}">${n}</button>`).join('')}</div>
+    <label class="chk"><input type="checkbox" id="auClr" ${AUTO.clear ? 'checked' : ''}> 직접 놓은 기물도 모두 지우고 배치</label>
+    <label class="chk"><input type="checkbox" id="auNew" ${AUTO.newVar ? 'checked' : ''}> 새 안으로 배치 (지금 안은 그대로 둠)</label>
+    <div class="btns"><button class="btn pri" id="auGo">배치하기</button></div>
+    <p class="hint">매장 바깥 벽을 기준으로 뒤쪽에 주방 · 앞쪽에 홀을 나누고, 칸막이 · 배식구 · 주방 기물(뒷벽 → 옆벽 → 칸막이) · 후드 · 배수구 · 카운터 · 테이블을 놓아요. 다시 배치하면 자동으로 놓은 것만 바꿔요.${pr.pel ? ' 페리카나 매뉴얼 2025.01 의 기물 · 색을 써요.' : ''}</p>
+    <div class="sec">배치안 · ${M.variants.length}개</div>
+    ${M.variants.map((v) => { const m = SH.metrics(varLevel(v), S.lib, PRICE()); return `<div class="lvrow ${v.id === M.varId ? 'on' : ''}"><button class="lvgo" data-vsw="${v.id}">${esc(v.name)}${v.id === M.varId ? ' · 지금' : ''}</button><small>기물 ${m.items} · 좌석 ${m.seats} · ${m.kw}kW</small><button class="qb" data-vren="${v.id}">이름</button>${M.variants.length > 1 ? `<button class="qb danger" data-vdel="${v.id}">지우기</button>` : ''}</div>`; }).join('')}
+    <div id="vRen" hidden class="row"><input id="vRenIn" aria-label="안 이름"><button class="btn pri" id="vRenOk">바꾸기</button></div>
+    <div class="btns"><button class="btn" id="vAdd">+ 지금 안 복사해서 새 안</button><button class="btn" id="vCmp" ${M.variants.length < 2 ? 'disabled' : ''}>비교하기</button></div>`;
+  $$('[data-bz]', body).forEach((b) => (b.onclick = () => { AUTO.kind = b.dataset.bz; AUTO.ratio = null; renderProps(); }));
+  $('#auR').oninput = (e) => { AUTO.ratio = +e.target.value / 100; e.target.previousElementSibling.textContent = `${e.target.value}%${+e.target.value >= 95 ? ' · 배달 전용 (홀 없음)' : ''}`; };
+  $$('[data-rq]', body).forEach((b) => (b.onclick = () => { AUTO.ratio = +b.dataset.rq; renderProps(); }));
+  $('#auF').onchange = (e) => (AUTO.front = e.target.value);
+  $('[data-k=aisle]', body).onchange = (e) => { S.model.aisle = clamp(Math.round(+e.target.value || 900), 400, 2000); commit(); };
+  $$('[data-sc]', body).forEach((b) => (b.onclick = () => { AUTO.scope[b.dataset.sc] = AUTO.scope[b.dataset.sc] ? 0 : 1; renderProps(); }));
+  $('#auClr').onchange = (e) => (AUTO.clear = e.target.checked); $('#auNew').onchange = (e) => (AUTO.newVar = e.target.checked);
+  $('#auGo').onclick = async () => {
+    if (AUTO.clear && level().items.some((it) => !it.pz) && !(await ask('기물을 모두 지우고 배치할까요?', '직접 놓은 기물도 지워져요. 되돌리기(↶)로 되돌릴 수 있어요.', [{ label: '취소', value: false }, { label: '지우고 배치', value: true, kind: 'pri' }]))) return;
+    if (AUTO.newVar) varAdd(); setFocus(null);
+    const r = SH.autoLayout(level(), S.lib, { kind: AUTO.kind, ratio: AUTO.ratio ?? pr.ratio, front: AUTO.front, aisle: aisleOf(), clear: AUTO.clear, scope: AUTO.scope }, mkItem, uid);
+    if (r.error) return toast(r.error);
+    S.sel = null; engine.setLevel(level()); applyEnv(); plan.fit(); syncCeilBtn(); commit(); renderProps();
+    const a = SH.analyze(level(), S.lib, aisleOf()), w = a.checks.filter((c) => c.lvl !== 'work').length;
+    toast(`${varCur().name} · ${pr.name}: ${r.placed}개 놓음${r.seats ? ` · 좌석 ${r.seats}석` : ''} · 주방 ${r.kitchenA.toFixed(1)}㎡${r.hallA ? ` / 홀 ${r.hallA.toFixed(1)}㎡` : ''}${r.miss.length ? ` · 못 넣음: ${r.miss.slice(0, 3).map((m) => (S.lib[m] || {}).name || m).join(', ')}` : ''}${r.note ? ' · ' + r.note : ''}${w ? ` · 점검 ${w}건` : ' · 점검 이상 없음'}`, 8000);
+  };
+  $$('[data-vsw]', body).forEach((b) => (b.onclick = () => varSwitch(b.dataset.vsw)));
+  $$('[data-vdel]', body).forEach((b) => (b.onclick = async () => { const v = S.model.variants.find((x) => x.id === b.dataset.vdel); if (await ask(`${v.name}을 지울까요?`, '', [{ label: '취소', value: false }, { label: '지우기', value: true, kind: 'pri' }])) varDel(v.id); }));
+  $$('[data-vren]', body).forEach((b) => (b.onclick = () => { const v = S.model.variants.find((x) => x.id === b.dataset.vren), box = $('#vRen'); box.hidden = false; $('#vRenIn').value = v.name; $('#vRenIn').focus(); $('#vRenOk').onclick = () => { v.name = $('#vRenIn').value.trim().slice(0, 30) || v.name; commit(); renderProps(); }; }));
+  $('#vAdd').onclick = () => { const v = varAdd(); renderProps(); toast(`${v.name}을 만들었어요 · 지금 화면이 ${v.name}이에요`); };
+  $('#vCmp').onclick = () => { S.cmp = { a: S.model.variants[0].id, b: (S.model.variants.find((v) => v.id !== S.model.variants[0].id) || {}).id }; S.panel = 'cmp'; renderProps(); };
+}
+function renderCmp(body) {
+  varEnsure(); const V = S.model.variants, c = S.cmp || {}, va = V.find((v) => v.id === c.a) || V[0], vb = V.find((v) => v.id === c.b) || V[1] || V[0], P = PRICE();
+  const ma = SH.metrics(varLevel(va), S.lib, P), mb = SH.metrics(varLevel(vb), S.lib, P), opt = (sel) => V.map((v) => `<option value="${v.id}" ${v.id === sel.id ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
+  const rowsDef = [['기물', 'items', '개', 0], ['좌석', 'seats', '석', 0], ['전력', 'kw', 'kW', 1], ['주방 면적', 'kitchen', '㎡', 1], ['홀 면적', 'hall', '㎡', 1], ['주방 비율', 'kr', '%', 0], ['겹침', 'bad', '건', 0], ['확인 필요', 'warn', '건', 0], ['견적 소계', 'cost', '원', 0]];
+  for (const m of [ma, mb]) m.kr = m.total ? (m.kitchen / m.total) * 100 : 0;
+  $('#propsTitle').textContent = '안 비교';
+  body.innerHTML = `<div class="row"><label class="fld">왼쪽<select id="cA">${opt(va)}</select></label><label class="fld">오른쪽<select id="cB">${opt(vb)}</select></label></div>
+    <div class="cmpv"><canvas id="cvA" width="300" height="220"></canvas><canvas id="cvB" width="300" height="220"></canvas></div>
+    <div class="tblw"><table class="qt"><thead><tr><th></th><th>${esc(va.name)}</th><th>${esc(vb.name)}</th></tr></thead><tbody>${rowsDef.map(([n, k, u, d]) => { const x = ma[k], y = mb[k], f = (v) => (d ? v.toFixed(d) : Math.round(v).toLocaleString()); return `<tr><td>${n}</td><td class="n">${f(x)} ${u}</td><td class="n">${f(y)} ${u}${x !== y ? ` <small class="muted">(${y > x ? '+' : ''}${d ? (y - x).toFixed(d) : Math.round(y - x).toLocaleString()})</small>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
+    <p class="hint">견적 소계는 견적에 넣은 단가 기준이에요 (단가가 없으면 0).</p>
+    <div class="btns"><button class="btn" id="cBack">← 자동 배치</button><button class="btn pri" id="cUse">${esc(vb.name)} 쓰기</button></div>`;
+  SH.thumb($('#cvA'), varLevel(va), S.lib); SH.thumb($('#cvB'), varLevel(vb), S.lib);
+  $('#cA').onchange = (e) => { S.cmp = { ...c, a: e.target.value, b: vb.id }; renderProps(); }; $('#cB').onchange = (e) => { S.cmp = { ...c, a: va.id, b: e.target.value }; renderProps(); };
+  $('#cBack').onclick = () => ACT.auto(); $('#cUse').onclick = () => { varSwitch(vb.id); S.panel = 'cmp'; renderProps(); };
 }
 /* ----- 공기 흐름 · 열/연기 ----- */
 function toggleAir() {
@@ -920,6 +1030,9 @@ const DOCK = [
   { run: () => startWalk(), label: '걷기', icon: '<circle cx="13" cy="4.5" r="1.8"/><path d="M10 21l2-6-2.5-2.5L11 8l3 2 3 1M12 15l3 6M9.5 12.5L7 14"/>' },
   { id: 'dkXr', act: 'xray', label: '설치물', icon: '<path d="M3 18h18M5 18v-4h14v4"/><path d="M8 14V9h8v5" stroke-dasharray="2 2"/>' },
   { id: 'dkAir', run: () => toggleAir(), label: '공기', icon: '<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h8"/>' },
+  { act: 'check', label: '점검', icon: '<path d="M9 11l2.5 2.5L16 9"/><rect x="4" y="3.5" width="16" height="17" rx="2"/>' },
+  { act: 'quote', label: '견적', icon: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>' },
+  { act: 'auto', label: '자동 배치', icon: '<rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M3.5 10h17M10 10v10.5"/><path d="M14 14h3v3h-3z"/>' },
   { id: 'dkSim', act: 'sim', label: '동선', icon: '<circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h6a3 3 0 0 0 0-6h-2a3 3 0 0 1 0-6h6" stroke-dasharray="2.5 2"/>' },
 ];
 function buildDock() {
