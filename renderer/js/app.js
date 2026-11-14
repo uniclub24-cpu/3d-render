@@ -177,7 +177,7 @@ const ACT = {
   auto: () => { S.panel = 'auto'; S.propsOpen = true; renderProps(); },
   view: () => { S.panel = 'view'; S.propsOpen = true; renderProps(); },
   hist: () => { S.panel = 'hist'; S.propsOpen = true; renderProps(); },
-  lang: () => { setLang(lang() === 'en' ? 'ko' : 'en'); renderProps(); buildDock(); syncBar && syncBar(); if (!$('#home').hidden) renderHome(); toast(lang() === 'en' ? 'English screen (names in your project stay as they are)' : '한국어 화면으로 바꿨어요'); },
+  lang: () => { setLang(lang() === 'en' ? 'ko' : 'en'); renderProps(); if (!$('#home').hidden) renderHome(); toast(lang() === 'en' ? 'English screen (names in your project stay as they are)' : '한국어 화면으로 바꿨어요'); },
   sketch: () => setPlanTool('sketch'),
   cmt: () => { S.panel = 'cmt'; S.propsOpen = true; renderProps(); },
   pack: async () => { /* 블렌더 패키지: GLB(모든 층) + DXF + 프로젝트 + 견적 + 안내 를 zip 하나로 */
