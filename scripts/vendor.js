@@ -9,6 +9,7 @@ const ENTRY = [
   'examples/jsm/postprocessing/ShaderPass.js', 'examples/jsm/postprocessing/OutputPass.js', 'examples/jsm/shaders/FXAAShader.js',
   'examples/jsm/controls/OrbitControls.js', 'examples/jsm/environments/RoomEnvironment.js', 'examples/jsm/utils/BufferGeometryUtils.js',
   'examples/jsm/loaders/GLTFLoader.js', 'examples/jsm/loaders/OBJLoader.js', 'examples/jsm/loaders/FBXLoader.js',
+  'examples/jsm/loaders/STLLoader.js', 'examples/jsm/loaders/PLYLoader.js', 'examples/jsm/loaders/ColladaLoader.js', 'examples/jsm/loaders/3MFLoader.js',
   'examples/jsm/exporters/GLTFExporter.js', 'examples/jsm/exporters/OBJExporter.js',
 ];
 if (!fs.existsSync(path.join(src, 'build', 'three.module.min.js'))) {

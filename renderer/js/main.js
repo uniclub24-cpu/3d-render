@@ -193,7 +193,27 @@ export class Engine {
   }
   /** 설치물 투시: cat = 'floor' | 'wall' | 'ceil' | null. 그 분류의 배관 · 전선 · 설비만 진하게, 나머지는 흑백 반투명 */
   setXray(cat) { this.xray = cat || null; applyStyleMaterials(this.world, this.style); if (this.envGroup) this.envGroup.visible = !this.xray && !this.focusPts; this._applyXray(); }
+  /** 댓글 핀 (3D 글자판) */
+  setPins(pins) {
+    if (this.pinG) { this.scene.remove(this.pinG); disposeTree(this.pinG); } this.pinG = new THREE.Group(); this.pinG.name = '댓글 핀'; this.scene.add(this.pinG);
+    (pins || []).forEach((c, i) => { const cv = document.createElement('canvas'), g = cv.getContext('2d'); cv.width = 64; cv.height = 84; g.fillStyle = c.done ? '#7c8794' : '#ff6b3d'; g.strokeStyle = '#fff'; g.lineWidth = 4; g.beginPath(); g.arc(32, 30, 26, 0, Math.PI * 2); g.moveTo(16, 48); g.lineTo(32, 82); g.lineTo(48, 48); g.fill(); g.stroke();
+      g.fillStyle = '#fff'; g.font = '700 30px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(i + 1), 32, 31); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true })); s.center.set(0.5, 0); s.scale.set(0.3, 0.39, 1); s.position.set(c.x * MM, (c.z ?? 1600) * MM, c.y * MM); s.renderOrder = 998; this.pinG.add(s); });
+  }
+  /* ---------- 벽 낮춰 보기 · 레이어 투명도 (기존 앱 v13) ---------- */
+  setWallCut(h) { this.wallCut = h || null; this._applyCut(); }
+  _applyCut() { if (!this.structure) return; const H = (this.level && this.level.ceilingH) || 2700; for (const g of this.structure.children) if (g.name === '벽') g.scale.y = this.wallCut ? Math.max(0.02, this.wallCut / H) : 1; this.renderer.shadowMap.needsUpdate = true; }
+  setLayerOpacity(op) { this.layerOp = { ...op }; this._applyLayers(); }
+  _applyLayers() {
+    const op = this.layerOp || {}, any = Object.values(op).some((v) => v < 1); if (!any && !this._layered) return; this._layered = any;
+    for (const g of this.items.children) { const it = this.level && this.level.items.find((q) => q.id === g.userData.itemId), L = it && this.ctx.lib[it.type], ly = (L && L.layer) || 'floor', a = op[ly === 'ceiling' ? 'ceil' : ly] ?? 1;
+      g.traverse((o) => { if (!o.isMesh) return; const u = o.userData; if (u.opMat && o.material !== u.opMat) { u.opBase = null; u.opMat = null; } /* 스타일이 재질을 바꿈 */
+        if (a >= 1) { if (u.opBase) { o.material = u.opBase; u.opBase = u.opMat = null; } return; }
+        const base = u.opBase || o.material, m = Array.isArray(base) ? base.map((x) => x.clone()) : base.clone(); for (const x of [].concat(m)) { x.transparent = true; x.opacity = a * (x.opacity ?? 1); x.depthWrite = false; }
+        u.opBase = base; u.opMat = m; o.material = m; }); }
+  }
   _applyXray() {
+    this._applyCut(); this._applyLayers();
     const cat = this.xray; if (!cat) return; const gray = (this._xrMat ||= new THREE.MeshStandardMaterial({ color: '#c9ccd1', transparent: true, opacity: 0.16, depthWrite: false, roughness: 1 }));
     const keep = (o) => { for (let p = o; p; p = p.parent) { if (p.userData.xr) return p.userData.xr === cat; if (p.userData.itemId) { const it = this.level.items.find((q) => q.id === p.userData.itemId); return it ? itemCat(this.ctx.lib[it.type]) === cat : false; } } return false; };
     this.world.traverse((o) => { if (!o.isMesh) return; o.userData.baseMat ||= o.material; if (!keep(o)) o.material = gray; });

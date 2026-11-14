@@ -267,6 +267,9 @@ export class Plan2D {
     // 배관 · 전선 · 덕트 (종류별 색 · 굵기)
     for (const l of L.lines || []) { const k = LINEKINDS[l.kind]; if (!k || !l.pts || l.pts.length < 2) continue; g.save(); g.strokeStyle = l.color || k.color; g.lineWidth = Math.max(2 * px1, Math.min(l.w || k.w, 300)); g.globalAlpha = 0.85; if (k.z === 'below') g.setLineDash([10 * px1, 6 * px1]); g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath(); l.pts.forEach((q, i) => (i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]))); g.stroke(); g.restore(); }
     if (this.tool === 'line' && this.lpts && this.lpts.length) { const k = LINEKINDS[this.lineKind] || LINEKINDS.wire, R2 = [...this.lpts, ...(this.hover ? [this.hover] : [])]; g.save(); g.strokeStyle = k.color; g.lineWidth = Math.max(3 * px1, k.w); g.globalAlpha = 0.7; g.beginPath(); R2.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.stroke(); g.restore(); }
+    // 댓글 핀
+    if (this.pins) this.pins.forEach((c, i) => { g.save(); g.fillStyle = c.done ? '#7c8794' : '#ff6b3d'; g.strokeStyle = '#fff'; g.lineWidth = 2 * px1; g.beginPath(); g.arc(c.x, c.y - 26 * px1, 13 * px1, 0, Math.PI * 2); g.moveTo(c.x - 7 * px1, c.y - 18 * px1); g.lineTo(c.x, c.y); g.lineTo(c.x + 7 * px1, c.y - 18 * px1); g.fill(); g.stroke();
+      g.fillStyle = '#fff'; g.font = `700 ${13 * px1}px system-ui`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(i + 1), c.x, c.y - 26 * px1); g.restore(); });
     // 동선 시뮬레이터: 직원 · 남은 길
     if (this.simA) for (const A of this.simA) { g.save(); g.fillStyle = A.a.color; g.strokeStyle = A.a.color; if (A.path) { g.setLineDash([8 * px1, 6 * px1]); g.lineWidth = 2 * px1; g.beginPath(); g.moveTo(A.pos[0], A.pos[1]); for (const q of A.path.slice(A.pi)) g.lineTo(q[0], q[1]); g.stroke(); g.setLineDash([]); } g.beginPath(); g.arc(A.pos[0], A.pos[1], 220, 0, Math.PI * 2); g.fill(); g.restore(); }
     if (this.mtmp) this._tape(this.mtmp[0].x, this.mtmp[0].y, this.mtmp[1].x, this.mtmp[1].y, px1);

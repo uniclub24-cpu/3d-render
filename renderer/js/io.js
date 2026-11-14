@@ -6,13 +6,21 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 
-export const ASSET_EXT = ['glb', 'gltf', 'obj', 'fbx'];
+export const ASSET_EXT = ['glb', 'gltf', 'obj', 'fbx', 'stl', 'ply', 'dae', '3mf', 'off'];
 export const extOf = (name) => (name.split('.').pop() || '').toLowerCase();
 
 export const RES_EXT = ['bin', 'png', 'jpg', 'jpeg', 'webp', 'ktx2', 'tga', 'bmp'];
 /** 내용으로 만든 짧은 지문 (이름 · 크기가 같아도 내용이 다르면 다른 모델) */
 export function fingerprint(bytes) { let a = 0x811c9dc5, b = 0x9747b28c; for (let i = 0; i < bytes.length; i++) { const c = bytes[i]; a = Math.imul(a ^ c, 0x01000193); b = Math.imul(b ^ c, 0x5bd1e995) ^ (b >>> 13); } return (a >>> 0).toString(36) + (b >>> 0).toString(36) + bytes.length.toString(36); }
 /** 파일 바이트 → Three 객체. res = { '파일이름': Uint8Array } — glTF 의 .bin · 텍스처, FBX 텍스처처럼 따로 있는 연결 파일 */
+/** OFF (Object File Format) → BufferGeometry */
+function parseOFF(t) {
+  const w = t.split(/\r?\n/).map((l) => l.replace(/#.*/, '').trim()).filter(Boolean); let i = 0; if (/^C?N?OFF/.test(w[0])) { const r = w[0].replace(/^C?N?OFF/, '').trim(); if (r) w[0] = r; else i++; }
+  const [nv, nf] = w[i++].split(/\s+/).map(Number), P = [], idx = [];
+  for (let k = 0; k < nv; k++) { const v = w[i++].split(/\s+/).map(Number); P.push(v[0], v[1], v[2]); }
+  for (let k = 0; k < nf; k++) { const f = w[i++].split(/\s+/).map(Number), n = f[0]; for (let j = 2; j < n; j++) idx.push(f[1], f[j], f[j + 1]); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setIndex(idx); g.computeVertexNormals(); return g;
+}
 async function parseAsset(ext, bytes, res = {}) {
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), urls = [];
   const mgr = new THREE.LoadingManager(), base = (u) => decodeURIComponent(String(u).split(/[?#]/)[0].split('/').pop()).toLowerCase(), map = new Map();
@@ -24,7 +32,14 @@ async function parseAsset(ext, bytes, res = {}) {
     if (ext === 'glb' || ext === 'gltf') obj = await new Promise((ok, no) => new GLTFLoader(mgr).parse(buf, '', (g) => ok(g.scene), no));
     else if (ext === 'obj') obj = new OBJLoader(mgr).parse(new TextDecoder().decode(bytes));
     else if (ext === 'fbx') obj = new FBXLoader(mgr).parse(buf, '');
+    else if (ext === 'stl' || ext === 'ply' || ext === 'off') { /* 형상만 있는 형식: 회색 재질 (PLY 는 점 색 있으면 그대로) */
+      const geo = ext === 'off' ? parseOFF(new TextDecoder().decode(bytes)) : ext === 'stl' ? new (await import('three/addons/loaders/STLLoader.js')).STLLoader().parse(buf) : new (await import('three/addons/loaders/PLYLoader.js')).PLYLoader().parse(buf);
+      if (!geo.attributes.normal) geo.computeVertexNormals(); const vc = !!geo.attributes.color;
+      obj = new THREE.Group(); obj.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: vc ? 0xffffff : 0xb9bec6, vertexColors: vc, roughness: 0.6, metalness: 0.05 }))); }
+    else if (ext === 'dae') obj = new (await import('three/addons/loaders/ColladaLoader.js')).ColladaLoader(mgr).parse(new TextDecoder().decode(bytes), '').scene;
+    else if (ext === '3mf') obj = new (await import('three/addons/loaders/3MFLoader.js')).ThreeMFLoader(mgr).parse(buf);
     else throw new Error('지원하지 않는 형식이에요: ' + ext);
+    if (/^(stl|ply|off|3mf)$/.test(ext)) { const g = new THREE.Group(); obj.rotation.x -= Math.PI / 2; g.add(obj); obj = g; } /* 출력용 형식은 보통 Z 가 위 */
     await new Promise((ok) => setTimeout(ok, 300)); // 텍스처가 다 읽힐 시간
     obj.userData.missing = [...missing];
     return obj;

@@ -16,14 +16,14 @@ import { findFaces } from './rooms.js';
 import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
-export const APP_VERSION = '2.1.7';
+export const APP_VERSION = '2.1.8';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = (p) => p + Math.random().toString(36).slice(2, 9);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-const S = { model: null, lib: {}, shapes: {}, assets: new Map(), undo: [], redo: [], propsOpen: false, sel: null, panel: 'props', pane: 'split' };
+const S = { model: null, lib: {}, shapes: {}, assets: new Map(), undo: [], redo: [], um: [], rm: [], propsOpen: false, sel: null, panel: 'props', pane: 'split' };
 let engine, plan;
 const store = { get: (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 const level = () => (S.model ? S.model.levels[S.model.activeLevel] : null);
@@ -35,20 +35,24 @@ function toast(msg, ms = 4200) { const t = $('#toast'); t.textContent = msg; t.h
 
 /* ---------- 모델 · 되돌리기 ---------- */
 const snap = () => JSON.stringify(S.model);
-function commit() { S.undo.push(S.last); if (S.undo.length > 60) S.undo.shift(); S.redo.length = 0; S.last = snap(); syncBar(); afterChange(); }
+/** 작업 기록: 고칠 때마다 무엇이 몇 개 바뀌었는지 (되돌리기 칸과 짝) */
+const cnts = () => { const L = level(); return L ? [L.items.length, L.walls.length, L.openings.length, (L.rooms || []).length, (L.lines || []).length, (L.dims || []).length, S.model.activeLevel, S.model.levels.length] : []; };
+const CN = ['기물', '벽', '문/창', '공간', '설치물', '치수'];
+function histLabel(a, b) { if (!a || a[6] !== b[6]) return a && a[7] !== b[7] ? `층 ${b[7] > a[7] ? '추가' : '삭제'}` : '층 · 설정'; const d = CN.map((n, i) => (b[i] !== a[i] ? `${n} ${b[i] > a[i] ? '+' : '−'}${Math.abs(b[i] - a[i])}` : '')).filter(Boolean); return d.join(' · ') || (S.sel ? `${{ item: '기물', wall: '벽', opening: '문/창', room: '공간' }[S.sel.kind] || ''} 수정`.trim() : '수정'); }
+function commit() { const c = cnts(); S.undo.push(S.last); S.um.push({ t: Date.now(), l: histLabel(S.lastC, c) }); S.lastC = c; if (S.undo.length > 60) { S.undo.shift(); S.um.shift(); } S.redo.length = 0; S.rm.length = 0; S.last = snap(); syncBar(); afterChange(); if (S.panel === 'hist' && S.propsOpen) renderProps(); }
 /** 고칠 때마다: 자동 저장 · 조정 필요 다시 세기 · 2D 다시 그리기 */
-function afterChange() { lib2.autosave(S.model); refreshBad(); plan && plan.redraw(); }
+function afterChange() { lib2.autosave(S.model); refreshBad(); syncPins(); plan && plan.redraw(); }
 function restore(json) {
   const sel = S.sel; S.model = JSON.parse(json); S.last = json; engine.setLevel(level()); applyEnv(); afterChange();
   const L = level(), still = sel && ({ item: L.items, wall: L.walls, opening: L.openings, room: L.rooms }[sel.kind] || []).some((q) => q.id === sel.id);
   setSel(still ? sel : null); syncBar();
 }
-function undo() { if (!S.undo.length) return; S.redo.push(S.last); restore(S.undo.pop()); }
-function redo() { if (!S.redo.length) return; S.undo.push(S.last); restore(S.redo.pop()); }
+function undo() { if (!S.undo.length) return; S.redo.push(S.last); S.rm.push(S.um.pop()); restore(S.undo.pop()); S.lastC = cnts(); }
+function redo() { if (!S.redo.length) return; S.undo.push(S.last); S.um.push(S.rm.pop()); restore(S.redo.pop()); S.lastC = cnts(); }
 async function setModel(model, fit = true) {
   if (S.model && S.model !== model) await lib2.flush();
   if (engine.sim.on) { engine.sim.stop(); plan.simA = null; syncSimBtn(); } if (engine.air.on) toggleAir(); if (engine.xray) setXray(null);
-  S.model = migrate(model, S.lib); S.undo.length = S.redo.length = 0; S.last = snap(); setFocus(null);
+  S.model = migrate(model, S.lib); S.undo.length = S.redo.length = S.um.length = S.rm.length = 0; S.last = snap(); S.lastC = cnts(); setTimeout(syncPins); setFocus(null);
   await restoreAssets(); S.sel = null; engine.setLevel(level()); applyEnv(); loadRender(); syncCeilBtn(); if (fit) { engine.view('iso'); plan.fit(); } plan.select(null, true); syncBar(); renderProps();
   try { await lib2.saveLocal(S.model); setSaveState('이 기기에 저장됨'); } catch (e) { console.warn(e); } refreshBad(); if (cloud.session()) lib2.scheduleSync(2000);
 }
@@ -131,9 +135,9 @@ function checkModel(m) {
 }
 /** 열다가 실패하면 지금 프로젝트 · 되돌리기 기록을 그대로 되살린다 */
 async function safeOpen(model) {
-  const prev = S.model && { json: snap(), undo: [...S.undo], redo: [...S.redo] };
+  const prev = S.model && { json: snap(), undo: [...S.undo], redo: [...S.redo], um: [...S.um], rm: [...S.rm] };
   try { await setModel(model); return true; }
-  catch (e) { console.error(e); if (prev) { S.model = JSON.parse(prev.json); S.last = prev.json; S.undo = prev.undo; S.redo = prev.redo; try { engine.setLevel(level()); applyEnv(); plan.fit(); syncBar(); renderProps(); } catch (e2) { console.error(e2); } } toast('열지 못했어요 (' + (e.message || e) + ') · 지금 작업은 그대로예요', 7000); return false; }
+  catch (e) { console.error(e); if (prev) { S.model = JSON.parse(prev.json); S.last = prev.json; S.undo = prev.undo; S.redo = prev.redo; S.um = prev.um; S.rm = prev.rm; try { engine.setLevel(level()); applyEnv(); plan.fit(); syncBar(); renderProps(); } catch (e2) { console.error(e2); } } toast('열지 못했어요 (' + (e.message || e) + ') · 지금 작업은 그대로예요', 7000); return false; }
 }
 async function importAsset(name, bytes, resFiles = []) {
   try {
@@ -156,7 +160,8 @@ const ACT = {
   new: async () => {
     const empty = !S.model || (S.model.levels.every((L) => !L.items.length && !L.rooms.length && L.walls.length <= 4) && !S.undo.length);
     if (!empty && !(await ask('새 프로젝트를 시작할까요?', `"${S.model.name}" 은 내 프로젝트에 저장돼 있어요. 지금 화면의 되돌리기 기록은 없어져요.`, [{ label: '취소', value: false }, { label: '새로 시작', value: true, kind: 'pri' }]))) return;
-    await lib2.flush(); await setModel(emptyProject()); toast('새 프로젝트 · 이전 작업은 "내 프로젝트"에 있어요');
+    const sz = await ask('매장 크기 (사각 매장 템플릿)', '바깥 벽 안쪽 기준 가로 × 세로예요. 만든 뒤 벽 끝점을 끌거나 벽 길이를 바꿔 맞출 수 있어요.', [['6×8', 6000, 8000], ['8×10', 8000, 10000], ['9×12', 9000, 12000], ['10×15', 10000, 15000], ['12×20', 12000, 20000], ['기본 8×6', 8000, 6000]].map(([n, w, d], i) => ({ label: `${n} m`, value: [w, d], kind: i === 5 ? 'pri' : '' })).concat([{ label: '취소', value: false }]));
+    if (!sz) return; await lib2.flush(); await setModel(emptyProject('새 프로젝트', sz[0], sz[1])); toast(`새 프로젝트 · ${sz[0] / 1000}×${sz[1] / 1000}m · 이전 작업은 "내 프로젝트"에 있어요`);
   },
   home: () => showHome(),
   quit: () => quitApp(),
@@ -170,6 +175,14 @@ const ACT = {
   quote: () => { S.panel = 'quote'; S.propsOpen = true; renderProps(); },
   auto: () => { S.panel = 'auto'; S.propsOpen = true; renderProps(); },
   view: () => { S.panel = 'view'; S.propsOpen = true; renderProps(); },
+  hist: () => { S.panel = 'hist'; S.propsOpen = true; renderProps(); },
+  cmt: () => { S.panel = 'cmt'; S.propsOpen = true; renderProps(); },
+  pack: async () => { /* 블렌더 패키지: GLB(모든 층) + DXF + 프로젝트 + 견적 + 안내 를 zip 하나로 */
+    setSel(null); toast('패키지를 만드는 중…'); const nm = safeName(), root = engine.buildAll(S.model.levels, (L) => (it) => SL.itemZ(L, it, S.lib)), glb = await exportGLB(root), dxf = CAD.dxfDoc(S.model.levels.map((L, i) => ({ level: L, pre: `F${i + 1}_` })), S.lib, (L, it) => SL.itemZ(L, it, S.lib));
+    engine.disposeTree(root); const shot = Uint8Array.from(atob(engine.snapshot().split(',')[1]), (c) => c.charCodeAt(0)), rows = SH.bomRows(level(), S.lib), xl = SH.bomXlsx(rows, PRICE(), { title: `${S.model.name} 견적서`, sub: new Date().toLocaleDateString('ko-KR') + ' · BYR2', etcPct: store.get('byr.etc', 0), vat: store.get('byr.vat', true) });
+    const readme = `${S.model.name} — BYR2 ${APP_VERSION} 패키지 (${new Date().toLocaleString('ko-KR')})\r\n\r\n- ${nm}.glb : 모든 층 3D (단위 m · Y 위). Blender: File > Import > glTF 2.0 / D5 · Twinmotion · SketchUp 에서도 가져오기\r\n- ${nm}.dxf : 평면 (mm · 층마다 F1_ · F2_ 레이어 · 기물은 블록)\r\n- ${nm}.byr.json : BYR2 프로젝트 (다시 열어서 고치기)\r\n- ${nm}_견적.xlsx : 지금 층 물량 · 단가 · 합계\r\n- ${nm}.png : 지금 화면\r\n\r\nBlender 팁: 가져온 뒤 렌더 엔진 Cycles · 조명은 기물 이름의 '조명' 을 Emission 으로 바꾸면 좋아요.\r\n`;
+    const z = SH.zip([{ name: nm + '.glb', data: new Uint8Array(glb) }, { name: nm + '.dxf', data: dxf }, { name: nm + '.byr.json', data: JSON.stringify(S.model) }, { name: nm + '_견적.xlsx', data: xl }, { name: nm + '.png', data: shot }, { name: '읽어보기.txt', data: readme }]);
+    if (await saveFile({ title: 'ZIP 패키지', defaultName: nm + '-패키지.zip', extensions: ['zip'], data: z })) toast(`패키지를 저장했어요 (${(z.length / 1e6).toFixed(1)}MB · GLB · DXF · 프로젝트 · 견적 · 이미지)`); },
   dxfIn: async () => { const f = (await openFiles({ title: 'DXF 도면', extensions: ['dxf'] }))[0]; if (f) dxfLoad(f.name, f.data); },
   dxfOut: async () => { const t = CAD.dxfDoc([{ level: level() }], S.lib, (L, it) => SL.itemZ(L, it, S.lib)); if (await saveFile({ title: 'DXF 도면', defaultName: `${safeName()}-${level().name || '층'}.dxf`, extensions: ['dxf'], data: t })) toast('DXF 로 내보냈어요 · 기물은 블록(이름 · 규격 속성)으로 들어가요'); },
   dxfAll: async () => { const t = CAD.dxfDoc(S.model.levels.map((L, i) => ({ level: L, pre: `F${i + 1}_` })), S.lib, (L, it) => SL.itemZ(L, it, S.lib)); if (await saveFile({ title: 'DXF 도면', defaultName: `${safeName()}-전체층.dxf`, extensions: ['dxf'], data: t })) toast(`${S.model.levels.length}개 층을 DXF 한 파일로 (층마다 F1_ · F2_ 레이어)`); },
@@ -216,6 +229,8 @@ function renderProps() {
   if (S.panel === 'auto') return renderAuto(body);
   if (S.panel === 'cmp') return renderCmp(body);
   if (S.panel === 'view') return renderView(body);
+  if (S.panel === 'hist') return renderHist(body);
+  if (S.panel === 'cmt') return renderCmt(body);
   if (S.panel === 'dxf') return renderDxf(body);
   if (selRoom()) return renderRoom(body, selRoom());
   if (S.panel === 'account') return renderAccount(body);
@@ -611,6 +626,9 @@ function renderView(body) {
   body.innerHTML = `<div class="sec">단면 보기 · 잘라서 속 보기</div>
     <div class="chips">${[['off', '끄기'], ['h', '높이에서 (위를 걷어냄)'], ['x', '세로 (좌우)'], ['z', '세로 (앞뒤)']].map(([k, n]) => `<button data-sec="${k}" aria-pressed="${SEC.mode === k}">${n}</button>`).join('')}</div>
     ${SEC.mode !== 'off' ? `<label class="fld">자르는 위치 <b id="secV">${Math.round(SEC.at)} mm</b><input type="range" id="secAt" min="${Math.round(rg[0])}" max="${Math.round(rg[1])}" step="10" value="${Math.round(clamp(SEC.at, rg[0], rg[1]))}"></label>${SEC.mode !== 'h' ? `<label class="chk"><input type="checkbox" id="secFlip" ${SEC.flip ? 'checked' : ''}> 반대쪽 보기</label>` : ''}` : ''}
+    <label class="fld">벽 낮춰 보기 <b id="wcV">${engine.wallCut ? engine.wallCut + ' mm' : '끔'}</b><input type="range" id="wcAt" min="300" max="${(level().ceilingH || 2700)}" step="50" value="${engine.wallCut || level().ceilingH || 2700}"></label>
+    <div class="sec">레이어 투명도</div>
+    ${Object.entries(LAYERN).map(([k, n]) => `<label class="fld">${n} <b data-lov="${k}">${Math.round(((engine.layerOp || {})[k] ?? 1) * 100)}%</b><input type="range" data-lo="${k}" min="0" max="100" step="5" value="${Math.round(((engine.layerOp || {})[k] ?? 1) * 100)}"></label>`).join('')}
     <div class="sec">시점 저장 · ${V.length}개</div>
     ${V.map((v) => `<div class="lvrow"><button class="lvgo" data-vgo="${v.id}">${esc(v.name)}</button><button class="qb danger" data-vx="${v.id}">지우기</button></div>`).join('') || '<p class="hint">지금 보고 있는 시점을 이름 붙여 저장해 두면 누르는 순간 그 자리로 가요.</p>'}
     <div class="row"><input id="vName" placeholder="시점 이름 (예: 입구에서)" aria-label="시점 이름"><button class="btn" id="vSave">+ 지금 시점 저장</button></div>
@@ -623,6 +641,8 @@ function renderView(body) {
   $$('[data-sec]', body).forEach((b) => (b.onclick = () => { SEC.mode = b.dataset.sec; const r2 = secRange(); SEC.at = SEC.mode === 'h' ? 1500 : (r2[0] + r2[1]) / 2; applySection(); renderProps(); }));
   const sa = $('#secAt'); if (sa) sa.oninput = () => { SEC.at = +sa.value; $('#secV').textContent = `${SEC.at} mm`; applySection(); };
   const sf = $('#secFlip'); if (sf) sf.onchange = () => { SEC.flip = sf.checked; applySection(); };
+  $('#wcAt').oninput = (e) => { const H = level().ceilingH || 2700, v = +e.target.value; engine.setWallCut(v >= H ? null : v); $('#wcV').textContent = v >= H ? '끔' : v + ' mm'; };
+  $$('[data-lo]', body).forEach((i) => (i.oninput = () => { const op = { ...(engine.layerOp || {}) }; op[i.dataset.lo] = +i.value / 100; engine.setLayerOpacity(op); $(`[data-lov="${i.dataset.lo}"]`).textContent = i.value + '%'; }));
   $$('[data-vgo]', body).forEach((b) => (b.onclick = () => { const v = (M.views || []).find((q) => q.id === b.dataset.vgo); if (v) { if (S.pane === '2d') setPane('split'); engine.flyTo(v.v, 900); } }));
   $$('[data-vx]', body).forEach((b) => (b.onclick = () => { M.views = (M.views || []).filter((q) => q.id !== b.dataset.vx); commit(); renderProps(); }));
   $('#vSave').onclick = () => { M.views ||= []; M.views.push({ id: uid('v'), name: $('#vName').value.trim().slice(0, 30) || `시점 ${M.views.length + 1}`, v: engine.getView() }); commit(); renderProps(); toast('시점을 저장했어요'); };
@@ -633,6 +653,40 @@ function renderView(body) {
   $('#rGo').onclick = async () => { if (S.pane === '2d') { setPane('split'); await new Promise((r2) => setTimeout(r2, 150)); } setSel(null); const [, W, H] = RESN[RES.size], ty = 'image/' + RES.type, url = W ? engine.snapshotAt(W, H, ty) : engine.snapshot();
     const b = Uint8Array.from(atob(url.split(',')[1]), (x) => x.charCodeAt(0)), ext = RES.type === 'jpeg' ? 'jpg' : 'png'; if (await saveFile({ title: '이미지', defaultName: `${safeName()}${W ? `-${W}x${H}` : ''}.${ext}`, extensions: [ext], data: b })) toast(`이미지를 저장했어요 (${(b.length / 1e6).toFixed(1)}MB)`); };
   $$('[data-dact]', body).forEach((b) => (b.onclick = () => ACT[b.dataset.dact]()));
+}
+
+
+/* ----- 댓글 · 핀 (기존 앱 v7) ----- */
+const pinsHere = () => (S.model.comments || []).filter((c) => (c.lv ?? 0) === S.model.activeLevel);
+function syncPins() { if (!S.model || !plan) return; const P = pinsHere(); plan.pins = P; engine.setPins(P); }
+function renderCmt(body) {
+  const P = pinsHere(), tm = (t) => new Date(t).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }), me = (cloud.session() || {}).name || '나';
+  $('#propsTitle').textContent = '댓글 · 핀';
+  body.innerHTML = `<p class="hint">2D 도면에서 자리를 눌러 핀을 꽂고 메모를 남겨요. 프로젝트 파일 · 계정 동기화에 함께 저장돼서 다른 기기 · 다른 사람과 볼 수 있어요.</p>
+    <div class="btns"><button class="btn pri" id="cmPin">+ 핀 꽂기</button></div>
+    ${P.map((c, i) => `<div class="cmt ${c.done ? 'done' : ''}"><b>${i + 1}</b><div><p>${esc(c.text || '(메모 없음)')}</p><small>${esc(c.by || '')} · ${tm(c.t)}${(c.re || []).length ? ` · 답글 ${c.re.length}` : ''}</small>${(c.re || []).map((r) => `<p class="re">↳ ${esc(r.text)} <small>${esc(r.by || '')}</small></p>`).join('')}
+      <div class="btns"><button class="qb" data-cgo="${c.id}">보기</button><button class="qb" data-cre="${c.id}">답글</button><button class="qb" data-cdn="${c.id}">${c.done ? '다시 열기' : '해결'}</button><button class="qb danger" data-cx="${c.id}">지우기</button></div></div></div>`).join('') || '<p class="hint">아직 핀이 없어요</p>'}
+    <div id="cmBox" hidden class="row"><input id="cmIn" placeholder="메모" aria-label="메모"><button class="btn pri" id="cmOk">남기기</button></div>`;
+  const C = () => (S.model.comments ||= []), find = (id) => C().find((c) => c.id === id);
+  const askText = (cb) => { const b = $('#cmBox'); b.hidden = false; $('#cmIn').value = ''; $('#cmIn').focus(); $('#cmOk').onclick = () => { const t = $('#cmIn').value.trim(); if (t) cb(t.slice(0, 500)); }; $('#cmIn').onkeydown = (e) => { if (e.key === 'Enter') $('#cmOk').click(); }; };
+  $('#cmPin').onclick = () => { if (S.pane === '3d') setPane('split'); plan.setTool('pick'); toast('2D 도면에서 핀을 꽂을 자리를 누르세요 · Esc 취소', 5000);
+    plan.picker = (p, hit) => { plan.picker = null; plan.setTool('select'); const it = hit && level().items.find((q) => q.id === hit); const c = { id: uid('c'), lv: S.model.activeLevel, x: Math.round(p.x), y: Math.round(p.y), z: it ? SL.itemZ(level(), it, S.lib) + (it.h || 0) + 150 : 1600, item: it ? it.id : null, text: '', by: me, t: Date.now(), done: false, re: [] };
+      C().push(c); commit(); renderProps(); askText((t) => { c.text = t; commit(); renderProps(); }); }; };
+  $$('[data-cgo]', body).forEach((b) => (b.onclick = () => { const c = find(b.dataset.cgo); engine.frame([[c.x - 2000, c.y - 2000], [c.x + 2000, c.y + 2000]]); }));
+  $$('[data-cre]', body).forEach((b) => (b.onclick = () => askText((t) => { const c = find(b.dataset.cre); (c.re ||= []).push({ text: t, by: me, t: Date.now() }); commit(); renderProps(); })));
+  $$('[data-cdn]', body).forEach((b) => (b.onclick = () => { const c = find(b.dataset.cdn); c.done = !c.done; commit(); renderProps(); }));
+  $$('[data-cx]', body).forEach((b) => (b.onclick = () => { S.model.comments = C().filter((c) => c.id !== b.dataset.cx); commit(); renderProps(); }));
+}
+/* ----- 작업 기록 ----- */
+function renderHist(body) {
+  const tm = (t) => new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }), U = S.um, Rd = S.rm;
+  $('#propsTitle').textContent = '작업 기록';
+  body.innerHTML = `<p class="hint">누르면 그 작업을 한 바로 뒤로 돌아가요 (되돌리기 여러 번과 같아요). 최근 60개까지 · 이 화면을 연 뒤의 작업만 남아요.</p>
+    <ul class="clist">${Rd.slice().map((m, i) => `<li><button data-hr="${Rd.length - i}" style="opacity:.55">↷ ${tm(m.t)} · ${esc(m.l)} <small>(되돌린 작업)</small></button></li>`).join('')}
+    <li><button disabled style="border-color:var(--accent)">● 지금</button></li>
+    ${U.slice().reverse().map((m, i) => `<li><button data-hu="${i}">${tm(m.t)} · ${esc(m.l)}</button></li>`).join('')}${U.length ? '' : '<li><p class="hint">아직 기록이 없어요</p></li>'}</ul>`;
+  $$('[data-hu]', body).forEach((b) => (b.onclick = () => { for (let k = 0; k < +b.dataset.hu; k++) undo(); renderProps(); }));
+  $$('[data-hr]', body).forEach((b) => (b.onclick = () => { for (let k = 0; k < +b.dataset.hr; k++) redo(); renderProps(); }));
 }
 /* ----- DXF 가져오기 (캐드 선 → 벽) ----- */
 const DXFO = { unit: 'auto', merge: true, rest: true, replace: true };
@@ -745,7 +799,7 @@ function renderLevels(body) {
     if (a === 'wallsH') { for (const w of L.walls) w.h = L.ceilingH || 2700; engine.rebuildStructure(); commit(); toast('벽 높이를 천장 높이에 맞췄어요'); }
   }));
 }
-function switchLevel(i) { if (engine.sim.on) { engine.sim.stop(); plan.simA = null; syncSimBtn(); } S.model.activeLevel = clamp(i, 0, S.model.levels.length - 1); S.sel = null; setFocus(null); engine.setLevel(level()); applyEnv(); engine.view('iso'); plan.fit(); plan.select(null, true); syncBar(); syncCeilBtn(); refreshBad(); }
+function switchLevel(i) { setTimeout(syncPins);  if (engine.sim.on) { engine.sim.stop(); plan.simA = null; syncSimBtn(); } S.model.activeLevel = clamp(i, 0, S.model.levels.length - 1); S.sel = null; setFocus(null); engine.setLevel(level()); applyEnv(); engine.view('iso'); plan.fit(); plan.select(null, true); syncBar(); syncCeilBtn(); refreshBad(); }
 
 /* ----- 배경 (주변 거리) · 도면 밑그림 ----- */
 function renderBg(body) {
@@ -1113,6 +1167,7 @@ const DOCK = [
   { id: 'dkXr', act: 'xray', label: '설치물', icon: '<path d="M3 18h18M5 18v-4h14v4"/><path d="M8 14V9h8v5" stroke-dasharray="2 2"/>' },
   { id: 'dkAir', run: () => toggleAir(), label: '공기', icon: '<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h8"/>' },
   { act: 'view', label: '단면 · 시점', icon: '<path d="M4 7l8-4 8 4v10l-8 4-8-4z"/><path d="M4 12h16" stroke-dasharray="2.5 2"/>' },
+  { act: 'cmt', label: '댓글', icon: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>' },
   { act: 'check', label: '점검', icon: '<path d="M9 11l2.5 2.5L16 9"/><rect x="4" y="3.5" width="16" height="17" rx="2"/>' },
   { act: 'quote', label: '견적', icon: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>' },
   { act: 'auto', label: '자동 배치', icon: '<rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M3.5 10h17M10 10v10.5"/><path d="M14 14h3v3h-3z"/>' },
@@ -1289,6 +1344,7 @@ async function boot() {
     if (!mod && it && /^arrow/.test(k)) { e.preventDefault(); const st = e.shiftKey ? 100 : 10, d = { arrowleft: [-st, 0], arrowright: [st, 0], arrowup: [0, -st], arrowdown: [0, st] }[k]; patchSel({ x: it.x + d[0], y: it.y + d[1] }, false); return; }
     if (!mod && !e.altKey && k === 'g') { startWalk(); return; }
     if (!mod && !e.altKey && k === 'm') { setPlanTool('measure'); return; }
+    if (!mod && !e.altKey && k === 'h') { ACT.hist(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel) plan.erase(S.sel);
     if (e.key === 'Escape') { if (SW.pick) { endPick(); renderProps(); return; } setSel(null); closeDrawer(); }
   });
