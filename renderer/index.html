@@ -44,7 +44,7 @@
     <select id="levelSel" aria-label="층" title="층 고르기" hidden></select>
     <div class="grow"></div>
     <button class="ib" id="btnUndo" aria-label="되돌리기" title="되돌리기"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
-    <button class="ib wide" id="btnRedo" aria-label="다시 실행" title="다시 실행"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+    <button class="ib" id="btnRedo" aria-label="다시 실행" title="다시 실행"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
     <div class="seg" role="group" aria-label="화면 나누기">
       <button class="ib txt" data-pane="2d" aria-pressed="false" title="2D 도면만">2D</button>
       <button class="ib txt" data-pane="split" aria-pressed="true" title="2D + 3D 함께 (2D 에서 그리면 3D 에 바로)">분할</button>
@@ -54,7 +54,8 @@
   </header>
 
   <!-- 아래 도구 막대: app.js 의 DOCK 목록으로 그린다 (도구를 늘릴 때는 목록에 한 줄만 더하면 됨) -->
-  <nav id="dock" aria-label="도구"><div id="dockIn" role="toolbar"></div></nav>
+  <div id="modeChip" class="pill" aria-live="polite"></div>
+  <nav id="dock" aria-label="도구"><div id="dockIn" role="toolbar"></div><div id="dockTabs" role="tablist" aria-label="작업군"></div></nav>
   <!-- 조정 필요 · 공간만 작업 -->
   <button id="fitFab" class="pill warn" hidden>조정 필요</button>
   <div id="focusBar" class="pill" hidden><span id="focusName"></span><button class="btn" id="focusExit">전체 보기</button></div>

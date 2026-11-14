@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { material, floorMaterial, MAT_TEX } from './materials.js';
-import { slopeFrame, slopePieces, slopeH } from './slope.js';
+import { slopeFrame, slopePieces, slopeH, pointInPoly } from './slope.js';
 
 export const MM = 0.001;
 /** 텍스처 입히기: tex = { img(dataURL), size(mm, 한 장 크기 · 바닥용), rot } → 반복되는 PBR 재질 */
@@ -182,6 +182,7 @@ export function buildFloors(level) {
   for (const r of level.rooms) {
     if (slopeFrame(r)) { root.add(slopedRoom(r)); continue; }
     const shape = new THREE.Shape(r.pts.map((p) => new THREE.Vector2(p[0] * MM, -p[1] * MM)));
+    for (const c of level.rooms) if (c !== r && c.pts.length > 2 && c.pts.every((p) => pointInPoly(p[0], p[1], r.pts)) && !r.pts.every((p) => pointInPoly(p[0], p[1], c.pts))) shape.holes.push(new THREE.Path(c.pts.map((p) => new THREE.Vector2(p[0] * MM, -p[1] * MM)))); /* 안쪽에 떼어 낸 공간은 구멍으로 (겹쳐 깜빡이지 않게) */
     const depth = Math.max(0.004, r.lift * MM + 0.004);
     const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false }); geo.rotateX(-Math.PI / 2);
     const m = new THREE.Mesh(geo, texMaterial(r.tex, 1000 / ((r.tex && r.tex.size) || 600)) || floorMaterial(r.finish, r.color)); m.receiveShadow = true; m.castShadow = r.lift > 20; m.name = r.name; m.userData.roomId = r.id; root.add(m);

@@ -48,6 +48,16 @@ export class Engine {
     this.controls = new OrbitControls(this.camera, canvas);
     Object.assign(this.controls, { enableDamping: true, dampingFactor: 0.09, maxPolarAngle: Math.PI / 2 - 0.03, minDistance: 0.8, maxDistance: 70, zoomToCursor: true });
     this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    if (matchMedia('(pointer: coarse)').matches) Object.assign(this.controls, { rotateSpeed: 0.55, panSpeed: 0.45, zoomSpeed: 0.7, dampingFactor: 0.12 }); /* 터치: 천천히 · 부드럽게 미끄러지듯 */
+    { /* 두 손가락을 비틀면 구도 돌리기 (지도 앱처럼) */
+      const T = new Map(); let a0 = null;
+      const ang = () => { const [p, q] = [...T.values()]; return Math.atan2(q.y - p.y, q.x - p.x); };
+      canvas.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'touch') return; T.set(e.pointerId, { x: e.clientX, y: e.clientY }); a0 = T.size === 2 ? ang() : null; });
+      canvas.addEventListener('pointermove', (e) => { if (!T.has(e.pointerId)) return; T.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (T.size !== 2 || a0 == null || this.walker.active || this.design.active) return;
+        let d = ang() - a0; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; if (Math.abs(d) < 0.004) return; a0 = ang();
+        const t = this.controls.target, off = this.camera.position.clone().sub(t).applyAxisAngle(new THREE.Vector3(0, 1, 0), -d); this.camera.position.copy(t).add(off); this.camera.lookAt(t); });
+      const up = (e) => { T.delete(e.pointerId); a0 = T.size === 2 ? ang() : null; }; canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+    }
 
     /* ----- 기본 조명: AmbientLight + DirectionalLight(그림자) ----- */
     this.ambient = new THREE.AmbientLight('#ffffff', 0.22); scene.add(this.ambient);

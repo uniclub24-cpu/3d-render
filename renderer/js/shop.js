@@ -73,12 +73,14 @@ const FLN = { tile: '타일', wood: '마루', concrete: '콘크리트', epoxy: '
 const OPN = { door1: '여닫이문', door2: '양개문', auto: '자동문', slide: '미닫이문', window: '창', full: '통창', pass: '배식구', slidepass: '미닫이 배식구', arch: '개구부' };
 export function bounds(L) { const xs = [], ys = []; for (const w of L.walls) { xs.push(w.x1, w.x2); ys.push(w.y1, w.y2); } if (!xs.length) return [0, 0, 0, 0]; return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; }
 const isExt = (w, b) => { const m = [(w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2], t = 250; return (Math.abs(w.y1 - w.y2) < 5 && (Math.abs(m[1] - b[1]) < t || Math.abs(m[1] - b[3]) < t)) || (Math.abs(w.x1 - w.x2) < 5 && (Math.abs(m[0] - b[0]) < t || Math.abs(m[0] - b[2]) < t)); };
+/** 겹친 공간: 큰 공간 안에 떼어 낸 공간이 있으면 그만큼 빼서(두 번 세지 않게) ㎡ */
+export function netArea(r, rooms) { let a = polyArea(r.pts); for (const c of rooms) if (c !== r && c.pts.length > 2 && c.pts.every((p) => pointInPoly(p[0], p[1], r.pts)) && !r.pts.every((p) => pointInPoly(p[0], p[1], c.pts))) a -= polyArea(c.pts); return Math.max(0, a) / 1e6; }
 export function bomRows(L, lib, std = {}) {
-  const rows = [], add = (g, n, sp, q, u, key, note = '') => { if (q > 0) rows.push({ g, n, sp, q: Math.round(q * 100) / 100, u, key, note }); };
+  const rows = [], add = (g, n, sp, q, u, key, note = '', old = null) => { if (q > 0) rows.push({ g, n, sp, q: Math.round(q * 100) / 100, u, key, note, old }); };
   const groups = new Map(), r10 = (v) => Math.round((v || 0) / 10) * 10;
   for (const it of L.items) { if (it.hidden) continue; const Li = lib[it.type] || { name: it.name || it.type, cat: '내 기물' }; if (Li.shape === 'zone') continue; const k = `${it.type}|${r10(it.w)}x${r10(it.d)}x${r10(it.h)}|${it.name || ''}`; const g = groups.get(k) || { it, L: Li, q: 0 }; g.q++; groups.set(k, g); }
   for (const g of groups.values()) { const Li = g.L, kw = itemKw(g.it, lib), mark = Li.shape === 'mark' || Li.shape === 'drainpt';
-    add(Li.cat === '전기' || layerOf(Li) === 'elec' ? '전기' : /배관/.test(Li.cat || '') ? '설비 · 배관' : /설비/.test(Li.cat || '') ? '설비' : '기물 · 가구', g.it.name || Li.name, mark ? '' : `${r10(g.it.w)}×${r10(g.it.d)}×${r10(g.it.h)}`, g.q, mark ? '개소' : '대', 'it:' + g.it.type + ':' + r10(g.it.w), kw ? `${kw}kW` : ''); }
+    add(Li.cat === '전기' || layerOf(Li) === 'elec' ? '전기' : /배관/.test(Li.cat || '') ? '설비 · 배관' : /설비/.test(Li.cat || '') ? '설비' : '기물 · 가구', g.it.name || Li.name, mark ? '' : `${r10(g.it.w)}×${r10(g.it.d)}×${r10(g.it.h)}`, g.q, mark ? '개소' : '대', 'it:' + g.it.type + ':' + r10(g.it.w) + 'x' + r10(g.it.d) + 'x' + r10(g.it.h), kw ? `${kw}kW` : '', 'it:' + g.it.type + ':' + r10(g.it.w)); }
   const ops = new Map(); for (const o of L.openings) { const k = `${o.type}|${o.w}x${o.h}`; ops.set(k, (ops.get(k) || 0) + 1); }
   for (const [k, q] of ops) { const [t, sz] = k.split('|'); add('문 · 창', `${OPN[t] || t}`, sz.replace('x', '×'), q, '개', 'op:' + t + ':' + sz); }
   const b = bounds(L), fin = {}; let partL = 0, perim = 0;
@@ -88,8 +90,8 @@ export function bomRows(L, lib, std = {}) {
     if (t === 'paint') add('벽 마감', '└ 페인트 양 (2회 · 9㎡/L)', '', (a * 2) / 9, 'L', 'paintL');
     if (t === 'tile') { const ts = std.tileWall || 300; add('벽 마감', `└ 타일 장수 (${ts}각 · 로스 8%)`, `${ts}×${ts}`, Math.ceil(((a * 1e6) / ts / ts) * 1.08), '장', 'tileWn'); } }
   if (partL) add('벽체', '칸막이 벽 (경량)', '', partL / 1000, 'm', 'part');
-  const rooms = L.rooms || [], ra = rooms.reduce((s, r) => s + polyArea(r.pts), 0) / 1e6, area = ra || ((b[2] - b[0]) * (b[3] - b[1])) / 1e6;
-  if (rooms.length) for (const r of rooms) { const a = polyArea(r.pts) / 1e6; add('바닥', `바닥 마감 · ${r.name} (${FLN[r.finish] || r.finish || '타일'})`, '', a, '㎡', 'floor:' + (r.finish || 'tile'));
+  const rooms = L.rooms || [], ra = rooms.reduce((s, r) => s + netArea(r, rooms), 0), area = ra || ((b[2] - b[0]) * (b[3] - b[1])) / 1e6;
+  if (rooms.length) for (const r of rooms) { const a = netArea(r, rooms); add('바닥', `바닥 마감 · ${r.name} (${FLN[r.finish] || r.finish || '타일'})`, '', a, '㎡', 'floor:' + (r.finish || 'tile'));
     if ((r.finish || 'tile') === 'tile') { const ts = std.tileFloor || 600; add('바닥', `└ 바닥 타일 (${ts}각 · 로스 6%)`, `${ts}×${ts}`, Math.ceil(((a * 1e6) / ts / ts) * 1.06), '장', 'tileFn'); }
     for (const f of r.layers || []) add('바닥', `└ 채움층 · ${f.name || f.k || ''} ${f.t || ''}mm`, '', a * (f.t || 0) / 1000, '㎥', 'fill:' + (f.k || f.name)); }
   else add('바닥', `바닥 마감 (${FLN[L.floor && L.floor.finish] || '타일'}) · 외곽 사각형 기준`, '', area, '㎡', 'floor:' + ((L.floor && L.floor.finish) || 'tile'));
@@ -261,8 +263,8 @@ export function autoLayout(L, lib, opt, make, uid) {
 
 /* ---------- A안 · B안 지표 ---------- */
 export function metrics(L, lib, price = {}) {
-  const a = analyze(L, lib), rows = bomRows(L, lib), t = bomTotals(rows, price, 0, false), rooms = L.rooms || [], ar = (k) => rooms.filter((r) => r.kind === k).reduce((s, r) => s + polyArea(r.pts), 0) / 1e6;
-  const b = bounds(L), total = rooms.reduce((s, r) => s + polyArea(r.pts), 0) / 1e6 || ((b[2] - b[0]) * (b[3] - b[1])) / 1e6;
+  const a = analyze(L, lib), rows = bomRows(L, lib), t = bomTotals(rows, price, 0, false), rooms = L.rooms || [], ar = (k) => rooms.filter((r) => r.kind === k).reduce((s, r) => s + netArea(r, rooms), 0);
+  const b = bounds(L), total = rooms.reduce((s, r) => s + netArea(r, rooms), 0) || ((b[2] - b[0]) * (b[3] - b[1])) / 1e6;
   return { items: L.items.length, seats: L.items.filter((it) => /chair|stool|bench|banquette|h_ch|h_st|f_dchair/.test(it.type)).length, kw: a.kw, bad: a.checks.filter((c) => c.lvl === 'bad').length, warn: a.checks.filter((c) => c.lvl === 'warn').length, kitchen: ar('주방'), hall: ar('홀'), total, cost: t.sub };
 }
 /** 작은 평면 그림 (안 비교용) */

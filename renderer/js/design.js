@@ -44,8 +44,12 @@ export class DesignEditor {
   }
   stop() { this.active = false; this.e.setShift(0); this.root.visible = false; this._clear(); if (this.hidden) this.hidden.visible = true; this.hidden = null; }
   result() { this.T.forEach((T, i) => writeBack(this.parts[i], T)); return this.parts; }
-  snapshot() { this.undoStack.push(JSON.stringify(this.T.map((T) => T.P))); if (this.undoStack.length > 50) this.undoStack.shift(); }
-  undo() { const s = this.undoStack.pop(); if (!s) return false; JSON.parse(s).forEach((P, i) => { if (this.T[i]) this.T[i].P.forEach((p, k) => p.splice(0, 3, ...P[k])); }); this.rebuild(); this.onChange(); return true; }
+  /** 되돌리기 기록: 부품 전체(점 · 색 · 재질 · 투명도 · 추가/삭제) + 고른 부품을 한 단위로. key 가 같은 연속 조작(슬라이더)은 0.8초 안이면 한 번만 */
+  _state() { this.T.forEach((T, i) => writeBack(this.parts[i], T)); return JSON.stringify({ parts: this.parts, sel: this.sel }); }
+  snapshot(key) { const now = performance.now(); if (key && this._lastKey === key && now - this._lastT < 800) { this._lastT = now; return; } this._lastKey = key || null; this._lastT = now; this.undoStack.push(this._state()); this.redoStack = []; if (this.undoStack.length > 60) this.undoStack.shift(); }
+  _restore(st) { const o = JSON.parse(st); this.parts = o.parts; this.T = this.parts.map(topo); this.sel = Math.min(o.sel, this.parts.length - 1); this.vSel = null; this.fSel = null; this.rebuild(); this.onSelect(this.sel); this.onChange(); }
+  undo() { const st = this.undoStack.pop(); if (!st) return false; (this.redoStack ||= []).push(this._state()); this._lastKey = null; this._restore(st); return true; }
+  redo() { const st = (this.redoStack || []).pop(); if (!st) return false; this.undoStack.push(this._state()); this._lastKey = null; this._restore(st); return true; }
   _clear() { for (const c of [...this.root.children]) { this.root.remove(c); c.traverse((o) => { if (o.geometry && o.geometry !== this.hGeo) o.geometry.dispose(); }); } }
   /** 화면을 다시 그린다 (부품 메시 + 선택 부품 꼭짓점 손잡이) */
   rebuild() {
@@ -71,12 +75,13 @@ export class DesignEditor {
 
   /* ---------- 부품 편집 ---------- */
   selectPart(i) { this.sel = Math.max(0, Math.min(this.parts.length - 1, i)); this.vSel = null; this.fSel = null; this.rebuild(); this.onSelect(this.sel); }
-  setColor(i, c) { const p = this.parts[i]; p.c = c; p.own = true; this.rebuild(); this.onChange(); }
-  setMat(i, m) { const p = this.parts[i]; p.m = m; p.own = true; this.rebuild(); this.onChange(); }
-  setAlpha(i, a) { const p = this.parts[i]; if (a >= 1) delete p.a; else p.a = a; p.own = true; this.rebuild(); this.onChange(); }
-  removePart(i) { if (this.parts.length < 2) return false; this.parts.splice(i, 1); this.T.splice(i, 1); this.selectPart(Math.min(i, this.parts.length - 1)); this.onChange(); return true; }
-  duplicatePart(i) { const p = clone(this.parts[i]); this.parts.splice(i + 1, 0, p); const T = topo(p); T.P.forEach((q) => (q[0] += 50)); this.T.splice(i + 1, 0, T); this.selectPart(i + 1); this.onChange(); }
+  setColor(i, c) { this.snapshot('c' + i); const p = this.parts[i]; p.c = c; p.own = true; this.rebuild(); this.onChange(); }
+  setMat(i, m) { this.snapshot(); const p = this.parts[i]; p.m = m; p.own = true; this.rebuild(); this.onChange(); }
+  setAlpha(i, a) { this.snapshot('a' + i); const p = this.parts[i]; if (a >= 1) delete p.a; else p.a = a; p.own = true; this.rebuild(); this.onChange(); }
+  removePart(i) { if (this.parts.length < 2) return false; this.snapshot(); this.parts.splice(i, 1); this.T.splice(i, 1); this.selectPart(Math.min(i, this.parts.length - 1)); this.onChange(); return true; }
+  duplicatePart(i) { this.snapshot(); const p = clone(this.parts[i]); this.parts.splice(i + 1, 0, p); const T = topo(p); T.P.forEach((q) => (q[0] += 50)); this.T.splice(i + 1, 0, T); this.selectPart(i + 1); this.onChange(); }
   addBox() { // 선택 부품 위에 얹는 상자 (턱 · 선반 · 손잡이 만들 때)
+    this.snapshot();
     const all = this.T.flatMap((T) => T.P), maxY = Math.max(...all.map((p) => p[1])), xs = all.map((p) => p[0]), zs = all.map((p) => p[2]), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2;
     const w = 200, d = 200, h = 100, v = [[cx - w / 2, maxY, cz - d / 2], [cx + w / 2, maxY, cz - d / 2], [cx + w / 2, maxY, cz + d / 2], [cx - w / 2, maxY, cz + d / 2]]; const p = { n: 4, v: [...v, ...v.map((q) => [q[0], q[1] + h, q[2]])].flat(), c: '#b8bcc2', m: 'plain', own: true };
     this.parts.push(p); this.T.push(topo(p)); this.selectPart(this.parts.length - 1); this.onChange();
@@ -141,7 +146,7 @@ export class DesignEditor {
       e.stopImmediatePropagation(); cv.setPointerCapture(e.pointerId); this.rebuild();
     }, true);
     cv.addEventListener('pointermove', (e) => { if (!drag) return; e.stopImmediatePropagation(); drag.move(this._ray(e)); drag.moved = true; }, true);
-    const up = (e) => { if (!drag) return; e.stopImmediatePropagation(); const m = drag.moved; drag = null; if (m) this.onChange(); else this.undoStack.pop(); };
+    const up = (e) => { if (!drag) return; e.stopImmediatePropagation(); const m = drag.moved; drag = null; if (m) this.onChange(); else { this.undoStack.pop(); this._lastKey = null; } };
     cv.addEventListener('pointerup', up, true); cv.addEventListener('pointercancel', up, true);
   }
 }
