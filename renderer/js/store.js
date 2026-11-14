@@ -53,6 +53,19 @@ const dir = () => `${session().user}/byr2/`;
 const enc = (p) => p.split('/').map(encodeURIComponent).join('/');
 async function sget(name) { const r = await sbFetch('/storage/v1/object/authenticated/models/' + enc(dir() + name), { allow404: true }); return r.status === 404 || r.status === 400 ? null : r.text(); }
 async function sput(name, text) { await sbFetch('/storage/v1/object/models/' + enc(dir() + name), { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-upsert': 'true' }, body: text }); }
+/* 큰 프로젝트(가져온 3D · 텍스처)는 gzip 으로 줄여 올린다 → <id>.json.gz (목록에 gz 표시) */
+const GZ_AT = 4e6;
+async function gz(text) { const s = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip')); return new Uint8Array(await new Response(s).arrayBuffer()); }
+async function gunz(bytes) { const s = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')); return new Response(s).text(); }
+async function putProject(id, text) {
+  if (text.length < GZ_AT || typeof CompressionStream === 'undefined') { await sput(id + '.json', text); return false; }
+  const b = await gz(text); if (b.length > 48e6) throw new Error(`프로젝트가 너무 커요 (${(b.length / 1e6).toFixed(0)}MB · 계정 한도 50MB) · 가져온 3D 파일이나 텍스처를 줄여 주세요`);
+  await sbFetch('/storage/v1/object/models/' + enc(dir() + id + '.json.gz'), { method: 'POST', headers: { 'Content-Type': 'application/gzip', 'x-upsert': 'true' }, body: b }); return true;
+}
+async function getProject(id, r) {
+  if (!r || !r.gz) return sget(id + '.json');
+  const x = await sbFetch('/storage/v1/object/authenticated/models/' + enc(dir() + id + '.json.gz'), { allow404: true }); if (x.status === 404 || x.status === 400) return null; return gunz(new Uint8Array(await x.arrayBuffer()));
+}
 async function sdel(name) { await sbFetch('/storage/v1/object/models', { method: 'DELETE', body: JSON.stringify({ prefixes: [dir() + name] }) }); }
 let syncT = 0, syncing = null;
 export function scheduleSync(ms = 3000) { clearTimeout(syncT); syncT = setTimeout(() => syncNow().catch(() => {}), ms); }
@@ -61,7 +74,7 @@ export function syncNow() { return (syncing ||= doSync().finally(() => (syncing 
 async function doSync() {
   if (!session()) return { skipped: true };
   status('동기화 중…'); await flush();
-  const res = { up: 0, down: 0, del: 0, conflict: 0, changed: [] };
+  const res = { up: 0, down: 0, del: 0, conflict: 0, changed: [], err: [] };
   try {
     const txt = await sget('_index.json'); const idx = txt ? JSON.parse(txt) : {}; let idxDirty = false;
     const recs = await allRecs(), seen = new Set();
@@ -69,17 +82,17 @@ async function doSync() {
       seen.add(rec.id); const r = idx[rec.id];
       const edited = rec.dirty ?? rec.updated > (rec.synced || 0);              // 마지막 동기화 뒤 이 기기에서 고쳤나
       const changed = !!r && (r.deleted || r.updated !== rec.synced);          // 마지막 동기화 뒤 계정 쪽이 바뀌었나 (시계가 달라도 안전하게 "같은지"로 본다)
-      const up = async () => { await sput(rec.id + '.json', rec.data); idx[rec.id] = { name: rec.name, updated: rec.updated }; idxDirty = true; await putRec({ ...rec, synced: rec.updated, dirty: false }); res.up++; };
+      const up = async () => { let g; try { g = await putProject(rec.id, rec.data); } catch (e) { res.err.push(`${rec.name}: ${e.message || e}`); return; } idx[rec.id] = { name: rec.name, updated: rec.updated, ...(g ? { gz: true } : {}) }; idxDirty = true; await putRec({ ...rec, synced: rec.updated, dirty: false }); res.up++; };
       if (rec.deleted) { // 이 기기에서 지움
-        if (!r || !changed || r.deleted) { if (r && !r.deleted) await sdel(rec.id + '.json').catch(() => {}); idx[rec.id] = { name: rec.name, updated: rec.updated, deleted: true }; idxDirty = true; res.del++; await delRec(rec.id); }
+        if (!r || !changed || r.deleted) { if (r && !r.deleted) await sdel(r.gz ? rec.id + '.json.gz' : rec.id + '.json').catch(() => {}); idx[rec.id] = { name: rec.name, updated: rec.updated, deleted: true }; idxDirty = true; res.del++; await delRec(rec.id); }
         else { // 지웠는데 다른 기기에서 그 사이 고침 → 고친 쪽을 살린다
-          const data = await sget(rec.id + '.json'); if (data) { await putRec({ id: rec.id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, data }); res.down++; } }
+          const data = await getProject(rec.id, r); if (data) { await putRec({ id: rec.id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, data }); res.down++; } }
         continue;
       }
       if (!r) { await up(); continue; }
       if (!changed) { if (edited) await up(); continue; }
       if (r.deleted) { if (edited) await up(); else { await delRec(rec.id); res.del++; res.changed.push(rec.id); } continue; }
-      const data = await sget(rec.id + '.json'); if (!data) { if (edited) await up(); continue; }
+      const data = await getProject(rec.id, r); if (!data) { if (edited) await up(); continue; }
       if (edited) { // 양쪽에서 고침 → 이 기기 것을 "충돌 사본"으로 남기고 계정 것을 받는다
         const mine = JSON.parse(rec.data), cid = 'p' + Math.random().toString(36).slice(2, 9); mine.id = cid; mine.name = `${mine.name} (충돌 사본)`;
         await putRec({ id: cid, name: mine.name, updated: Date.now(), synced: 0, dirty: true, deleted: false, data: JSON.stringify(mine) }); res.conflict++;
@@ -87,13 +100,13 @@ async function doSync() {
       await putRec({ id: rec.id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, data }); res.down++; res.changed.push(rec.id);
     }
     for (const [id, r] of Object.entries(idx)) { // 계정에만 있는 것
-      if (seen.has(id) || r.deleted) continue; const data = await sget(id + '.json'); if (!data) continue;
+      if (seen.has(id) || r.deleted) continue; const data = await getProject(id, r); if (!data) continue;
       await putRec({ id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, data }); res.down++;
     }
     if (res.conflict) scheduleSync(500); // 충돌 사본도 올린다
     if (idxDirty) await sput('_index.json', JSON.stringify(idx));
     ls.set('byr.syncAt', Date.now());
-    status(`동기화됨 · ${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`);
+    status(res.err.length ? `일부 못 올림 · ${res.err[0]}` : `동기화됨 · ${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`);
   } catch (e) { console.warn('[sync]', e); status('동기화 실패 · ' + (e.message || e)); throw e; }
   return res;
 }

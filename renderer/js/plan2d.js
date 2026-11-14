@@ -248,7 +248,7 @@ export class Plan2D {
   /* ---------- 그리기 ---------- */
   draw() {
     const g = this.g, L = this.L, pr = this.pr, W = this.cv.clientWidth, H = this.cv.clientHeight, sc = this.view.sc, st = this.api.style ? this.api.style() : 'real';
-    const ink = '#1d2026', paper = st === 'comic' ? '#f2ecdf' : st === 'tycoon' ? '#eef6ea' : '#f7f8fa';
+    const ink = '#1d2026', paper = st === 'ink' ? '#ece4d2' : st === 'comic' ? '#f2ecdf' : st === 'tycoon' ? '#eef6ea' : '#f7f8fa';
     g.setTransform(pr, 0, 0, pr, 0, 0); g.fillStyle = paper; g.fillRect(0, 0, W, H); if (!L) return;
     // 모눈: 100mm (가까울 때) / 1m
     const grid = (step, col) => { if (step * sc < 7) return; g.strokeStyle = col; g.lineWidth = 1; g.beginPath(); const a = this.toMm(0, 0), b = this.toMm(W, H); for (let x = Math.floor(a.x / step) * step; x <= b.x; x += step) { const px = Math.round(this.toPx(x, 0).x) + 0.5; g.moveTo(px, 0); g.lineTo(px, H); } for (let y = Math.floor(a.y / step) * step; y <= b.y; y += step) { const py = Math.round(this.toPx(0, y).y) + 0.5; g.moveTo(0, py); g.lineTo(W, py); } g.stroke(); };
@@ -302,6 +302,7 @@ export class Plan2D {
     if (this.tool === 'line' && this.lpts && this.lpts.length) { const k = LINEKINDS[this.lineKind] || LINEKINDS.wire, R2 = [...this.lpts, ...(this.hover ? [this.hover] : [])]; g.save(); g.strokeStyle = k.color; g.lineWidth = Math.max(3 * px1, k.w); g.globalAlpha = 0.7; g.beginPath(); R2.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.stroke(); g.restore(); }
     { const rh = this._rotHandle(); if (rh) { const it = rh.it; g.save(); g.strokeStyle = '#2f7df6'; g.fillStyle = '#fff'; g.lineWidth = 2 * px1; g.beginPath(); g.moveTo(it.x - Math.sin(rh.a) * it.d / 2, it.y + Math.cos(rh.a) * it.d / 2); g.lineTo(rh.x, rh.y); g.stroke(); g.beginPath(); g.arc(rh.x, rh.y, 9 * px1, 0, Math.PI * 2); g.fill(); g.stroke();
       g.beginPath(); g.arc(rh.x, rh.y, 4.5 * px1, -2.2, 1.4); g.stroke(); if (this.rotInfo != null) { g.fillStyle = '#2f7df6'; g.font = `600 ${13 * px1}px system-ui`; g.textAlign = 'left'; g.fillText(this.rotInfo + '°', rh.x + 14 * px1, rh.y + 4 * px1); } g.restore(); } }
+    if (this.hlPoly) { const P = this.hlPoly; g.save(); g.fillStyle = 'rgba(255,122,0,.22)'; g.strokeStyle = '#ff7a00'; g.lineWidth = 3 * px1; g.setLineDash([10 * px1, 6 * px1]); g.beginPath(); P.forEach((q, i) => (i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]))); g.closePath(); g.fill(); g.stroke(); g.restore(); } /* 공간 지정 확인용 강조 */
     // 낙서 (2D 메모 그림)
     for (const k of [...(L.sketches || []), ...(this.skp ? [{ pts: this.skp.map((q) => [q.x, q.y]), color: this.skColor || '#e8467c', w: this.skW || 3 }] : [])]) { if (!k.pts || k.pts.length < 2) continue; g.save(); g.strokeStyle = k.color || '#e8467c'; g.lineWidth = (k.w || 3) * px1; g.lineCap = g.lineJoin = 'round'; g.beginPath(); k.pts.forEach((q, i) => (i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]))); g.stroke(); g.restore(); }
     // 여러 개 고르기 · 정렬선
@@ -312,7 +313,7 @@ export class Plan2D {
     if (this.pins) this.pins.forEach((c, i) => { g.save(); g.fillStyle = c.done ? '#7c8794' : '#ff6b3d'; g.strokeStyle = '#fff'; g.lineWidth = 2 * px1; g.beginPath(); g.arc(c.x, c.y - 26 * px1, 13 * px1, 0, Math.PI * 2); g.moveTo(c.x - 7 * px1, c.y - 18 * px1); g.lineTo(c.x, c.y); g.lineTo(c.x + 7 * px1, c.y - 18 * px1); g.fill(); g.stroke();
       g.fillStyle = '#fff'; g.font = `700 ${13 * px1}px system-ui`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(i + 1), c.x, c.y - 26 * px1); g.restore(); });
     // 동선 시뮬레이터: 직원 · 남은 길
-    if (this.simA) for (const A of this.simA) { g.save(); g.fillStyle = A.a.color; g.strokeStyle = A.a.color; if (A.path) { g.setLineDash([8 * px1, 6 * px1]); g.lineWidth = 2 * px1; g.beginPath(); g.moveTo(A.pos[0], A.pos[1]); for (const q of A.path.slice(A.pi)) g.lineTo(q[0], q[1]); g.stroke(); g.setLineDash([]); } g.beginPath(); g.arc(A.pos[0], A.pos[1], 220, 0, Math.PI * 2); g.fill(); g.restore(); }
+    if (this.simA) for (const A of this.simA) { g.save(); g.fillStyle = A.a.color; g.strokeStyle = A.a.color; if (A.w && A.w.path) { g.globalAlpha = 0.35; g.lineWidth = 6 * px1; g.beginPath(); A.w.path.forEach((q, i) => (i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]))); g.stroke(); g.globalAlpha = 1; } if (A.path) { g.setLineDash([8 * px1, 6 * px1]); g.lineWidth = 2 * px1; g.beginPath(); g.moveTo(A.pos[0], A.pos[1]); for (const q of A.path.slice(A.pi)) g.lineTo(q[0], q[1]); g.stroke(); g.setLineDash([]); } g.beginPath(); g.arc(A.pos[0], A.pos[1], 220, 0, Math.PI * 2); g.fill(); g.restore(); }
     if (this.mtmp) this._tape(this.mtmp[0].x, this.mtmp[0].y, this.mtmp[1].x, this.mtmp[1].y, px1);
     if (this.autoDims) for (const w of L.walls) this._dim(w.x1, w.y1, w.x2, w.y2, w.t + 300);
     // 공간 이름표 (태그 · 단 · 구배)

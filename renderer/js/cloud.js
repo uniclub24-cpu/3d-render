@@ -22,8 +22,14 @@ export function logout() { store.set('byr.session', null); if (store.get('byr.ai
 export async function sbFetch(path, opt = {}) {
   let s = session(); if (!s) throw new Error('먼저 로그인하세요');
   if (s.exp && Date.now() > s.exp) s = take(await sbAuth('token?grant_type=refresh_token', { refresh_token: s.refresh }));
-  const r = await fetch(SB.url + path, { ...opt, headers: { apikey: SB.key, Authorization: 'Bearer ' + s.access, 'Content-Type': 'application/json', ...(opt.headers || {}) } });
-  if (!r.ok && !(opt.allow404 && (r.status === 404 || r.status === 400))) throw new Error('서버 응답 ' + r.status); return r;
+  const go = () => fetch(SB.url + path, { ...opt, headers: { apikey: SB.key, Authorization: 'Bearer ' + s.access, 'Content-Type': 'application/json', ...(opt.headers || {}) } });
+  let r = await go();
+  if (!r.ok && (r.status === 400 || r.status === 401 || r.status === 403)) { // 저장소는 토큰이 만료돼도 400 을 준다 → 한 번 새로 받고 다시
+    const body = await r.clone().text().catch(() => '');
+    if (/jwt|token|expired|unauthori[sz]ed|signature/i.test(body) && s.refresh) { s = take(await sbAuth('token?grant_type=refresh_token', { refresh_token: s.refresh })); r = await go(); }
+    else if (/too large|exceeded|maximum|413/i.test(body)) throw new Error('파일이 너무 커요 (계정 저장 한도)');
+  }
+  if (!r.ok && !(opt.allow404 && (r.status === 404 || r.status === 400))) { const t = await r.text().catch(() => ''); let m = ''; try { m = JSON.parse(t).message || JSON.parse(t).error || ''; } catch {} throw new Error('서버 응답 ' + r.status + (m ? ' · ' + String(m).slice(0, 80) : '')); } return r;
 }
 /** 기존 앱이 계정에 올려 둔 프로젝트 목록 */
 export async function listProjects() { const s = session(); return (await sbFetch(`/rest/v1/projects?select=id,name,updated_at&user_id=eq.${s.user}&order=updated_at.desc`)).json(); }

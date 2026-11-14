@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.9';
+export const APP_VERSION = '2.1.10';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -318,9 +318,19 @@ function renderProps() {
 const FLOORS = { tile: '타일', epoxy: '에폭시', concrete: '콘크리트', wood: '목재', marble: '대리석', turf: '인조잔디' };
 const SW = { pct: 1, pick: null, a: null };
 function nearestRoom(x, y) { let best = null; for (const r of level().rooms) { const d = SL.polyEdgeDist(r.pts, x, y); if (d < 400 && (!best || d < best.d)) best = { d, r }; } return best && best.r; }
-function newRoom(pts) {
-  const L = level(), n = L.rooms.length + 1, r = { id: uid('r'), name: `공간 ${n}`, kind: '기타', pts, lift: 0, color: '#c9c3b8', finish: 'tile', slope: null };
-  L.rooms.push(r); engine.rebuildStructure(); commit(); setSel({ kind: 'room', id: r.id }); toast('공간을 만들었어요 · 오른쪽에서 태그(주방 · 홀 …)를 고르세요');
+/* 그리는 동안 패널을 접어 도면이 보이게 · 끝나면 다시 펼친다 */
+function tuck() { if (S.propsOpen) { S.tucked = S.panel; S.propsOpen = false; renderProps(); } }
+function untuck() { if (S.tucked) { S.panel = S.tucked; S.tucked = null; S.propsOpen = true; renderProps(); } }
+/** 영역을 2D 에서 강조하고 무엇으로 지정할지 묻는다 → 태그(kind) 또는 false */
+async function askRoomKind(pts, title) {
+  if (S.pane === '3d') setPane('split'); plan.hlPoly = pts; plan.redraw(); const a = (SL.polyArea(pts) / 1e6).toFixed(1);
+  const k = await ask(title || `이 영역 (${a}㎡) 을 무엇으로 지정할까요?`, '주황색으로 칠한 곳이에요. 고르면 그 태그의 공간이 돼요.', [...Object.keys(KINDS).map((n) => ({ label: n, value: n })), { label: '취소', value: false }]);
+  plan.hlPoly = null; plan.redraw(); return k;
+}
+async function newRoom(pts) {
+  const L = level(), kind = await askRoomKind(pts); if (!kind) { untuck(); return toast('공간 지정을 취소했어요'); }
+  const same = L.rooms.filter((q) => q.kind === kind).length, r = { id: uid('r'), name: same ? `${kind} ${same + 1}` : kind, kind, pts, lift: 0, color: '#c9c3b8', finish: 'tile', slope: null };
+  L.rooms.push(r); engine.rebuildStructure(); commit(); S.tucked = null; setSel({ kind: 'room', id: r.id }); toast(`"${r.name}" 으로 지정했어요`);
 }
 function setDrain(r, it, msg) {
   r.slope = { deg: SL.pct2deg(SW.pct), ...SL.drainGeom(it), item: it.id }; endPick(); engine.rebuildStructure(); commit();
@@ -485,7 +495,8 @@ function spSave(r) { const B = spBox(r), its = level().items.filter((it) => SL.p
 function autoRooms(at) {
   const L = level(), faces = findFaces(L.walls); let made = 0, last = null;
   for (const f of faces) { const c = SL.polyCenter(f.pts); if (at && !SL.pointInPoly(at.x, at.y, f.pts)) continue; if (!at && L.rooms.some((r) => SL.pointInPoly(c[0], c[1], r.pts))) continue;
-    if (at) { const ex = L.rooms.find((r) => SL.pointInPoly(at.x, at.y, r.pts)); if (ex && Math.abs(SL.polyArea(ex.pts) - f.area) < 1e5) { setSel({ kind: 'room', id: ex.id }); return toast('이미 공간이 있어요'); } }
+    if (at) { const ex = L.rooms.find((r) => SL.pointInPoly(at.x, at.y, r.pts)); if (ex && Math.abs(SL.polyArea(ex.pts) - f.area) < 1e5) { askRoomKind(ex.pts, `"${ex.name}" 의 태그를 바꿀까요?`).then((k) => { if (k) { ex.kind = k; if (/^공간 \d+$/.test(ex.name)) ex.name = k; engine.rebuildStructure(); commit(); } S.tucked = null; setSel({ kind: 'room', id: ex.id }); }); return; }
+      return newRoom(f.pts); }
     const r = { id: uid('r'), name: `공간 ${L.rooms.length + 1}`, kind: '기타', pts: f.pts, lift: 0, color: '#c9c3b8', finish: 'tile', slope: null }; L.rooms.push(r); made++; last = r; if (at) break; }
   if (!made) return toast(at ? '여기는 벽으로 닫혀 있지 않아요 · 벽 끝을 이어 주세요' : '새로 찾은 공간이 없어요 (이미 다 있거나 벽이 닫혀 있지 않아요)', 5000);
   engine.rebuildStructure(); commit(); if (last) setSel({ kind: 'room', id: last.id }); toast(`공간 ${made}개를 찾았어요 · 태그(주방 · 홀 …)를 붙여 주세요`, 5000);
@@ -498,7 +509,7 @@ function renderRooms(body) {
     <div class="btns"><button class="btn pri" data-ra="auto">벽 따라 공간 자동 찾기</button><button class="btn" data-ra="autoTap">눌러서 찾기 (2D)</button></div>
     ${S.focus ? '<div class="btns"><button class="btn" data-ra="all">전체 보기로</button></div>' : ''}`;
   $('[data-ra=auto]', body).onclick = () => autoRooms(null);
-  $('[data-ra=autoTap]', body).onclick = () => { if (S.pane === '3d') setPane('split'); plan.setTool('pick'); plan.picker = (p) => { plan.picker = null; plan.setTool('select'); autoRooms(p); }; toast('2D 에서 벽으로 둘러싼 곳 안쪽을 누르세요'); };
+  $('[data-ra=autoTap]', body).onclick = () => { if (S.pane === '3d') setPane('split'); tuck(); plan.setTool('pick'); plan.picker = (p) => { plan.picker = null; plan.setTool('select'); autoRooms(p); }; toast('2D 에서 벽으로 둘러싼 곳 안쪽을 누르세요'); };
   $$('[data-room]', body).forEach((b) => (b.onclick = () => { setFocus(b.dataset.room); setSel({ kind: 'room', id: b.dataset.room }); }));
   const a = $('[data-ra=all]', body); if (a) a.onclick = () => { setFocus(null); renderProps(); };
 }
@@ -723,6 +734,11 @@ function renderMulti(body) {
     if (a === 'dup') { const n = its.map((q) => ({ ...JSON.parse(JSON.stringify(q)), id: uid('i'), x: q.x + 400, y: q.y + 400 })); level().items.push(...n); n.forEach((q) => engine.rebuildItem(q)); commit(); plan.setMulti(n.map((q) => q.id)); return; }
     if (a === 'rot') { const cx = its.reduce((s2, q) => s2 + q.x, 0) / its.length, cy = its.reduce((s2, q) => s2 + q.y, 0) / its.length; for (const q of its) { const dx = q.x - cx, dy = q.y - cy; q.x = Math.round(cx - dy); q.y = Math.round(cy + dx); q.rot = ((q.rot || 0) + 90) % 360; } done('묶어서 돌렸어요'); } }));
 }
+function patrolDone(pts) {
+  const P = S.patrol, Sm = engine.sim, d = Sm.data(S.model); S.patrol = null; setPlanTool('select');
+  if (P.idx != null && d.walkers[P.idx]) d.walkers[P.idx].path = pts; else Sm.addWalker(S.model, P.sex, pts);
+  commit(); if (Sm.on) Sm.reset(S.model); S.tucked = null; S.panel = 'sim'; S.propsOpen = true; renderProps(); toast('길을 저장했어요 · ▶ 시작을 누르면 왔다 갔다 해요');
+}
 /* ----- 작업 기록 ----- */
 function renderHist(body) {
   const tm = (t) => new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }), U = S.um, Rd = S.rm;
@@ -782,6 +798,13 @@ function renderSim(body) {
     <div class="plist">${d.actors.map((a, i) => { const A = Sm.A[i]; return `<div class="hsec" style="padding:10px;gap:6px"><div class="row2"><span><i class="dot" style="background:${a.color}"></i><b>${esc(a.name)}</b></span><span><input type="color" data-sc="${i}" value="${a.color}" aria-label="직원 색" style="width:34px;height:30px;border:0;background:none"><button class="btn danger" data-sdel="${i}">빼기</button></span></div>
       <div class="chips">${a.plan.map((f, k) => `<button data-sstep="${i}:${k}" aria-pressed="${!!(Sm.on && A && A.step === k)}" title="눌러서 빼기">${FAMN[f] || f} ✕</button>`).join('')}<select data-sadd="${i}" aria-label="일 더하기"><option value="">+ 일 더하기</option>${famOpt}</select></div>
       ${Sm.on && A ? `<small class="hint">${A.miss ? '<b class="warn">' + esc(A.label) + '</b>' : '지금: ' + esc(A.label)}${A.last ? ` · 한 바퀴 ${A.last.t.toFixed(0)}초 · ${(A.last.d / 1000).toFixed(1)}m` : ''}</small>` : ''}</div>`; }).join('') || '<p class="hint">아직 직원이 없어요</p>'}</div>
+    <div class="sec">유동인구 · 순찰 (그린 길을 왔다 갔다)</div>
+    ${d.walkers.map((w, i) => `<div class="lvrow"><i class="dot" style="background:${w.color}"></i><span class="lvgo" style="flex:1">${esc(w.name)} <small>점 ${w.path.length}개</small></span>
+      <select data-wm="${i}" aria-label="움직임"><option value="pingpong" ${w.mode !== 'loop' ? 'selected' : ''}>왕복</option><option value="loop" ${w.mode === 'loop' ? 'selected' : ''}>한 방향 반복</option></select>
+      <select data-wv="${i}" aria-label="속도">${[[800, '천천히'], [1200, '보통'], [1600, '빠르게']].map(([v, n]) => `<option value="${v}" ${(w.speed || 1200) === v ? 'selected' : ''}>${n}</option>`).join('')}</select>
+      <button class="qb" data-wr="${i}">다시 그리기</button><button class="qb danger" data-wx="${i}">지우기</button></div>`).join('')}
+    <div class="btns"><button class="btn" data-wadd="m">+ 남자 길 그리기</button><button class="btn" data-wadd="f">+ 여자 길 그리기</button></div>
+    <p class="hint">2D 에서 지나갈 점을 차례로 누르고, 마지막 점을 한 번 더 누르면(또는 Enter) 끝나요. 점 사이는 벽 · 기물을 돌아서 걸어요. 사람끼리 마주치면 비켜 가요.</p>
     <div class="row"><label class="fld">직원 더하기<select id="simRole">${Object.entries(ROLES).map(([k, r]) => `<option value="${k}">${r[0]}</option>`).join('')}</select></label><div class="btns" style="align-items:flex-end"><button class="btn" id="simAdd">더하기</button></div></div>
     <div class="btns"><button class="btn pri" id="simPlay">${Sm.on && Sm.run ? '❚❚ 멈춤' : '▶ 시작'}</button>${[1, 2, 4].map((v) => `<button class="btn ${Sm.speed === v ? 'pri' : ''}" data-sp="${v}">${v}배</button>`).join('')}<button class="btn" id="simReset" ${Sm.on ? '' : 'disabled'}>처음부터</button><button class="btn" id="simStop" ${Sm.on ? '' : 'disabled'}>끝내기</button></div>
     <label class="tog">동선 열지도 (많이 지나간 곳 빨강)<input type="checkbox" id="simHeat" ${Sm.heatOn ? 'checked' : ''}></label>
@@ -793,6 +816,11 @@ function renderSim(body) {
   $$('[data-sstep]', body).forEach((b) => (b.onclick = () => { const [i, k] = b.dataset.sstep.split(':').map(Number); if (d.actors[i].plan.length > 1) { d.actors[i].plan.splice(k, 1); changed(); } }));
   $$('[data-sadd]', body).forEach((sel) => (sel.onchange = () => { if (sel.value) { d.actors[+sel.dataset.sadd].plan.push(sel.value); changed(); } }));
   $('#simAdd').onclick = () => { Sm.add(M, $('#simRole').value); changed(); };
+  $$('[data-wadd]', body).forEach((b) => (b.onclick = () => { S.patrol = { sex: b.dataset.wadd }; plan.lineKind = 'wire'; setPlanTool('line'); toast(`${b.dataset.wadd === 'f' ? '여자' : '남자'} 길: 2D 에서 점을 차례로 · 마지막 점을 한 번 더 누르면 끝 · Esc 취소`, 6000); }));
+  $$('[data-wr]', body).forEach((b) => (b.onclick = () => { S.patrol = { idx: +b.dataset.wr }; plan.lineKind = 'wire'; setPlanTool('line'); toast('새 길을 그려 주세요 · 마지막 점을 한 번 더 누르면 끝', 5000); }));
+  $$('[data-wx]', body).forEach((b) => (b.onclick = () => { d.walkers.splice(+b.dataset.wx, 1); changed(); }));
+  $$('[data-wm]', body).forEach((x) => (x.onchange = () => { d.walkers[+x.dataset.wm].mode = x.value; changed(); }));
+  $$('[data-wv]', body).forEach((x) => (x.onchange = () => { d.walkers[+x.dataset.wv].speed = +x.value; changed(); }));
   $('#simPlay').onclick = () => { if (!Sm.on) { if (S.pane === '2d') setPane('split'); Sm.start(M); engine.view('top'); commit(); } else Sm.run = !Sm.run; syncSimBtn(); renderProps(); };
   $$('[data-sp]', body).forEach((b) => (b.onclick = () => { Sm.speed = +b.dataset.sp; renderProps(); }));
   $('#simReset').onclick = () => { Sm.reset(M); renderProps(); };
@@ -1240,7 +1268,7 @@ function buildDock() {
     else if (d.run) b.onclick = () => { closeHome(); d.run(); }; });
 }
 function stopWalk() { engine.walker.stop(); }
-function setPlanTool(t) { if (S.pane === '3d') setPane('split'); plan.setTool(t); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q.dataset.tool === t))); if (t === 'measure') toast('2D 에서 잴 두 점 사이를 끌어요 · 벽 끝 · 모서리에 붙어요 · 3D 에도 보여요', 5000); }
+function setPlanTool(t) { if (S.pane === '3d') setPane('split'); if (t !== 'select' && t !== 'boxsel') tuck(); plan.setTool(t); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q.dataset.tool === t))); if (t === 'measure') toast('2D 에서 잴 두 점 사이를 끌어요 · 벽 끝 · 모서리에 붙어요 · 3D 에도 보여요', 5000); }
 function toggleCeiling() { const L = level(); L.ceiling ||= {}; L.ceiling.on = L.ceiling.on === false; engine.showCeiling(L.ceiling.on); syncCeilBtn(); commit(); toast(L.ceiling.on ? '천장을 보여요 · 위에서 내려다보면 투명해요' : '천장을 껐어요'); }
 function syncCeilBtn() { const b = $('#dkCeil'); if (b && level()) b.setAttribute('aria-pressed', String((level().ceiling || {}).on !== false)); }
 function startWalk() {
@@ -1345,12 +1373,12 @@ async function boot() {
     onMulti: (ids) => { S.multi = ids; if (ids.length && plan.tool === 'boxsel') setPlanTool('select'); if (ids.length) { engine.select(null); S.sel = null; S.panel = 'multi'; S.propsOpen = true; } else if (S.panel === 'multi') S.panel = 'props'; renderProps(); },
     onSketch: (pts) => { const L = level(); (L.sketches ||= []).push({ id: uid('k'), pts, color: plan.skColor || '#e8467c', w: plan.skW || 3 }); commit(); },
     onRoom: (pts) => newRoom(pts),
-    onLine: (pts) => { const L = level(), k = LINEKINDS[plan.lineKind] || LINEKINDS.wire; (L.lines ||= []).push({ id: uid('l'), kind: plan.lineKind || 'wire', pts, ...(k.z === 'below' ? { depth: LOPT.depth } : {}), ...(k.z === 'hang' ? { off: LOPT.off } : {}) }); engine.rebuildStructure(); commit(); toast(`${k.name} ${Math.round(pts.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]), 0) / 100) / 10}m 를 그렸어요 · 이어서 다음 선을 그려도 돼요`, 3000); },
+    onLine: (pts) => { if (S.patrol) return patrolDone(pts); const L = level(), k = LINEKINDS[plan.lineKind] || LINEKINDS.wire; (L.lines ||= []).push({ id: uid('l'), kind: plan.lineKind || 'wire', pts, ...(k.z === 'below' ? { depth: LOPT.depth } : {}), ...(k.z === 'hang' ? { off: LOPT.off } : {}) }); engine.rebuildStructure(); commit(); toast(`${k.name} ${Math.round(pts.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]), 0) / 100) / 10}m 를 그렸어요 · 이어서 다음 선을 그려도 돼요`, 3000); },
     onDim: (d) => { const L = level(); (L.dims ||= []).push({ id: uid('d'), ...d }); engine.rebuildStructure(); commit(); toast(`${Math.round(Math.hypot(d.x2 - d.x1, d.y2 - d.y1)).toLocaleString()} mm · 지우기 도구로 누르면 지워져요`, 2500); },
     onSoffit: (pts) => { const L = level(); (L.soffits ||= []).push({ id: uid('s'), pts, h: L.soffitH || 2400 }); engine.rebuildStructure(); commit(); toast(`천장 가벽을 넣었어요 · 아래면 ${L.soffitH || 2400}mm (층 · 천장 카드에서 높이 바꾸기)`, 3500); },
     onChange: (msg) => { commit(); renderProps(); if (msg) toast(msg, 2200); },
   });
-  $$('[data-tool]').forEach((b) => (b.onclick = () => { plan.setTool(b.dataset.tool); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q === b))); }));
+  $$('[data-tool]').forEach((b) => (b.onclick = () => { if (b.dataset.tool !== 'select' && b.dataset.tool !== 'boxsel') tuck(); else untuck(); plan.setTool(b.dataset.tool); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q === b))); }));
   $('#btnFit').onclick = () => plan.fit();
   $('#btnRooms').onclick = () => ACT.rooms();
   $('#fitFab').onclick = () => fitItems(SL.slopeBad(level(), S.lib));
@@ -1376,7 +1404,7 @@ async function boot() {
   $('#walkExit').onclick = () => stopWalk();
   engine.air.onInfo = (i) => airHud(i);
   engine.sim.onInfo = () => { if (S.panel === 'sim' && S.propsOpen && !document.activeElement.closest('#props select, #props input')) renderProps(); };
-  engine.onTick = () => { if (engine.sim.on) { plan.simA = engine.sim.A; plan.redraw(); } };
+  engine.onTick = () => { if (engine.sim.on) { plan.simA = engine.sim.all(); plan.redraw(); } };
   engine.walker.onStop = () => { if (S.walkPane && S.walkPane !== S.pane) setPane(S.walkPane); S.walkPane = null; };
   $('#walkUp').onclick = () => { engine.walker.eye = Math.min(4000, engine.walker.eye + 200); toast(`눈높이 ${Math.round(engine.walker.eye)}mm`, 1200); };
   $('#walkDown').onclick = () => { engine.walker.eye = Math.max(400, engine.walker.eye - 200); toast(`눈높이 ${Math.round(engine.walker.eye)}mm`, 1200); };
@@ -1410,6 +1438,8 @@ async function boot() {
     if (!mod && !e.altKey && k === 'm') { setPlanTool('measure'); return; }
     if (!mod && !e.altKey && k === 'h') { ACT.hist(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel) plan.erase(S.sel);
+    if (e.key === 'Escape' && S.patrol) { S.patrol = null; }
+    if (e.key === 'Escape' && S.tucked && plan.tool !== 'select') { plan.picker = null; setPlanTool('select'); untuck(); return; }
     if (e.key === 'Escape' && (S.multi || []).length) { plan.setMulti([]); return; }
     if (e.key === 'Escape') { if (SW.pick) { endPick(); renderProps(); return; } setSel(null); closeDrawer(); }
   });

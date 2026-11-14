@@ -1,8 +1,9 @@
 // 주방 동선 시뮬레이터 (기존 앱 "동선"): 직원마다 역할(작업 순서)을 정하면 냉장고 → 작업대 → 튀김기 → 배식구 …를
 // 실제 기물 앞자리로 찾아 A* 길찾기로 걸어간다. 동선 열지도 · 겹침(부딪힘) 횟수 · 한 바퀴 시간/거리.
-// model.sim = { actors: [{ id, name, role, color, plan: ['fridge', 'work', …] }] }
+// model.sim = { actors: [{ id, name, role, color, plan: ['fridge', 'work', …] }], walkers: [{ id, name, sex: 'm'|'f', color, path: [[x,y]…], mode: 'pingpong'|'loop', speed }] }
+// 사람 기준: 벽 · 기물은 통과하지 않고(길이 없으면 멈춤), 서로 마주치면 비켜 가거나 잠깐 기다렸다 다시 길을 찾는다.
 import * as THREE from 'three';
-import { pointInPoly } from './slope.js';
+import { pointInPoly, polyEdgeDist } from './slope.js';
 const MM = 0.001;
 export const FAM = { fridge: /^(fridge|freezer|tfridge|showcase)/, work: /^work/, fryer: /^fryer/, range: /^(range|griddle|oven)/, sink: /^(sink|handsink)/, dish: /^dishwasher/, rack: /^(rack|shelf|holding)/, counter: /^(counter|pos)/ };
 export const FAMN = { fridge: '냉장고', work: '작업대', fryer: '튀김기', range: '화구', sink: '싱크대', dish: '식기세척기', rack: '선반 · 랙', counter: '카운터', pass: '배식구' };
@@ -13,7 +14,8 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 export class KitchenSim {
   constructor(engine) { this.e = engine; this.on = false; this.run = false; this.speed = 1; this.heatOn = true; this.follow = -1; this.A = []; this.root = new THREE.Group(); this.root.name = '동선'; this.root.visible = false; engine.scene.add(this.root); this.onInfo = () => {}; }
-  data(model) { return (model.sim ||= { actors: [] }); }
+  data(model) { const d = (model.sim ||= { actors: [] }); d.walkers ||= []; return d; }
+  addWalker(model, sex, path) { const d = this.data(model), n = d.walkers.filter((w) => w.sex === sex).length + 1; d.walkers.push({ id: 'p' + Math.random().toString(36).slice(2, 8), name: `${sex === 'f' ? '여자' : '남자'} ${n}`, sex, color: sex === 'f' ? '#d9577c' : '#3d6fb8', path, mode: 'pingpong', speed: 1200 }); }
   add(model, role = 'fry') { const d = this.data(model), i = d.actors.length, R = ROLES[role] || ROLES.fry; d.actors.push({ id: 'm' + Math.random().toString(36).slice(2, 8), name: `직원 ${i + 1} · ${R[0]}`, role, color: SIMCOL[i % SIMCOL.length], plan: [...R[1]] }); }
   kitchen() { return (this.e.level.rooms || []).find((r) => r.kind === '주방') || null; }
   bounds() { const L = this.e.level, xs = L.walls.flatMap((w) => [w.x1, w.x2]), ys = L.walls.flatMap((w) => [w.y1, w.y2]); return xs.length ? [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] : [0, 0, 8000, 6000]; }
@@ -33,6 +35,8 @@ export class KitchenSim {
       mark(Math.min(w.x1, w.x2) - r, Math.min(w.y1, w.y2) - r, Math.max(w.x1, w.x2) + r, Math.max(w.y1, w.y2) + r, (x, y) => { const t = clamp(((x - w.x1) * (w.x2 - w.x1) + (y - w.y1) * (w.y2 - w.y1)) / (len * len), 0, 1), d = Math.hypot(w.x1 + (w.x2 - w.x1) * t - x, w.y1 + (w.y2 - w.y1) * t - y); if (d > r) return false; const at = t * len; return !ops.some((o) => at > o.t - o.w / 2 + 120 && at < o.t + o.w / 2 - 120); }); }
     for (const it of L.items) { const Lb = lib[it.type]; if (Lb && Lb.layer && Lb.layer !== 'floor') continue; if ((it.elev || 0) > 400 || it.autoDrain || /drain|trench|trap|mat|rug/.test(it.type)) continue; const a = ((it.rot || 0) * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), hw = it.w / 2 + 130, hd = it.d / 2 + 130, R = Math.hypot(hw, hd);
       mark(it.x - R, it.y - R, it.x + R, it.y + R, (x, y) => { const dx = x - it.x, dy = y - it.y, lx = dx * c + dy * s, ly = -dx * s + dy * c; return Math.abs(lx) < hw && Math.abs(ly) < hd; }); }
+    const R = (L.rooms || []).filter((r) => r.pts && r.pts.length > 2); /* 공간이 있으면 공간 밖(매장 밖)은 막는다 → 문 밖으로 나가지 않음 */
+    if (R.length) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; if (g[k]) continue; const x = b[0] + i * cs, y = b[1] + j * cs; if (!R.some((r) => pointInPoly(x, y, r.pts) || polyEdgeDist(r.pts, x, y) < 260)) g[k] = 2; }
     return { b, cs, nx, ny, g };
   }
   astar(G, p, q) {
@@ -40,12 +44,12 @@ export class KitchenSim {
     const free = (c) => { if (!g[c[1] * nx + c[0]]) return c; for (let r = 1; r < 25; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) { const x = c[0] + dx, y = c[1] + dy; if (x >= 0 && y >= 0 && x < nx && y < ny && !g[y * nx + x]) return [x, y]; } return c; };
     const s = free(ci(p)), t = free(ci(q)), N = nx * ny, gs = new Float32Array(N).fill(1e9), from = new Int32Array(N).fill(-1), open = [], si = s[1] * nx + s[0], ti = t[1] * nx + t[0];
     const h = (i) => { const x = i % nx, y = (i / nx) | 0, dx = Math.abs(x - t[0]), dy = Math.abs(y - t[1]); return dx + dy - 0.59 * Math.min(dx, dy); };
-    const push = (i, f) => { open.push([f, i]); let k = open.length - 1; while (k) { const pk = (k - 1) >> 1; if (open[pk][0] <= open[k][0]) break; [open[pk], open[k]] = [open[k], open[pk]]; k = pk; } };
+    const push = (f, i) => { open.push([f, i]); let k = open.length - 1; while (k) { const pk = (k - 1) >> 1; if (open[pk][0] <= open[k][0]) break; [open[pk], open[k]] = [open[k], open[pk]]; k = pk; } };
     const pop = () => { const top = open[0], last = open.pop(); if (open.length) { open[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < open.length && open[l][0] < open[m][0]) m = l; if (r < open.length && open[r][0] < open[m][0]) m = r; if (m === k) break; [open[m], open[k]] = [open[k], open[m]]; k = m; } } return top; };
     gs[si] = 0; push(h(si), si); let it = 0;
     while (open.length && it++ < 80000) { const [, i] = pop(); if (i === ti) break; const x = i % nx, y = (i / nx) | 0;
       for (const [dx, dy, c] of [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= nx || Y >= ny) continue; const j = Y * nx + X; if (g[j] && j !== ti) continue; if (dx && dy && (g[y * nx + X] || g[Y * nx + x])) continue; const ng = gs[i] + c; if (ng < gs[j]) { gs[j] = ng; from[j] = i; push(ng + h(j), j); } } }
-    if (from[ti] < 0 && ti !== si) return [p, q];
+    if (from[ti] < 0 && ti !== si) return null; /* 길이 없으면 벽을 뚫지 않고 멈춘다 */
     const cells = []; for (let i = ti; i >= 0 && i !== si; i = from[i]) cells.push(i); cells.push(si); cells.reverse();
     const pts = cells.map((i) => [b[0] + (i % nx) * cs, b[1] + ((i / nx) | 0) * cs]);
     const los = (a, c) => { const n = Math.ceil(Math.hypot(c[0] - a[0], c[1] - a[1]) / (cs / 2)); for (let k = 1; k < n; k++) { const x = a[0] + ((c[0] - a[0]) * k) / n, y = a[1] + ((c[1] - a[1]) * k) / n, ii = clamp(Math.round((x - b[0]) / cs), 0, nx - 1), jj = clamp(Math.round((y - b[1]) / cs), 0, ny - 1); if (g[jj * nx + ii]) return false; } return true; };
@@ -53,23 +57,47 @@ export class KitchenSim {
   }
   reset(model) {
     this.G = this.grid(); this.cache = new Map(); this.heat = new Map(); this.hits = 0; this.contact = new Set(); this.t = 0;
-    this.A = this.data(model).actors.map((a, i) => { const s0 = this.station(a.plan[0], null); return { a, i, pos: s0 ? [...s0.p] : [0, 0], step: 0, wait: 0.5, path: null, pi: 0, loopD: 0, t0: 0, last: null, label: s0 ? s0.label : '-', miss: !s0, ph: 0 }; });
+    this.A = this.data(model).actors.map((a, i) => { const s0 = this.station(a.plan[0], null); return { a, i, pos: s0 ? [...s0.p] : [0, 0], step: 0, wait: 0.5, path: null, pi: 0, loopD: 0, t0: 0, last: null, label: s0 ? s0.label : '-', miss: !s0, ph: 0, stuck: 0 }; });
+    this.W = (this.data(model).walkers || []).filter((w) => w.path && w.path.length > 1).map((w, i) => ({ w, a: { color: w.color, name: w.name }, walker: true, i: 100 + i, pos: [...w.path[0]], wi: 0, dn: 1, wait: 0.3 + i * 0.4, path: null, pi: 0, ph: 0, label: '', stuck: 0 }));
     this.buildMeshes();
   }
   next(A) {
     const a = A.a; if (!a.plan.length) return; if (A.step === 0 && A.t0) { A.last = { d: A.loopD, t: this.t - A.t0 }; A.loopD = 0; A.t0 = this.t; } if (!A.t0) A.t0 = this.t;
     A.step = (A.step + 1) % a.plan.length; const fam = a.plan[A.step], s = this.station(fam, A.pos); if (!s) { A.miss = true; A.wait = 1; A.label = `${FAMN[fam] || fam} 없음`; return; }
     A.miss = false; A.label = s.label; const key = `${Math.round(A.pos[0] / 100)},${Math.round(A.pos[1] / 100)}>${Math.round(s.p[0] / 100)},${Math.round(s.p[1] / 100)}`;
-    if (!this.cache.has(key)) this.cache.set(key, this.astar(this.G, A.pos, s.p)); A.path = this.cache.get(key).map((p) => [...p]); A.pi = 1;
+    if (!this.cache.has(key)) this.cache.set(key, this.astar(this.G, A.pos, s.p)); const P = this.cache.get(key); if (!P) { A.miss = true; A.label = `${s.label} · 갈 길이 막혔어요`; A.path = null; A.wait = 1.5; return; } A.path = P.map((p) => [...p]); A.pi = 1;
   }
+  /** 유동인구: 그린 점을 차례로 (왕복 · 한 방향 반복). 점 사이는 길찾기로 (벽 · 기물 돌아감) */
+  nextW(A) {
+    const P = A.w.path; if (!P || P.length < 2) return; let n = A.wi + A.dn;
+    if (A.w.mode === 'loop') n = (A.wi + 1) % P.length; else if (n < 0 || n >= P.length) { A.dn = -A.dn; n = A.wi + A.dn; }
+    A.wi = n; const q = P[n], key = `w${Math.round(A.pos[0] / 100)},${Math.round(A.pos[1] / 100)}>${Math.round(q[0] / 100)},${Math.round(q[1] / 100)}`;
+    if (!this.cache.has(key)) this.cache.set(key, this.astar(this.G, A.pos, q)); const r = this.cache.get(key); A.path = r ? r.map((p) => [...p]) : null; A.pi = 1; A.miss = !r; A.label = r ? `${n + 1}번 점으로` : '길이 막혔어요'; if (!r) A.wait = 1;
+  }
+  cellFree(x, y) { const G = this.G; if (!G) return true; const i = Math.round((x - G.b[0]) / G.cs), j = Math.round((y - G.b[1]) / G.cs); return i >= 0 && j >= 0 && i < G.nx && j < G.ny && !G.g[j * G.nx + i]; }
+  /** 다른 사람을 막힌 칸으로 놓고 길 다시 찾기 */
+  replan(A, goal) { const G = this.G, g2 = G.g.slice(), all = this.all(); for (const B of all) { if (B === A) continue; const ci = Math.round((B.pos[0] - G.b[0]) / G.cs), cj = Math.round((B.pos[1] - G.b[1]) / G.cs); for (let dx = -3; dx <= 3; dx++) for (let dy = -3; dy <= 3; dy++) { const x = ci + dx, y = cj + dy; if (x >= 0 && y >= 0 && x < G.nx && y < G.ny && dx * dx + dy * dy <= 9) g2[y * G.nx + x] = 1; } }
+    const r = this.astar({ ...G, g: g2 }, A.pos, goal); if (r) { A.path = r; A.pi = 1; } }
+  all() { return [...this.A, ...(this.W || [])]; }
   update(dt) {
-    if (!this.on) return; if (this.run) { dt *= this.speed; this.t += dt; const V = 1100;
-      for (const A of this.A) {
-        if (A.wait > 0) { A.wait -= dt; A.ph += dt * 3; if (A.wait <= 0) this.next(A); continue; }
-        if (!A.path || A.pi >= A.path.length) { A.wait = DWELL[A.a.plan[A.step]] || 2; continue; }
-        const q = A.path[A.pi], dx = q[0] - A.pos[0], dy = q[1] - A.pos[1], d = Math.hypot(dx, dy), st = V * dt; A.ph += dt * 9;
-        if (d <= st) { A.pos = [...q]; A.pi++; A.loopD += d; } else { A.pos[0] += (dx / d) * st; A.pos[1] += (dy / d) * st; A.loopD += st; } A.dir = Math.atan2(dy, dx);
-        const hk = Math.round(A.pos[0] / 300) + ',' + Math.round(A.pos[1] / 300); this.heat.set(hk, (this.heat.get(hk) || 0) + dt);
+    if (!this.on) return; if (this.run) { dt *= this.speed; this.t += dt; const all = this.all();
+      for (const A of all) {
+        if (A.wait > 0) { A.wait -= dt; A.ph += dt * 3; if (A.wait <= 0) A.walker ? this.nextW(A) : this.next(A); continue; }
+        if (!A.path || A.pi >= A.path.length) { A.wait = A.walker ? 0.15 : DWELL[A.a.plan[A.step]] || 2; continue; }
+        const V = A.walker ? A.w.speed || 1200 : 1100, q = A.path[A.pi], dx = q[0] - A.pos[0], dy = q[1] - A.pos[1], d = Math.hypot(dx, dy), st = V * dt;
+        if (d < 1) { A.pi++; continue; } const ux = dx / d, uy = dy / d;
+        // 앞에 사람이 있으면: 우선순위가 낮은 쪽이 오른쪽으로 비켜 가거나 기다린다
+        const ahead = all.find((B) => B !== A && Math.hypot(B.pos[0] - A.pos[0], B.pos[1] - A.pos[1]) < 520 && (B.pos[0] - A.pos[0]) * ux + (B.pos[1] - A.pos[1]) * uy > 60);
+        if (ahead && !(ahead.i > A.i && ahead.stuck > 0 && !A.stuck)) {
+          A.stuck += dt; A.ph += dt * 4; let moved = false;
+          for (const ang of [-1.05, 1.05, -1.6]) { const c = Math.cos(ang), sn = Math.sin(ang), vx = ux * c - uy * sn, vy = ux * sn + uy * c, nx = A.pos[0] + vx * st * 0.7, ny = A.pos[1] + vy * st * 0.7;
+            if (this.cellFree(nx, ny) && !all.some((B) => B !== A && Math.hypot(B.pos[0] - nx, B.pos[1] - ny) < 430)) { A.pos = [nx, ny]; A.dir = Math.atan2(vy, vx); moved = true; break; } }
+          if (A.stuck > 1.4) { A.stuck = 0; this.replan(A, A.path[A.path.length - 1]); A.wait = 0.2; }
+          if (!moved) continue; if (A.path) { A.path[A.pi - 1] = [...A.pos]; } continue;
+        }
+        A.stuck = 0; A.ph += dt * 9;
+        if (d <= st) { A.pos = [...q]; A.pi++; A.loopD = (A.loopD || 0) + d; } else { A.pos[0] += ux * st; A.pos[1] += uy * st; A.loopD = (A.loopD || 0) + st; } A.dir = Math.atan2(dy, dx);
+        if (!A.walker) { const hk = Math.round(A.pos[0] / 300) + ',' + Math.round(A.pos[1] / 300); this.heat.set(hk, (this.heat.get(hk) || 0) + dt); }
       }
       for (let i = 0; i < this.A.length; i++) for (let j = i + 1; j < this.A.length; j++) { const a = this.A[i], b = this.A[j], k = i + '-' + j, d = Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]); if (d < 450) { if (!this.contact.has(k)) { this.contact.add(k); this.hits++; } } else this.contact.delete(k); }
     }
@@ -79,8 +107,8 @@ export class KitchenSim {
   }
   buildMeshes() {
     for (const c of [...this.root.children]) { this.root.remove(c); c.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
-    this.root.position.y = (this.e.level.elev || 0) * MM; this.figs = this.A.map((A) => {
-      const g = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: A.a.color, roughness: 0.6 }), skin = new THREE.MeshStandardMaterial({ color: '#f1d3b5', roughness: 0.8 });
+    this.root.position.y = (this.e.level.elev || 0) * MM; this.figs = this.all().map((A) => {
+      if (A.walker) return this.person(A); const g = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: A.a.color, roughness: 0.6 }), skin = new THREE.MeshStandardMaterial({ color: '#f1d3b5', roughness: 0.8 });
       const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 0.75, 4, 10), mat); body.position.y = 0.6; const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 10), skin); head.position.y = 1.33;
       const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.08, 14), new THREE.MeshStandardMaterial({ color: '#ffffff' })); cap.position.y = 1.45; const nose = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.06), mat); nose.position.set(0.15, 1.0, 0);
       for (const m of [body, head]) m.castShadow = true; g.add(body, head, cap, nose); this.root.add(g);
@@ -88,13 +116,23 @@ export class KitchenSim {
     });
     this.heatMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.3, 0.3).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.55, depthWrite: false }), 4000); this.heatMesh.count = 0; this.heatMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(12000), 3); this.root.add(this.heatMesh);
   }
+  /** 유동인구 사람 (남 · 여) */
+  person(A) {
+    const g = new THREE.Group(), f = A.w.sex === 'f', top = new THREE.MeshStandardMaterial({ color: A.w.color, roughness: 0.7 }), skin = new THREE.MeshStandardMaterial({ color: '#efcfb0', roughness: 0.8 }), hair = new THREE.MeshStandardMaterial({ color: '#2b211c', roughness: 0.9 }), pants = new THREE.MeshStandardMaterial({ color: f ? '#3a3340' : '#2e3542', roughness: 0.8 });
+    const legs = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.78, 10), pants); legs.position.y = 0.39;
+    const body = f ? new THREE.Mesh(new THREE.ConeGeometry(0.27, 0.72, 14), top) : new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.42, 4, 10), top); body.position.y = f ? 0.98 : 1.05;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 10), skin); head.position.y = 1.5;
+    const hr = f ? new THREE.Mesh(new THREE.SphereGeometry(0.135, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), hair) : new THREE.Mesh(new THREE.SphereGeometry(0.128, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.42), hair); hr.position.y = 1.52; if (f) { const tail = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.22, 3, 8), hair); tail.position.set(-0.12, 1.36, 0); g.add(tail); }
+    for (const m of [legs, body, head]) m.castShadow = true; g.add(legs, body, head, hr); this.root.add(g);
+    const line = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: A.w.color, dashSize: 0.15, gapSize: 0.1, depthTest: false, transparent: true, opacity: 0.6 })); line.renderOrder = 990; this.root.add(line); return { g, line };
+  }
   draw() {
     if (!this.figs) return; const m4 = new THREE.Matrix4(), c = new THREE.Color();
-    this.A.forEach((A, i) => { const f = this.figs[i]; if (!f) return; const bob = A.wait > 0 ? 0 : Math.abs(Math.sin(A.ph)) * 0.03; f.g.position.set(A.pos[0] * MM, bob, A.pos[1] * MM); if (A.dir != null) f.g.rotation.y = -A.dir;
+    this.all().forEach((A, i) => { const f = this.figs[i]; if (!f) return; const bob = A.wait > 0 ? 0 : Math.abs(Math.sin(A.ph)) * 0.03; f.g.position.set(A.pos[0] * MM, bob, A.pos[1] * MM); if (A.dir != null) f.g.rotation.y = -A.dir;
       const pts = A.path ? [A.pos, ...A.path.slice(A.pi)].map((p) => new THREE.Vector3(p[0] * MM, 0.05, p[1] * MM)) : []; f.line.geometry.dispose(); f.line.geometry = new THREE.BufferGeometry().setFromPoints(pts); if (pts.length > 1) f.line.computeLineDistances(); });
     let n = 0, mx = 0; if (this.heatOn) { for (const v of this.heat.values()) mx = Math.max(mx, v); for (const [k, v] of this.heat) { if (n >= 4000) break; const [i, j] = k.split(',').map(Number), t = v / (mx || 1); m4.makeTranslation(i * 0.3, 0.02, j * 0.3); this.heatMesh.setMatrixAt(n, m4); c.setHSL(0.6 - 0.6 * t, 0.85, 0.5); this.heatMesh.setColorAt(n, c); n++; } }
     this.heatMesh.count = n; this.heatMesh.instanceMatrix.needsUpdate = true; if (this.heatMesh.instanceColor) this.heatMesh.instanceColor.needsUpdate = true;
   }
-  start(model) { if (!this.data(model).actors.length) this.add(model, 'fry'); this.reset(model); this.on = true; this.run = true; this.root.visible = true; }
+  start(model) { const d = this.data(model); if (!d.actors.length && !d.walkers.length) this.add(model, 'fry'); this.reset(model); this.on = true; this.run = true; this.root.visible = true; }
   stop() { this.on = false; this.run = false; this.root.visible = false; this.follow = -1; }
 }
