@@ -124,10 +124,13 @@ export class Plan2D {
       if (end) { const mates = this.ends().filter((q) => Math.hypot(q.x - end.x, q.y - end.y) < 1); act = this._dragEnds(mates, start); return; }
       const hit = this.pickAt(p);
       if (hit && hit.kind === 'item' && this.multi && this.multi.includes(hit.id) && this.multi.length > 1) { act = this._dragGroup(p, start); return; }
-      if (hit && hit.kind === 'item' && e.shiftKey) { const m = new Set(this.multi || (this.sel && this.sel.kind === 'item' ? [this.sel.id] : [])); m.has(hit.id) ? m.delete(hit.id) : m.add(hit.id); this.setMulti([...m]); act = null; return; }
+      const mod = e.ctrlKey || e.metaKey, mouse = e.pointerType === 'mouse', free = !mouse || (this.api.freeMove && this.api.freeMove()); /* PC: 그냥 끌면 화면만 · Ctrl+Shift+끌기 = 옮기기 · Ctrl+끌기 = 길이 늘이기 */
+      if (hit && mod && !e.shiftKey && (hit.kind === 'item' || hit.kind === 'wall')) { if (!(this.sel && this.sel.id === hit.id)) this.select(hit); act = hit.kind === 'item' ? this._stretchItem(this.L.items.find((i) => i.id === hit.id), p, start) : this._stretchWall(this.L.walls.find((w) => w.id === hit.id), p, start); return; }
+      if (hit && hit.kind === 'item' && e.shiftKey && !mod) { const m = new Set(this.multi || (this.sel && this.sel.kind === 'item' ? [this.sel.id] : [])); m.has(hit.id) ? m.delete(hit.id) : m.add(hit.id); this.setMulti([...m]); act = null; return; }
       if (!hit) { act = { pan: true, start, last: start, tapEmpty: true }; return; }
       if (this.multi && this.multi.length) this.setMulti([]);
       const was = !!(this.sel && this.sel.id === hit.id); if (!was) this.select(hit);
+      if (!free && !(mod && e.shiftKey) && hit.kind !== 'room') { act = { pan: true, start, last: start }; return; } /* 잠금: 눌러서 고르기만, 끌면 화면 이동 */
       if (hit.kind === 'item') act = this._dragItem(this.L.items.find((i) => i.id === hit.id), p, start);
       else if (hit.kind === 'opening') act = this._dragOpening(this.L.openings.find((o) => o.id === hit.id), start);
       else if (hit.kind === 'room') act = was ? this._dragRoom(this.L.rooms.find((r) => r.id === hit.id), p, start) : { pan: true, start, last: start }; // 고른 공간을 다시 끌면 공간째 옮기기, 아니면 화면 이동
@@ -190,6 +193,18 @@ export class Plan2D {
     const o = [...r.pts[k]];
     return { start, move: (p) => { const q = this.snapPoint(p); r.pts[k] = [Math.round(q.x), Math.round(q.y)]; this.api.onLive('structure'); },
       done: (m) => m && this.api.onChange(), cancel: () => { r.pts[k] = o; this.api.onLive('structure'); } };
+  }
+  /** Ctrl+끌기: 잡은 쪽 끝만 늘이고 줄이기 (반대쪽 끝은 그대로) */
+  _stretchItem(it, p0, start) {
+    const a = ((it.rot || 0) * Math.PI) / 180, ux = Math.cos(a), uy = Math.sin(a), ow = it.w, ox = it.x, oy = it.y, side = (p0.x - it.x) * ux + (p0.y - it.y) * uy >= 0 ? 1 : -1;
+    return { start, move: (p) => { const d = ((p.x - p0.x) * ux + (p.y - p0.y) * uy) * side, w = Math.max(100, Math.round((ow + d) / 10) * 10), dw = w - ow; it.w = w; it.x = Math.round(ox + ux * side * dw / 2); it.y = Math.round(oy + uy * side * dw / 2); this.api.onLive('itemSize', it); this.stretchInfo = { it, w }; },
+      done: (m) => { this.stretchInfo = null; this.redraw(); m && this.api.onChange('길이를 바꿨어요'); }, cancel: () => { it.w = ow; it.x = ox; it.y = oy; this.stretchInfo = null; this.api.onLive('itemSize', it); } };
+  }
+  /** Ctrl+끌기 (벽): 가까운 끝을 벽 방향으로 늘이고 줄이기 */
+  _stretchWall(w, p0, start) {
+    const L0 = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1, ux = (w.x2 - w.x1) / L0, uy = (w.y2 - w.y1) / L0, e2 = Math.hypot(p0.x - w.x2, p0.y - w.y2) < Math.hypot(p0.x - w.x1, p0.y - w.y1), o = { x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2 };
+    return { start, move: (p) => { const d = (p.x - p0.x) * ux + (p.y - p0.y) * uy, s = Math.round(d / 10) * 10; if (e2) { const L = Math.max(100, L0 + s); w.x2 = Math.round(o.x1 + ux * L); w.y2 = Math.round(o.y1 + uy * L); } else { const L = Math.max(100, L0 - s); w.x1 = Math.round(o.x2 - ux * L); w.y1 = Math.round(o.y2 - uy * L); } this.api.onLive('structure'); },
+      done: (m) => m && this.api.onChange('벽 길이를 바꿨어요'), cancel: () => { Object.assign(w, o); this.api.onLive('structure'); } };
   }
   _dragItem(it, p0, start) {
     const ox = it.x, oy = it.y;

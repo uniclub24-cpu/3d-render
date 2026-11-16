@@ -1,5 +1,5 @@
 // 앱 상태 · 파일 관리(기존 데이터 가져오기 포함) · 태블릿 UI 연결
-import { Engine } from './main.js';
+import { Engine, QUALITY } from './main.js';
 import { findLegacyProjects, convertLegacy, isNextProject, emptyProject, reportText, defaultLight, FORMAT, migrate } from './legacy.js';
 import { loadAsset, exportGLB, exportOBJ, openFiles, saveFile, extOf, ASSET_EXT, RES_EXT, bytesToB64, b64ToBytes } from './io.js';
 import { MAT_LABEL } from './materials.js';
@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.11';
+export const APP_VERSION = '2.1.12';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -104,8 +104,13 @@ function saveRender() { if (!S.model) return; S.model.render = { style: engine.s
 function loadRender() { const r = S.model && S.model.render; if (!r) return; for (const k of RENDER_KEYS) if (r[k] != null && r[k] !== engine.opt[k]) engine.setOption(k, r[k]); if (r.style && STYLES[r.style] && r.style !== engine.style) setStyle(r.style, true); }
 function setStyle(name, fromModel) {
   engine.setStyle(name); store.set('byr.style', name); plan.redraw(); if (!fromModel) saveRender();
-  $('#styleMenu').innerHTML = Object.entries(STYLES).map(([k, st]) => `<button role="menuitemradio" aria-checked="${k === name}" data-style="${k}"><b>${st.name}</b><small>${st.hint}</small></button>`).join('');
+  renderStyleMenu(name);
   if (S.propsOpen && !S.sel) renderProps();
+}
+/** 스타일 목록 + 맨 위에 화질(빠름 · 보통 · 고급) */
+function renderStyleMenu(name = engine.style) {
+  $('#styleMenu').innerHTML = `<div class="qrow" role="group" aria-label="화질">${Object.entries(QUALITY).map(([k, q]) => `<button data-qual="${k}" aria-pressed="${engine.qual === k}">${q.name}</button>`).join('')}</div>`
+    + Object.entries(STYLES).map(([k, st]) => `<button role="menuitemradio" aria-checked="${k === name}" data-style="${k}"><b>${st.name}</b><small>${st.hint}</small></button>`).join('');
 }
 
 function applyEnv() { const L = level(); engine.setEnv(S.model.env ? envOf(S.model) : envOf(S.model), { slabH: L.slabH || 3300, ceilingH: L.ceilingH || 2700, above: false }); }
@@ -177,6 +182,7 @@ const ACT = {
   quote: () => { S.panel = 'quote'; S.propsOpen = true; renderProps(); },
   auto: () => { S.panel = 'auto'; S.propsOpen = true; renderProps(); },
   view: () => { S.panel = 'view'; S.propsOpen = true; renderProps(); },
+  keys: () => showKeys(),
   hist: () => { S.panel = 'hist'; S.propsOpen = true; renderProps(); },
   lang: () => { setLang(lang() === 'en' ? 'ko' : 'en'); renderProps(); if (!$('#home').hidden) renderHome(); toast(lang() === 'en' ? 'English screen (names in your project stay as they are)' : '한국어 화면으로 바꿨어요'); },
   sketch: () => setPlanTool('sketch'),
@@ -763,6 +769,24 @@ async function cutRooms(pts) {
   engine.rebuildStructure(); commit(); const k = await askRoomKind(last.pts, '잘라 낸 쪽 (주황색) 을 무엇으로 지정할까요?'); if (k) { last.kind = k; last.name = L.rooms.filter((q) => q.kind === k).length > 1 ? `${k} ${L.rooms.filter((q) => q.kind === k).length}` : k; engine.rebuildStructure(); commit(); }
   S.tucked = null; setSel({ kind: 'room', id: last.id }); toast(`공간 ${n}개를 둘로 나눴어요`);
 }
+/* ----- WASD · 방향키로 화면 옮기기 (2D 는 도면을, 3D 는 바닥을 따라) · 마우스가 있는 쪽 화면 ----- */
+const panHeld = new Set(); let panRaf = 0;
+function keyPan(k, on, fast) {
+  if (k == null) panHeld.clear(); else if (on) panHeld.add(k); else panHeld.delete(k);
+  const to3d = S.pane === '3d' || (S.pane === 'split' && S.hoverPane === '3d'); engine.panKeys = to3d ? panHeld : null; engine.panFast = !!fast; if (to3d) { engine.invalidate(false); return; }
+  if (!panRaf && panHeld.size) { let t0 = performance.now(); const step = (t) => { const dt = Math.min(0.05, (t - t0) / 1000); t0 = t; const h = (x) => panHeld.has(x), ax = (h('d') || h('arrowright') ? 1 : 0) - (h('a') || h('arrowleft') ? 1 : 0), ay = (h('s') || h('arrowdown') ? 1 : 0) - (h('w') || h('arrowup') ? 1 : 0), sp = (engine.panFast ? 1800 : 700) * dt / plan.view.sc;
+    plan.view.ox += ax * sp; plan.view.oy += ay * sp; plan.redraw(); panRaf = panHeld.size ? requestAnimationFrame(step) : 0; }; panRaf = requestAnimationFrame(step); }
+}
+/* ----- 단축키 안내 (F1 · Ctrl+/) ----- */
+const KEYS = [['마우스 · 2D', [['그냥 끌기', '화면 옮기기 (기물은 안 움직임)'], ['누르기', '고르기 (오른쪽에 속성)'], ['Ctrl+Shift+끌기', '기물 · 벽 · 문 옮기기'], ['Ctrl+끌기', '길이 늘이기 · 줄이기 (잡은 쪽 끝)'], ['Shift+누르기 / Shift+끌기', '여러 개 고르기'], ['기물 앞 파란 손잡이', '돌리기 (15° 씩 · Shift 자유)'], ['휠', '확대 · 축소']]],
+  ['마우스 · 3D', [['왼쪽 끌기', '돌려 보기'], ['오른쪽 끌기 · Shift+끌기', '바닥 따라 밀기'], ['휠', '가까이 · 멀리'], ['Ctrl+Shift+끌기', '기물 옮기기'], ['Ctrl+끌기', '기물 길이 늘이기']]],
+  ['키보드', [['W A S D · 방향키', '화면 옮기기 (Shift = 빠르게) · 기물을 고르면 방향키는 10mm 이동 (Shift 100mm)'], ['Ctrl+B → W', '벽 바로 그리기'], ['T', '줄자'], ['M', '이동 모드 켜고 끄기 (그냥 끌어도 옮김)'], ['R · Shift+R · Ctrl+R', '90° 돌리기'], ['Ctrl+] / Ctrl+[', '크기 5% 키우기 · 줄이기'], ['Ctrl+Shift+> / <', '크기 10%'], ['G', '걷기'], ['H', '작업 기록'], ['Delete', '지우기'], ['Esc', '도구 끝내기 · 고르기 풀기'], ['Enter', '그리던 선 끝내기']]],
+  ['편집', [['Ctrl+Z · Ctrl+Shift+Z · Ctrl+Y', '되돌리기 · 다시'], ['Ctrl+C · X · V', '복사 · 잘라내기 · 붙여넣기'], ['Ctrl+D', '복제'], ['Ctrl+A', '모두 고르기 (2D)'], ['Ctrl+S', '프로젝트 저장'], ['Ctrl+O · Ctrl+N', '내 프로젝트 · 새 프로젝트'], ['Ctrl+P', '이미지 · 단면 · 시점'], ['F1 · Ctrl+/', '이 안내']]],
+  ['걷기', [['W A S D', '걷기 (Shift = 뛰기)'], ['← →', '고개 돌리기'], ['Q · E', '눈높이 낮추기 · 높이기'], ['Esc', '걷기 끝']]]];
+function showKeys() {
+  ask('단축키', '', [{ label: '닫기', value: false, kind: 'pri' }]);
+  setTimeout(() => { const t = $('#dlgM') || $('#dlg p'); if (t) t.innerHTML = `<span class="keys">${KEYS.map(([g, L]) => `<b class="kh">${g}</b>${L.map(([a, b]) => `<kbd>${esc(a)}</kbd><span>${esc(b)}</span>`).join('')}`).join('')}</span>`; });
+}
 /* ----- 작업 기록 ----- */
 function renderHist(body) {
   const tm = (t) => new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }), U = S.um, Rd = S.rm;
@@ -1294,7 +1318,7 @@ const DOCK = [
 ];
 /* 작업군 5개 (선택 중심): 아래 줄 = 작업군 탭, 위 줄 = 그 작업군 도구. 고른 작업군은 기억 */
 const DGROUPS = [['edit', '편집', '<path d="M6 3l13 8-6 1.8L10.5 19z"/>'], ['plan', '설계', '<path d="M4 4h16v16H4z"/><path d="M4 10h9v10"/>'], ['view', '보기', '<path d="M2.5 12c2.4-4.4 5.6-6.6 9.5-6.6s7.1 2.2 9.5 6.6c-2.4 4.4-5.6 6.6-9.5 6.6S4.9 16.4 2.5 12z"/><circle cx="12" cy="12" r="3"/>'], ['check', '검토', '<path d="M9 11l2.5 2.5L16 9"/><rect x="4" y="3.5" width="16" height="17" rx="2"/>'], ['more', '더보기', '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>']];
-const MORE = [{ g: 'more', act: 'hist', label: '작업 기록', icon: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3h3"/><path d="M12 8v4l3 2"/>' }, { g: 'more', act: 'lang', label: 'English', icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/>' }, { g: 'more', run: () => $('#btnFile').click(), label: '파일', icon: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>' }];
+const MORE = [{ g: 'more', run: () => showKeys(), label: '단축키', icon: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h1M9 10h1M12 10h1M15 10h1M18 10h0M7 14h10"/>' }, { g: 'more', act: 'hist', label: '작업 기록', icon: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3h3"/><path d="M12 8v4l3 2"/>' }, { g: 'more', act: 'lang', label: 'English', icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/>' }, { g: 'more', run: () => $('#btnFile').click(), label: '파일', icon: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>' }];
 let dockG = store.get('byr.dockG', 'edit');
 function buildDock() {
   const ALL = [...DOCK.filter((d) => d !== '|'), ...MORE], list = ALL.filter((d) => d.g === dockG);
@@ -1306,6 +1330,8 @@ function buildDock() {
   [...$('#dockIn').children].filter((e) => e.tagName === 'BUTTON').forEach((b, i) => { const d = list[i]; void DOCK0;
     if (d.soon) b.onclick = () => toast(`"${d.label}" 은 ${d.soon} 업데이트에서 들어와요`);
     else if (d.act) b.onclick = () => { closeHome(); ACT[d.act](); };
+    else if (d.mode) b.onclick = () => setMode(d.mode); /* 작업군을 바꾸면 단추를 새로 그리므로 여기서 묶는다 */
+    else if (d.view) b.onclick = () => { closeHome(); if (S.pane === '2d') setPane('split'); engine.view(d.view); };
     else if (d.run) b.onclick = () => { closeHome(); d.run(); }; });
 }
 function stopWalk() { engine.walker.stop(); }
@@ -1411,7 +1437,8 @@ async function boot() {
   plan = new Plan2D($('#plan'), {
     level, lib: S.lib, style: () => engine.style, toast,
     onSelect: (sel) => setSel(sel),
-    onLive: (kind, x) => { if (kind === 'structure') liveStructure(); else if (kind === 'item') { engine.moveItem(x); drainMoved(x); } else if (kind === 'item-removed') engine.removeItem(x); },
+    onLive: (kind, x) => { if (kind === 'structure') liveStructure(); else if (kind === 'item') { engine.moveItem(x); drainMoved(x); } else if (kind === 'item-removed') engine.removeItem(x); else if (kind === 'itemSize') { engine.rebuildItem(x); if (S.sel && S.sel.id === x.id) renderProps(); } },
+    freeMove: () => engine.mode === 'move', /* 이동 모드면 마우스로 그냥 끌어도 옮김 */
     onMulti: (ids) => { S.multi = ids; setTimeout(syncModeChip); if (ids.length && plan.tool === 'boxsel') setPlanTool('select'); if (ids.length) { engine.select(null); S.sel = null; S.panel = 'multi'; S.propsOpen = true; } else if (S.panel === 'multi') S.panel = 'props'; renderProps(); },
     onSketch: (pts) => { const L = level(); (L.sketches ||= []).push({ id: uid('k'), pts, color: plan.skColor || '#e8467c', w: plan.skW || 3 }); commit(); },
     onRoom: (pts) => newRoom(pts),
@@ -1430,7 +1457,7 @@ async function boot() {
   /* 도구 막대 단추는 작업군을 바꿀 때마다 새로 그려지므로 이벤트는 문서에서 받는다 */
   const sm = $('#styleMenu'), sbA = (v) => { const sb = $('#btnStyle'); if (sb) sb.setAttribute('aria-expanded', v); };
   document.addEventListener('click', (e) => { if (e.target.closest('#btnStyle')) { sm.hidden = !sm.hidden; sbA(String(!sm.hidden)); } else if (e.target.closest('#btnDrawer')) openDrawer(); });
-  sm.onclick = (e) => { const b = e.target.closest('[data-style]'); if (!b) return; setStyle(b.dataset.style); sm.hidden = true; sbA('false'); };
+  sm.onclick = (e) => { const q = e.target.closest('[data-qual]'); if (q) { engine.setQuality(q.dataset.qual); renderStyleMenu(); toast(`화질: ${QUALITY[q.dataset.qual].name}`); return; } const b = e.target.closest('[data-style]'); if (!b) return; setStyle(b.dataset.style); sm.hidden = true; sbA('false'); };
   document.addEventListener('pointerdown', (e) => { if (!sm.hidden && !e.target.closest('#styleMenu, #btnStyle')) { sm.hidden = true; sbA('false'); } });
   setPane(store.get('byr.pane', innerWidth < 700 ? '3d' : 'split')); setStyle(STYLES[store.get('byr.style', 'real')] ? store.get('byr.style', 'real') : 'real');
   renderCatalog();
@@ -1469,7 +1496,18 @@ async function boot() {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); ACT.save(); }
     if (engine.design.active) return;
     if (engine.walker.active) return;
-    const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase(), it = selItem();
+    const mod = e.ctrlKey || e.metaKey, k = e.code && e.code.startsWith('Key') ? e.code.slice(3).toLowerCase() : e.key.toLowerCase(), it = selItem(); /* 한글 자판이어도 같은 키 */
+    if (e.key === 'F1' || (mod && (e.key === '/' || e.code === 'Slash'))) { e.preventDefault(); showKeys(); return; }
+    if (mod && k === 'b') { e.preventDefault(); S.chordB = Date.now(); toast('Ctrl+B · 이어서 W = 벽 그리기', 1800); return; }
+    if (!mod && k === 'w' && Date.now() - (S.chordB || 0) < 1800) { e.preventDefault(); S.chordB = 0; setPlanTool('wall'); toast('벽 그리기 · 점을 차례로 찍어요 · Esc 로 끝', 4000); return; }
+    if (mod && k === 'y') { e.preventDefault(); redo(); return; }
+    if (mod && k === 'r') { e.preventDefault(); if (it) { patchSel({ rot: ((it.rot || 0) + 90) % 360 }, false); renderProps(); } return; }
+    if (mod && k === 'x' && it) { e.preventDefault(); S.clipM = null; S.clip = JSON.parse(JSON.stringify(it)); plan.erase(S.sel); toast('잘라냈어요 · Ctrl+V 로 붙여넣기'); return; }
+    if (mod && (k === 'o' || k === 'n')) { e.preventDefault(); k === 'n' ? ACT.new() : showHome(); return; }
+    if (mod && k === 'p') { e.preventDefault(); ACT.view(); return; }
+    if (mod && it && (e.code === 'BracketRight' || e.code === 'BracketLeft' || (e.shiftKey && (e.code === 'Period' || e.code === 'Comma')))) { e.preventDefault(); const f = e.code === 'BracketRight' ? 1.05 : e.code === 'BracketLeft' ? 1 / 1.05 : e.code === 'Period' ? 1.1 : 1 / 1.1; patchSel({ w: Math.max(50, Math.round(it.w * f)), d: Math.max(50, Math.round(it.d * f)), h: Math.max(50, Math.round(it.h * f)) }, false); renderProps(); return; }
+    if (!mod && !e.altKey && !it && !(S.multi || []).length && /^(w|a|s|d|arrowup|arrowdown|arrowleft|arrowright)$/.test(k)) { e.preventDefault(); keyPan(k, true, e.shiftKey); return; } /* WASD · 방향키 = 화면 옮기기 */
+    if (!mod && !e.altKey && it && /^(w|a|s|d)$/.test(k)) { e.preventDefault(); keyPan(k, true, e.shiftKey); return; }
     if ((S.multi || []).length && !mod && (e.key === 'Delete' || e.key === 'Backspace')) { const b = $('[data-mu=del]'); if (b) b.click(); return; }
     if ((S.multi || []).length && mod && k === 'c') { S.clipM = multiItems().map((q) => JSON.parse(JSON.stringify(q))); S.clip = null; toast(`${S.clipM.length}개를 복사했어요`); return; }
     if (mod && k === 'v' && S.clipM && !S.clip) { e.preventDefault(); const n = S.clipM.map((q) => ({ ...JSON.parse(JSON.stringify(q)), id: uid('i'), x: q.x + 400, y: q.y + 400 })); S.clipM = n.map((q) => JSON.parse(JSON.stringify(q))); level().items.push(...n); n.forEach((q) => engine.rebuildItem(q)); commit(); plan.setMulti(n.map((q) => q.id)); return; }
@@ -1479,7 +1517,8 @@ async function boot() {
     if (!mod && it && k === 'r') { patchSel({ rot: ((it.rot || 0) + (e.shiftKey ? 270 : 90)) % 360 }, false); renderProps(); return; }
     if (!mod && it && /^arrow/.test(k)) { e.preventDefault(); const st = e.shiftKey ? 100 : 10, d = { arrowleft: [-st, 0], arrowright: [st, 0], arrowup: [0, -st], arrowdown: [0, st] }[k]; patchSel({ x: it.x + d[0], y: it.y + d[1] }, false); return; }
     if (!mod && !e.altKey && k === 'g') { startWalk(); return; }
-    if (!mod && !e.altKey && k === 'm') { setPlanTool('measure'); return; }
+    if (!mod && !e.altKey && k === 't') { setPlanTool('measure'); return; }
+    if (!mod && !e.altKey && k === 'm') { setMode(engine.mode === 'move' ? 'select' : 'move'); toast(engine.mode === 'move' ? '이동 모드: 그냥 끌어도 기물이 움직여요 (M 으로 끔)' : '선택 모드: 기물은 Ctrl+Shift+끌기로만 움직여요', 3000); return; }
     if (!mod && !e.altKey && k === 'h') { ACT.hist(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel) plan.erase(S.sel);
     if (e.key === 'Escape' && (S.patrol || S.cutRoom)) { S.patrol = null; S.cutRoom = false; }
@@ -1487,6 +1526,9 @@ async function boot() {
     if (e.key === 'Escape' && (S.multi || []).length) { plan.setMulti([]); return; }
     if (e.key === 'Escape') { if (SW.pick) { endPick(); renderProps(); return; } setSel(null); closeDrawer(); }
   });
+  window.addEventListener('keyup', (e) => { const k = e.code && e.code.startsWith('Key') ? e.code.slice(3).toLowerCase() : e.key.toLowerCase(); keyPan(k, false); });
+  window.addEventListener('blur', () => keyPan(null, false));
+  for (const [sel, p] of [['#plan', '2d'], ['#view', '3d']]) { const el = $(sel); if (el) el.addEventListener('pointerenter', () => (S.hoverPane = p)); }
   // 파일을 끌어다 놓기
   let depth = 0; const drop = $('#drop');
   window.addEventListener('dragenter', (e) => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { depth++; drop.hidden = false; } });
