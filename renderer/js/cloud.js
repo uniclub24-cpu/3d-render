@@ -60,16 +60,16 @@ const errOf = (j, r) => (j.error && (j.error.message || j.error.status)) || (typ
 /** 고른 AI 에 그림/PDF + 지시문을 보내 JSON 을 받는다 (제공자마다 요청 모양만 다르고 지시문은 같다) */
 export async function ask(prompt, file, maxTokens = 8000, provider = aiProvider()) {
   const key = aiKey(provider); if (!key) throw new Error(`${PROVIDERS[provider].name} 키가 없어요 · AI 화면에서 키를 넣어 주세요`);
-  const data = b64(file.bytes), pdf = file.mime === 'application/pdf', model = aiModel(provider);
+  const data = b64(file.bytes), pdf = file.mime === 'application/pdf', model = aiModel(provider), txt = /^text\//.test(file.mime) ? '[첨부 문서]\n' + new TextDecoder().decode(file.bytes).slice(0, 150000) : null;
   if (provider === 'claude') {
-    const src = pdf ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } } : { type: 'image', source: { type: 'base64', media_type: file.mime, data } };
+    const src = txt ? { type: 'text', text: txt } : pdf ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } } : { type: 'image', source: { type: 'base64', media_type: file.mime, data } };
     const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: 'user', content: [src, { type: 'text', text: prompt }] }] }) });
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(errOf(j, r));
     return jsonOf((j.content || []).map((c) => c.text || '').join(''));
   }
   if (provider === 'openai') {
-    const src = pdf ? { type: 'input_file', filename: file.name || 'plan.pdf', file_data: 'data:application/pdf;base64,' + data } : { type: 'input_image', image_url: `data:${file.mime};base64,${data}` };
+    const src = txt ? { type: 'input_text', text: txt } : pdf ? { type: 'input_file', filename: file.name || 'plan.pdf', file_data: 'data:application/pdf;base64,' + data } : { type: 'input_image', image_url: `data:${file.mime};base64,${data}` };
     const r = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + key },
       body: JSON.stringify({ model, max_output_tokens: maxTokens, input: [{ role: 'user', content: [src, { type: 'input_text', text: prompt }] }] }) });
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(errOf(j, r));
@@ -77,13 +77,14 @@ export async function ask(prompt, file, maxTokens = 8000, provider = aiProvider(
   }
   // Gemini
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ inline_data: { mime_type: file.mime, data } }, { text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens, responseMimeType: 'application/json' } }) });
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [txt ? { text: txt } : { inline_data: { mime_type: file.mime, data } }, { text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens, responseMimeType: 'application/json' } }) });
   const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(errOf(j, r));
   return jsonOf(((j.candidates || [])[0]?.content?.parts || []).map((p) => p.text || '').join(''));
 }
 
 /** 이미지는 긴 변 2000px JPEG 로 줄여 보낸다. 가로·세로 픽셀도 돌려준다 */
 export async function prepFile(name, bytes) {
+  if (/\.(txt|md|csv|json)$/i.test(name)) return { mime: 'text/plain', bytes, aspect: 1, name };
   if (/\.pdf$/i.test(name)) {
     const txt = new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(bytes.length, 400000)));
     const m = txt.match(/MediaBox\s*\[\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)/); // 첫 쪽 크기 (못 찾으면 A판 가로)
@@ -135,4 +136,24 @@ List every distinct physical object you can see, one entry per object (three tab
 For each object give: "type" (one id from the list), "x0" and "x1" (left and right edge of the object across the photo, as fractions 0 to 1), "dist" (estimated distance in mm from the facing wall to the object's centre; 0 if it is on or built into that wall), "on_wall" (true if mounted on or built into the facing wall), "w" and "h" (estimated width and height in mm, or null), "sill" (for windows and pass-throughs, height of the bottom edge above the floor in mm, else null), "elev" (for wall-mounted things, height of the bottom edge above the floor in mm, else null).
 Answer with JSON only, exactly in this shape: {"objects":[{"type":"","x0":0,"x1":0,"dist":0,"on_wall":false,"w":null,"h":null,"sill":null,"elev":null}]}`;
   return (await ask(prompt, file, 4000)).objects || [];
+}
+
+/**
+ * 인테리어 시방서 · 계획서(PDF · 이미지 · 글) → 내 프리셋.
+ * 업종 · 주방 비율 · 마감 색 · 주방 기물 목록만 뽑는다 (기물 종류는 앱에 있는 것 중에서만).
+ */
+export async function readSpec(file, lib) {
+  const ids = Object.entries(lib).filter(([, L]) => /주방|kitchen|설비|냉장|싱크|작업대|튀김|화구|선반|세척|제빙|정수/.test((L.cat || '') + (L.sub || '') + (L.name || ''))).map(([k, L]) => `${k}=${L.name}`).slice(0, 220).join(', ');
+  const prompt = `이 문서는 매장 인테리어 시방서 또는 계획서다. 자동 배치에 쓸 "프리셋"을 JSON 하나로만 답하라. 설명 글 금지.
+{"name": "브랜드/타입 이름", "base": "pel_hall | pel_delivery | chicken | cafe | snack | korean 중 가장 가까운 것", "ratio": 주방 면적 비율 0.15~1,
+ "colors": {"main":"#hex 대표색","hallWall":"#hex 홀 벽","hallFloor":"#hex 홀 바닥","hallFloor2":"#hex 홀 바닥 둘째 색(체크 타일이 아니면 hallFloor 와 같게)","kitFloor":"#hex 주방 바닥","kitWall":"#hex 주방 벽","counter":"#hex 카운터 앞판","chair":"#hex 의자","ceiling":"#hex 천장","gate":"#hex 출입구 프레임"},
+ "kitchen": [["기물id", 폭mm, 깊이mm, 수량, "hot|wash|prep|cold|store"], ...],
+ "notes": ["배치 · 마감 규칙 요약 (짧게, 최대 8줄)"]}
+기물id 는 반드시 다음 목록에서만 고른다 (없으면 가장 가까운 것): ${ids}
+문서에 없는 값은 빼라. 색은 문서의 마감재 표 · 사진 색을 따른다.`;
+  const j = await ask(prompt, file, 6000);
+  const hex = (v) => (/^#[0-9a-f]{6}$/i.test(v || '') ? v : undefined), colors = {};
+  for (const [k, v] of Object.entries(j.colors || {})) if (hex(v)) colors[k] = v;
+  const kitchen = (j.kitchen || []).filter((r) => Array.isArray(r) && lib[r[0]]).map((r) => [r[0], Math.round(+r[1] || 0), Math.round(+r[2] || 0), Math.max(1, Math.min(9, Math.round(+r[3] || 1))), String(r[4] || 'prep')]);
+  return { name: String(j.name || '내 프리셋').slice(0, 40), base: String(j.base || 'pel_hall'), ratio: Math.min(1, Math.max(0.15, +j.ratio || 0.35)), colors, kitchen, notes: (j.notes || []).map(String).slice(0, 8) };
 }

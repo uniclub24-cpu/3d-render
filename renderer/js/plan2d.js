@@ -286,7 +286,10 @@ export class Plan2D {
       if (ceil) g.setLineDash([5 * px1, 4 * px1]);
       g.fillRect(-it.w / 2, -it.d / 2, it.w, it.d); g.strokeRect(-it.w / 2, -it.d / 2, it.w, it.d); g.setLineDash([]);
       g.beginPath(); g.moveTo(-it.w / 2, it.d / 2); g.lineTo(it.w / 2, it.d / 2); g.lineWidth = 2.2 * px1; g.stroke(); // 앞면 표시
-      if (Math.min(it.w, it.d) * sc > 26) { g.fillStyle = 'rgba(15,18,22,0.85)'; g.font = `${Math.min(13, it.d * sc / 3) * px1}px ${getComputedStyle(document.body).fontFamily}`; g.textAlign = 'center'; g.textBaseline = 'middle'; const name = it.name || Lb.name || ''; const max = it.w * 0.92; let s = name; while (s.length > 1 && g.measureText(s).width > max) s = s.slice(0, -1); g.fillText(s === name ? s : s + '…', 0, 0); }
+      if (Math.min(it.w, it.d) * sc > 22) { /* 이름: 작게 · 괄호 설명 빼고 · 넘치면 말없이 자름(테이블냉장고 → 테이블냉) · 높이가 다른 기물끼리 안 겹치게 위/가운데/아래로 나눔 */
+        const fs = Math.max(7, Math.min(10, it.d * sc / 3.4)), ly = (Lb.layer === 'upper' ? -1 : /^ceil/.test(Lb.layer || '') ? 1 : 0), name = (it.name || Lb.name || '').replace(/\s*\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
+        g.fillStyle = ly ? 'rgba(40,70,120,0.85)' : 'rgba(15,18,22,0.8)'; g.font = `${fs * px1}px ${getComputedStyle(document.body).fontFamily}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+        const max = it.w * 0.9; let t = name; while (t.length > 1 && g.measureText(t).width > max) t = t.slice(0, -1); const y = ly * Math.max(0, it.d / 2 - (fs * px1) * 0.9); g.fillText(t, 0, y); }
       g.restore();
     }
     // 벽 (문/창 자리는 비우고)

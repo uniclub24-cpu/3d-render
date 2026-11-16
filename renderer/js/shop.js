@@ -164,6 +164,20 @@ function frame(R, F) {
   return { W, D, toW, rot };
 }
 const DOORISH = /door|auto|slide|full|glass|fold/;
+/** 내 프리셋 (시방서 · 계획서에서 만든 업종) — key 는 'u_' 로 시작. 기본 업종을 바탕으로 색 · 주방 기물만 바꾼다 */
+export const ROLES = ['hot', 'wash', 'prep', 'cold', 'store'];
+export function setCustomBiz(list) {
+  for (const k of Object.keys(BIZ)) if (k.startsWith('u_')) delete BIZ[k];
+  for (const p of list || []) { const base = BIZ[p.base] || BIZ.pel_hall; if (!p.id) continue;
+    BIZ['u_' + p.id] = { ...base, name: p.name || '내 프리셋', ratio: +p.ratio || base.ratio, pel: p.pel ?? base.pel, colors: p.colors || {}, kitchen: (p.kitchen && p.kitchen.length ? p.kitchen : base.kitchen).map((r) => [r[0], +r[1] || 0, +r[2] || 0, Math.max(1, +r[3] || 1), ROLES.includes(r[4]) ? r[4] : 'prep']), custom: p }; }
+}
+/** 체크 무늬 바닥 이미지 (2×2 칸) · grout = 줄눈만 */
+function checker(a, b, px, grout) {
+  if (typeof document === 'undefined') return null; const c = document.createElement('canvas'); c.width = c.height = px * 2; const g = c.getContext('2d');
+  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) { g.fillStyle = grout ? a : (i + j) % 2 ? b : a; g.fillRect(i * px, j * px, px, px); }
+  g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 1; for (let k = 0; k <= 2; k++) { g.beginPath(); g.moveTo(k * px, 0); g.lineTo(k * px, px * 2); g.moveTo(0, k * px); g.lineTo(px * 2, k * px); g.stroke(); }
+  return c.toDataURL('image/png');
+}
 /** 출입구 쪽 벽 (N/E/S/W) */
 export function frontSide(L) {
   const b = bounds(L); let best = null;
@@ -176,7 +190,7 @@ export function frontSide(L) {
  * opt: { kind, ratio(0.15~1), front('auto'|N|E|S|W), aisle, clear, scope:{kitchen,hall,finish,mep} }
  */
 export function autoLayout(L, lib, opt, make, uid) {
-  const pr = BIZ[opt.kind]; if (!pr) return { error: '업종을 고르세요' };
+  const pr = BIZ[opt.kind]; if (!pr) return { error: '업종을 고르세요' }; const PC = { ...PELI, ...(pr.colors || {}) }; /* 내 프리셋 색이 있으면 덮어씀 */
   const outer = L.walls.filter((w) => w.pz !== 'part'); if (outer.length < 3) return { error: '먼저 매장 벽을 그려 주세요' };
   const T = (L.walls[0].t || 150) / 2, b = bounds({ walls: outer }), R = [b[0] + T, b[1] + T, b[2] - T, b[3] - T];
   const fd = frontSide({ ...L, walls: outer }), F = opt.front && opt.front !== 'auto' ? opt.front : fd ? fd.side : 'S';
@@ -186,29 +200,41 @@ export function autoLayout(L, lib, opt, make, uid) {
   // 0. 정리: 프리셋으로 놓은 것만 (clear 면 기물 전부)
   const partIds = new Set(L.walls.filter((w) => w.pz === 'part').map((w) => w.id));
   L.walls = L.walls.filter((w) => !partIds.has(w.id)); L.openings = L.openings.filter((o) => !partIds.has(o.wall));
-  L.items = opt.clear ? [] : L.items.filter((it) => !it.pz); L.rooms = (L.rooms || []).filter((r) => !r.pz);
+  L.items = opt.clear ? [] : L.items.filter((it) => !it.pz); L.rooms = (L.rooms || []).filter((r) => !r.pz); L.lines = (L.lines || []).filter((l) => !l.pz);
   // 1. 주방 깊이
   const kd = noHall ? Math.max(1500, D - 1200) : clamp(Math.round((D * ratio) / 50) * 50, 2400, Math.max(2400, D - 1800)), pv = D - kd;
   const rect = (u0, v0, u1, v1) => [toW(u0, v0), toW(u1, v0), toW(u1, v1), toW(u0, v1)].map((p) => p.map(Math.round));
-  const hall = { id: uid('r'), pz: 'auto', name: '홀', kind: '홀', pts: rect(0, 0, W, pv), lift: 0, finish: 'tile', color: pr.pel ? PELI.hallFloor : '#c9c3b8', slope: null };
-  const kit = { id: uid('r'), pz: 'auto', name: noHall ? '주방 (배달 전용)' : '주방', kind: '주방', pts: rect(0, noHall ? 0 : pv, W, D), lift: 0, finish: 'tile', color: pr.pel ? PELI.kitFloor : '#a7a3a2', slope: null };
+  const hall = { id: uid('r'), pz: 'auto', name: '홀', kind: '홀', pts: rect(0, 0, W, pv), lift: 0, finish: 'tile', color: pr.pel ? PC.hallFloor : '#c9c3b8', slope: null };
+  const kit = { id: uid('r'), pz: 'auto', name: noHall ? '주방 (배달 전용)' : '주방', kind: '주방', pts: rect(0, noHall ? 0 : pv, W, D), lift: 0, finish: 'tile', color: pr.pel ? PC.kitFloor : '#a7a3a2', slope: null };
   if (!noHall) L.rooms.push(hall); L.rooms.push(kit);
   rep.kitchenA = polyArea(kit.pts) / 1e6; rep.hallA = noHall ? 0 : polyArea(hall.pts) / 1e6;
   const put = (pz, type, u, v, ru, rv, over = {}) => { const Li = lib[type]; if (!Li) { rep.miss.push(type); return null; } const [x, y] = toW(u, v), it = make(type, x, y, rot(ru, rv), over); it.pz = pz; L.items.push(it); rep.placed++; return it; };
   // 2. 칸막이 · 배식구 · 주방 출입구
   const cw = clamp(Math.round((W * (pr.pel === 1 && opt.kind === 'pel_hall' ? 0.36 : 0.4)) / 100) * 100, 1200, 3200), kdU = W > 6000 ? W - 700 : 650;
   let cu = clamp(W / 2, cw / 2 + 250, W - cw / 2 - 250); if (Math.abs(cu - kdU) < cw / 2 + 650) cu = kdU > W / 2 ? kdU - cw / 2 - 650 : kdU + cw / 2 + 650; cu = clamp(cu, cw / 2 + 150, W - cw / 2 - 150);
-  if (!noHall) { const a = toW(0, pv), c = toW(W, pv), part = { id: uid('w'), pz: 'part', x1: Math.round(a[0]), y1: Math.round(a[1]), x2: Math.round(c[0]), y2: Math.round(c[1]), t: 100, h: L.ceilingH || 2700, color: pr.pel ? PELI.part : '#ece8e1', finish: pr.pel ? 'steel' : 'paint' };
-    L.walls.push(part); L.openings.push({ id: uid('o'), pz: 'auto', wall: part.id, type: 'pass', t: Math.round(cu), w: cw, h: 900, sill: 1050, frost: null }, { id: uid('o'), pz: 'auto', wall: part.id, type: 'arch', t: Math.round(kdU), w: 1000, h: 2100, sill: 0, frost: null }); }
+  if (!noHall) { const a = toW(0, pv), c = toW(W, pv), part = { id: uid('w'), pz: 'part', x1: Math.round(a[0]), y1: Math.round(a[1]), x2: Math.round(c[0]), y2: Math.round(c[1]), t: 100, h: L.ceilingH || 2700, color: pr.pel ? PC.part : '#ece8e1', finish: pr.pel ? 'steel' : 'paint' };
+    L.walls.push(part); L.openings.push({ id: uid('o'), pz: 'auto', wall: part.id, type: 'pass', t: Math.round(cu), w: cw, h: 900, sill: 1050, frost: null }, { id: uid('o'), pz: 'auto', wall: part.id, type: 'arch', t: Math.round(kdU), w: 1000, h: 2100, sill: 0, frost: null, curtain: { on: true, color: '#c4161c', len: 900 } }); } /* ⑨ 배식구 있는 주방 출입구: 빨간 가림막 */
   // 3. 출입문 (없으면 정면 가운데에)
   let gateU = W / 2;
   if (fd && F === fd.side) { const p = fd; gateU = F === 'S' ? p.x - R[0] : F === 'N' ? R[2] - p.x : F === 'W' ? p.y - R[1] : R[3] - p.y; }
   else { const m = toW(W / 2, -T), wl = outer.map((w) => { const len = hyp(w.x2 - w.x1, w.y2 - w.y1) || 1, t = clamp(((m[0] - w.x1) * (w.x2 - w.x1) + (m[1] - w.y1) * (w.y2 - w.y1)) / len, 0, len); return { w, t, len, d: hyp(w.x1 + ((w.x2 - w.x1) * t) / len - m[0], w.y1 + ((w.y2 - w.y1) * t) / len - m[1]) }; }).sort((p, q) => p.d - q.d)[0];
-    if (wl && wl.d < 400) { const [dt, dw, dh] = pr.door, ww = Math.min(dw, wl.len - 400); L.openings.push({ id: uid('o'), pz: 'auto', wall: wl.w.id, type: dt, t: Math.round(clamp(wl.t, ww / 2 + 200, wl.len - ww / 2 - 200)), w: ww, h: dh, sill: 0, frost: null, ...(pr.pel ? { frame: PELI.gate } : {}) }); } }
+    if (wl && wl.d < 400) { const [dt, dw, dh] = pr.door, ww = Math.min(dw, wl.len - 400); L.openings.push({ id: uid('o'), pz: 'auto', wall: wl.w.id, type: dt, t: Math.round(clamp(wl.t, ww / 2 + 200, wl.len - ww / 2 - 200)), w: ww, h: dh, sill: 0, frost: null, ...(pr.pel ? { frame: PC.gate } : {}) }); } }
   // 4. 주방 기물 (뒷벽 → 오른쪽 → 왼쪽 → 칸막이)
-  const list = []; for (const [type, w, d, q, role] of pr.kitchen) { const Li = lib[type]; if (!Li) { rep.miss.push(type); continue; } for (let k = 0; k < q; k++) list.push({ type, w: w || Li.w, d: d || Li.d, role, gas: !!Li.gas, drain: !!Li.drain, kw: Li.kw || 0 }); }
-  list.sort((a, b) => ROLE.indexOf(a.role) - ROLE.indexOf(b.role));
-  const v0 = noHall ? 0 : pv + 50, backD = Math.max(0, ...list.slice(0, 6).map((q) => q.d)), partD = 720, usePart = !noHall && kd >= backD + partD + aisle + 100;
+  /* 주방 규칙 (본사 기준)
+   * ① 화구 · 튀김기 · 렌지 · 인덕션은 후드 아래 (후드는 양쪽 100mm 씩 더 넓게 → 20cm 안)  ② 식기세척기는 옵션 · 싱크 바로 옆 · 벽에 붙지 않게
+   * ③ 튀김기 옆에 싱크 금지 (사이에 작업대)  ④ 냉장고(45박스 · 25박스) 1대 이상  ⑤ 통로 1.2m 이상 · 3m 넘게 비면 가운데 턱 없는 작업대
+   * ⑥ 가운데 트렌치(10평 이하) / 그리스트랩  ⑦ 싱크끼리 2m 이상  ⑧ 벽 작업대 위 스테인리스 벽선반 + 벽 속 보강재  ⑨ 배식구가 있으면 주방 출입구(미닫이 제외)에 빨간 가림막 */
+  const KA = Math.max(1200, aisle), isHotT = (t) => /fryer|range|griddle|wok|noodle|steam|soup|induc|salam/.test(t), isFry = (t) => /fryer/.test(t), isSink = (t) => /sink/.test(t) && t !== 'handsink', isWork = (t) => /^(work|work2|k_work|k_worknb|k_draw)/.test(t);
+  let list = []; for (const [type, w, d, q, role] of pr.kitchen) { if (type === 'dishwasher' && !opt.dish) continue; const Li = lib[type]; if (!Li) { rep.miss.push(type); continue; } for (let k = 0; k < q; k++) list.push({ type, w: w || Li.w, d: d || Li.d, role: isHotT(type) ? 'hot' : role, gas: !!Li.gas, drain: !!Li.drain, kw: Li.kw || 0 }); }
+  if (opt.dish && !list.some((q) => q.type === 'dishwasher') && lib.dishwasher) list.push({ type: 'dishwasher', w: 650, d: 650, role: 'wash', drain: true, kw: 4.6 });
+  if (!list.some((q) => /^fridge(45|25)$/.test(q.type)) && lib.fridge45) list.push({ type: 'fridge45', w: 1260, d: 800, role: 'cold', kw: 0.35 }); /* ④ */
+  const hot = list.filter((q) => q.role === 'hot').sort((a, b) => (isFry(b.type) - isFry(a.type)) || (isWork(a.type) - isWork(b.type))); /* 튀김기는 바깥쪽 끝 · 렌지 · 작업대 쪽이 싱크와 가까이 */
+  const wash = list.filter((q) => q.role === 'wash'), sinks = wash.filter((q) => isSink(q.type)), mainSink = sinks.sort((a, b) => b.w - a.w)[0], dish = wash.find((q) => q.type === 'dishwasher');
+  const washRun = [mainSink, dish, ...wash.filter((q) => q !== mainSink && q !== dish && !isSink(q.type))].filter(Boolean), farSinks = sinks.filter((q) => q !== mainSink); /* ② 세척 싱크 + 식세기 붙여서 · ⑦ 다른 싱크는 멀리 */
+  const buffer = hot.length && isFry(hot[hot.length - 1].type) ? [{ type: lib.k_work09 ? 'k_work09' : 'work', w: 600, d: 600, role: 'prep', buffer: true }] : []; /* ③ */
+  const rest = list.filter((q) => q.role !== 'hot' && q.role !== 'wash').sort((a, b) => ROLE.indexOf(a.role) - ROLE.indexOf(b.role));
+  list = [...hot, ...buffer, ...washRun, ...rest.slice(0, 2), ...farSinks.map((q) => ({ ...q, far: true })), ...rest.slice(2)];
+  const v0 = noHall ? 0 : pv + 50, backD = Math.max(0, ...list.slice(0, 6).map((q) => q.d)), partD = 720, usePart = !noHall && kd >= backD + partD + KA + 100;
   const segs = [ // 시작점(u,v) · 진행 방향 · 안쪽 방향 · 길이 · 막힌 구간
     { u: 0, v: D, du: 1, dv: 0, nu: 0, nv: -1, len: W, block: [] },
     { u: W, v: D - backD + 50, du: 0, dv: -1, nu: -1, nv: 0, len: D - backD + 50 - v0 - (usePart ? partD + 50 : 0), block: [] },
@@ -217,7 +243,9 @@ export function autoLayout(L, lib, opt, make, uid) {
   if (usePart) segs.push({ u: 0, v: pv + 50, du: 1, dv: 0, nu: 0, nv: 1, len: W, block: [[cu - cw / 2 - 50, cu + cw / 2 + 50], [kdU - 500 - 450, kdU + 500 + 450]] });
   if (noHall) segs[1].len = segs[2].len = D - backD + 50 - 1200; /* 배달 전용: 앞 1.2m 는 픽업 자리 */
   const placed = []; let si = 0, s = 50;
+  const posOf = (g, c, q) => [g.u + g.du * c + g.nu * (q.d / 2 + 10), g.v + g.dv * c + g.nv * (q.d / 2 + 10)];
   if (sc.kitchen) for (const q of list) { let ok = false;
+    if (isSink(q.type)) for (let tries = 0; tries < 40; tries++) { const g = segs[si]; if (!g) break; const [x, y] = posOf(g, s + q.w / 2, q), near = placed.find((p) => isSink(p.type) && hyp(p.u - x, p.v - y) < 2000 + (p.w + q.w) / 2 - 600); if (!near) break; s += 200; if (s + q.w > g.len - 50) { si++; s = 50; } } /* ⑦ 싱크끼리 2m */
     while (si < segs.length) { const g = segs[si], hit = g.block.find(([a, c]) => s < c && s + q.w > a); if (hit) { s = hit[1]; continue; } if (s + q.w <= g.len - 50 && q.d < 1200) { ok = true; break; }
       if (si === 0) { const row = placed.filter((p) => p.si === 0), first = row[0], last = row[row.length - 1]; /* 모서리: 뒷벽 끝 기물 깊이에 딱 붙여 옆벽 시작 */
         for (const [k, p] of [[1, last], [2, first]]) { if (!p) continue; const top = D - (p.d + 10); segs[k].len += segs[k].v - top - 50; segs[k].v = top + 50; } }
@@ -225,6 +253,18 @@ export function autoLayout(L, lib, opt, make, uid) {
     if (!ok) { rep.miss.push((lib[q.type] || {}).name || q.type); continue; }
     const g = segs[si], c = s + q.w / 2, off = q.d / 2 + 10, u = g.u + g.du * c + g.nu * off, v = g.v + g.dv * c + g.nv * off;
     const it = put('kit', q.type, u, v, g.nu, g.nv, { w: q.w, d: q.d }); if (it) placed.push({ ...q, it, si, s, u, v, g }); s += q.w; }
+  { /* ② 식기세척기가 벽(줄 끝)에 붙었으면 싱크와 자리 바꿈 */ const dw = placed.find((p) => p.type === 'dishwasher'), sk = dw && placed.find((p) => isSink(p.type) && p.si === dw.si && Math.abs(p.s + p.w - dw.s) < 2);
+    if (dw && sk && (dw.s + dw.w >= dw.g.len - 120 || dw.s <= 60)) { const ns = sk.s, nd = sk.s + dw.w; dw.s = ns; sk.s = nd; for (const p of [dw, sk]) { const c = p.s + p.w / 2, [x, y] = posOf(p.g, c, p); p.u = x; p.v = y; const W0 = toW(x, y); p.it.x = Math.round(W0[0]); p.it.y = Math.round(W0[1]); } } }
+  if (sc.kitchen) { /* ⑤ 가운데가 3m 넘게 비면 턱 없는 작업대 (양쪽 통로 1.2m 이상) */
+    const front = Math.max(0, ...placed.filter((p) => p.si === 0).map((p) => p.d)) + 10, partRow = usePart && placed.some((p) => p.si === 3) ? Math.max(...placed.filter((p) => p.si === 3).map((p) => p.d)) + 60 : 0, free = kd - 50 - front - partRow;
+    const IT = lib.k_worknb ? 'k_worknb' : 'work2', Id = 600, Iw = Math.min(1800, W - 2 * KA - 1600);
+    if (free >= 3000 && Iw >= 900 && lib[IT]) { const vC = D - front - (free / 2); put('kit', IT, W / 2, vC, 0, -1, { w: Math.round(Iw / 100) * 100, d: Id }); rep.island = true; }
+    /* ⑧ 벽 작업대 위 스테인리스 벽선반 + 벽 속 보강재 */
+    if (lib.shelf) for (const p of placed) { if (!isWork(p.type) || p.si > 2) continue; const off = 350 / 2 + 10; put('kit', 'shelf', p.g.u + p.g.du * (p.s + p.w / 2) + p.g.nu * off, p.g.v + p.g.dv * (p.s + p.w / 2) + p.g.nv * off, p.g.nu, p.g.nv, { w: p.w, elev: 1500, color: '#c9ced4', mat: 'steel' });
+      const a = toW(p.g.u + p.g.du * (p.s + 50) - p.g.nu * 10, p.g.v + p.g.dv * (p.s + 50) - p.g.nv * 10), b = toW(p.g.u + p.g.du * (p.s + p.w - 50) - p.g.nu * 10, p.g.v + p.g.dv * (p.s + p.w - 50) - p.g.nv * 10); (L.lines ||= []).push({ id: uid('ln'), pz: 'auto', kind: 'brace', pts: [a.map(Math.round), b.map(Math.round)], h: 1450 }); }
+    /* ⑥ 주방 가운데 트렌치(10평 = 33㎡ 이하) / 그리스트랩 */
+    const kA = rep.kitchenA, tt = kA <= 33.06 ? 'trench' : 'trap'; if (lib[tt]) { const vC = D - front - Math.max(600, free / 2) - (rep.island ? Id / 2 + 450 : 0); put('mep', tt, W / 2, vC, 0, -1, tt === 'trench' ? { w: Math.round(Math.min(2400, W * 0.4) / 100) * 100 } : {}); rep.drainType = tt === 'trench' ? '트렌치' : '그리스트랩'; }
+  }
   // 5. 후드 · 배수 · 가스 · 3상 (설비)
   if (sc.mep && sc.kitchen) {
     const runs = []; for (const p of placed) { if (!(p.role === 'hot' || p.gas || /fryer|range|griddle|wok|noodle|steam|soup/.test(p.type))) continue; const r = runs[runs.length - 1]; if (r && r.si === p.si && p.s - r.e < 120) { r.e = p.s + p.w; r.n++; } else runs.push({ si: p.si, s: p.s, e: p.s + p.w, g: p.g, n: 1 }); }
@@ -238,14 +278,14 @@ export function autoLayout(L, lib, opt, make, uid) {
   // 6. 홀: 카운터 · 메뉴보드 · 테이블
   if (!noHall && sc.hall) {
     const Cn = lib[pr.counter]; let cd = 0;
-    if (Cn) { const cwid = Math.min(cw + 400, W - 1200); cd = Cn.d; put('hall', pr.counter, cu, pv - Cn.d / 2 - 60, 0, -1, { w: Math.round(cwid), ...(pr.pel ? { color: PELI.counter } : {}) }); }
+    if (Cn) { const cwid = Math.min(cw + 400, W - 1200); cd = Cn.d; put('hall', pr.counter, cu, pv - Cn.d / 2 - 60, 0, -1, { w: Math.round(cwid), ...(pr.pel ? { color: PC.counter } : {}) }); }
     if (pr.menu && lib.menuboard) { const Mb = lib.menuboard; for (let k = 0; k < pr.menu; k++) put('hall', 'menuboard', cu + (k - (pr.menu - 1) / 2) * (Mb.w + 100), pv - 60 - Mb.d / 2, 0, -1, { elev: 2000 }); }
     const [tt, ch, gap] = pr.table, Tb = lib[tt], Ch = lib[ch];
     if (Tb && Ch) { const vMax = pv - cd - 60 - Math.max(aisle, 1000), uM = 500, cwid = Tb.w + gap, crow = Tb.d + 2 * (Ch.d - 60) + gap;
       for (let v = 1300 + Ch.d + Tb.d / 2; v + Tb.d / 2 + Ch.d <= vMax; v += crow) for (let u = uM + Tb.w / 2; u + Tb.w / 2 <= W - uM; u += cwid) {
         if (Math.abs(u - gateU) < Tb.w / 2 + 700 && v < 2600) continue; /* 출입구 앞 비움 */
         put('hall', tt, u, v, 0, -1, pr.pel ? { color: '#14223a' } : {}); const per = Tb.w > 900 ? 2 : 1;
-        for (let k = 0; k < per; k++) { const cu2 = u - Tb.w / 2 + (Tb.w * (k + 0.5)) / per, co = pr.pel ? { color: PELI.chair } : {}; if (put('hall', ch, cu2, v - Tb.d / 2 - Ch.d / 2 + 60, 0, -1, co)) rep.seats++; if (put('hall', ch, cu2, v + Tb.d / 2 + Ch.d / 2 - 60, 0, 1, co)) rep.seats++; } }
+        for (let k = 0; k < per; k++) { const cu2 = u - Tb.w / 2 + (Tb.w * (k + 0.5)) / per, co = pr.pel ? { color: PC.chair } : {}; if (put('hall', ch, cu2, v - Tb.d / 2 - Ch.d / 2 + 60, 0, -1, co)) rep.seats++; if (put('hall', ch, cu2, v + Tb.d / 2 + Ch.d / 2 - 60, 0, 1, co)) rep.seats++; } }
       if (!rep.seats) rep.miss.push('테이블 (홀이 좁아요)'); }
     if (sc.mep && lib.ac_cassette && rep.hallA > 15) put('hall', 'ac_cassette', W / 2, pv / 2, 0, -1);
   }
@@ -253,10 +293,18 @@ export function autoLayout(L, lib, opt, make, uid) {
   if (sc.mep) for (const c of analyze(L, lib, aisle).checks) { const it = L.items.find((q) => q.id === c.id); if (!it) continue; const a = ((it.rot || 0) * Math.PI) / 180, bx = Math.sin(a), by = -Math.cos(a), o = it.d / 2 - 20; /* 기물 뒤쪽 */
     const add = (type, over) => { if (!lib[type]) return; const n = make(type, it.x + bx * o, it.y + by * o, it.rot || 0, over); n.pz = 'mep'; L.items.push(n); rep.placed++; };
     if (/가스 밸브/.test(c.t)) add('gasvalve'); else if (/3상/.test(c.t)) add('outlet3', { elev: 1100 }); }
+  // 6-2. 페리카나 매뉴얼 (2025.01) 홀 디테일: 붙박이 의자(옆벽) · 창가 바테이블 + 바 의자 · 카운터 위 빈티지 조명 · 홀 매입등 · 주방 평판등
+  if (pr.pel && sc.hall && !noHall) {
+    if (lib.banquette && W > 5000) { const n = Math.floor((pv - 2600) / 1900); for (let k = 0; k < n; k++) put('hall', 'banquette', W - 310, 1500 + 950 + k * 1900, -1, 0, { color: PC.chair, w: 1800 }); }
+    if (lib.tbar && lib.barchair) { const bw = Math.min(2400, gateU - 1300); if (bw >= 1000) { put('hall', 'tbar', 300 + bw / 2, 260, 0, 1, { w: Math.round(bw / 100) * 100, d: 400, color: '#14223a' }); for (let x = 300 + 300; x < 300 + bw - 200; x += 600) if (put('hall', 'barchair', x, 760, 0, -1, { color: PC.chair })) rep.seats++; } }
+    if (sc.mep) { if (lib.l_line) put('hall', 'l_line', cu, pv - 700, 0, -1, { w: 1260, color: '#d8dde2' }); if (lib.l_down) for (let v = 1500; v < pv - 1400; v += 2000) for (let u = 1200; u < W - 800; u += 2000) put('hall', 'l_down', u, v, 0, -1); if (lib.l_flat) for (let u = 1400; u < W - 600; u += 2400) put('mep', 'l_flat', u, D - kd / 2, 0, -1); }
+  }
   // 7. 마감 (페리카나 매뉴얼 색)
   if (sc.finish) for (const w of L.walls) { if (w.pz === 'part') continue; const m = [(w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2], inK = pointInPoly(m[0], m[1], kit.pts) || (() => { const c = rect(0, noHall ? 0 : pv, W, D + 400); return pointInPoly(m[0], m[1], c); })();
-    if (inK) { w.finish = 'tile'; w.color = pr.pel ? PELI.kitWall : '#efefef'; } else if (pr.pel) { w.finish = 'paint'; w.color = PELI.hallWall; } }
-  if (sc.finish && pr.pel) { L.ceiling = { ...(L.ceiling || {}), on: true, color: PELI.ceiling }; }
+    if (inK) { w.finish = 'tile'; w.color = pr.pel ? PC.kitWall : '#efefef'; } else if (pr.pel) { w.finish = 'paint'; w.color = PC.hallWall; } }
+  if (sc.finish && pr.pel) { L.ceiling = { ...(L.ceiling || {}), on: true, color: PC.ceiling };
+    /* 홀 바닥 600각 2톤(TL-01 · TL-02 체크) · 주방 바닥 200각(TL-03) */
+    const chk = checker(PC.hallFloor, PC.hallFloor2, 64), kt = checker('#a7a3a2', '#9e9a99', 32, true); if (chk && !noHall) hall.tex = { img: chk, size: 1200 }; if (kt) kit.tex = { img: kt, size: 400 }; }
   rep.miss = [...new Set(rep.miss)]; if (!usePart && !noHall) rep.note = '주방 깊이가 얕아 칸막이 쪽 줄은 비웠어요';
   return rep;
 }

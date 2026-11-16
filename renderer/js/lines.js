@@ -8,6 +8,7 @@ export const LINEKINDS = {
   water: { name: '급수 배관', color: '#4f9cf9', layer: 'plumb', z: 'floor', w: 40 },
   drainpipe: { name: '배수 배관', color: '#38c1b0', layer: 'plumb', z: 'floor', w: 80 },
   gas: { name: '가스 배관', color: '#f28b3a', layer: 'plumb', z: 'mid', w: 30 },
+  brace: { name: '벽 보강재 (선반 · 기기 고정)', color: '#b07a3a', layer: 'plumb', z: 'mid', w: 60 },
   duct: { name: '환기 덕트', color: '#a9adb5', layer: 'ceil', z: 'above', w: 300 },
   supplyDuct: { name: '급기관', color: '#7fb3d5', layer: 'ceil', z: 'above', w: 250 },
   exhaustDuct: { name: '배기관', color: '#b0a49a', layer: 'ceil', z: 'above', w: 300 },
@@ -26,7 +27,7 @@ export const lineCat = (k) => (k.z === 'below' || (k.layer === 'plumb' && k.z ==
 export const XRN = { floor: '바닥 매립 · 배관', wall: '벽 속 전선 · 가스', ceil: '천장 속 배기 · 급기 · 전선' };
 /** 기물도 분류 (콘센트 · 수전 · 천장 설비 등) */
 export function itemCat(L) { if (!L) return null; if (L.layer === 'elec') return 'wall'; if (L.layer === 'plumb' || L.shape === 'drainpt' || L.drain === 'out') return 'floor'; if (L.layer === 'ceil' || L.layer === 'ceiling') return 'ceil'; return null; }
-export function lineZ(k, l, level) { const H = level.ceilingH || 2700, S = level.slabH || 3300; return k.z === 'above' ? (H + S) / 2 : k.z === 'mid' ? 500 : k.z === 'below' ? -(l.depth ?? 80) - k.w / 2 : k.z === 'hang' ? S - (l.off ?? 300) : k.z === 'frame' ? H + 30 : 20; }
+export function lineZ(k, l, level) { const H = level.ceilingH || 2700, S = level.slabH || 3300; return k.z === 'above' ? (H + S) / 2 : k.z === 'mid' ? (l.h ?? 500) : k.z === 'below' ? -(l.depth ?? 80) - k.w / 2 : k.z === 'hang' ? S - (l.off ?? 300) : k.z === 'frame' ? H + 30 : 20; }
 export function buildLines(level) {
   const root = new THREE.Group(); root.name = '배관 · 전선'; const mats = new Map();
   for (const l of level.lines || []) {

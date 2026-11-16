@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.12';
+export const APP_VERSION = '2.1.13';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -596,16 +596,44 @@ function varAdd(name) { varEnsure(); const used = new Set(S.model.variants.map((
 function varSwitch(id) { varEnsure(); const M = S.model; if (id === M.varId) return; const v = M.variants.find((x) => x.id === id); if (!v || !v.data) return; const cur = varCur(); cur.data = JSON.parse(JSON.stringify(level())); cur.lv = M.activeLevel;
   M.levels[v.lv] = JSON.parse(JSON.stringify(v.data)); v.data = null; M.varId = id; switchLevel(v.lv); commit(); renderProps(); toast(`${v.name}으로 바꿨어요`); }
 function varDel(id) { varEnsure(); const M = S.model; if (M.variants.length < 2) return; if (id === M.varId) { const o = M.variants.find((x) => x.id !== id); varSwitch(o.id); } M.variants = M.variants.filter((x) => x.id !== id); commit(); renderProps(); }
+/* 내 프리셋 (시방서 · 계획서) — 이 기기(localStorage)와 프로젝트(model.bizpre)에 같이 둔다 */
+const bizList = () => { const a = store.get('byr.bizpre', []) || [], m = (S.model && S.model.bizpre) || []; const out = [...a]; for (const p of m) if (!out.some((q) => q.id === p.id)) out.push(p); return out; };
+const bizSave = (list) => { store.set('byr.bizpre', list); SH.setCustomBiz(list); };
+const BIZC = [['main', '대표색'], ['hallWall', '홀 벽'], ['hallFloor', '홀 바닥'], ['hallFloor2', '홀 바닥 2'], ['kitFloor', '주방 바닥'], ['kitWall', '주방 벽'], ['counter', '카운터'], ['chair', '의자'], ['ceiling', '천장'], ['gate', '출입구']];
+async function bizFromDoc() {
+  const f = (await openFiles({ title: '시방서 · 계획서 (PDF · 이미지 · 글)', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'txt', 'md', 'csv'] }))[0]; if (!f) return;
+  const base = SH.BIZ[AUTO.kind] || SH.BIZ.pel_hall, id = uid('bz').slice(-8); let p = { id, name: f.name.replace(/\.[^.]+$/, '').slice(0, 40), base: AUTO.kind.startsWith('u_') ? (base.custom?.base || 'pel_hall') : AUTO.kind, ratio: base.ratio, pel: base.pel, colors: { ...(base.colors || {}) }, kitchen: base.kitchen.map((r) => [...r]), notes: [], doc: f.name };
+  if (cloud.aiKey && cloud.aiKey()) { toast('AI 가 문서를 읽는 중… (30초~1분)', 60000); try { const r = await cloud.readSpec(await cloud.prepFile(f.name, f.data), S.lib); p = { ...p, ...r, kitchen: r.kitchen.length ? r.kitchen : p.kitchen, colors: { ...p.colors, ...r.colors }, pel: SH.BIZ[r.base]?.pel ?? p.pel, id, doc: f.name }; toast(`"${p.name}" 프리셋을 만들었어요 · 아래에서 고칠 수 있어요`, 5000); } catch (e) { console.error(e); toast('AI 가 읽지 못해서 지금 업종을 복사했어요 · 직접 고쳐 주세요 (' + (e.message || e) + ')', 7000); } }
+  else toast('AI 키가 없어서 지금 업종을 복사했어요 · 색 · 기물을 직접 고쳐 주세요 (AI 화면에서 키를 넣으면 문서를 읽어 채워요)', 7000);
+  const list = bizList(); list.push(p); bizSave(list); AUTO.kind = 'u_' + id; AUTO.ratio = null; renderProps();
+}
+function bizEditor() {
+  const pr = SH.BIZ[AUTO.kind]; if (!pr || !pr.custom) return ''; const p = pr.custom;
+  return `<div class="sec">내 프리셋 고치기</div><label class="fld">이름<input id="bzN" value="${esc(p.name)}"></label>
+    ${p.doc ? `<p class="hint">문서: ${esc(p.doc)}</p>` : ''}${(p.notes || []).length ? `<p class="hint">${p.notes.map(esc).join('<br>')}</p>` : ''}
+    <div class="row" style="flex-wrap:wrap">${BIZC.map(([k, n]) => `<label class="fld" style="min-width:30%">${n}<input type="color" data-bzc="${k}" value="${(p.colors || {})[k] || SH.PELI[k] || '#cccccc'}"></label>`).join('')}</div>
+    <label class="chk"><input type="checkbox" id="bzPel" ${p.pel ? 'checked' : ''}> 브랜드 마감 디테일 (체크 바닥 · 붙박이 의자 · 바 테이블 · 조명)</label>
+    <label class="fld">주방 기물 (한 줄에 하나: 기물id, 폭, 깊이, 수량, hot/wash/prep/cold/store)<textarea id="bzK" rows="8" style="font:12px ui-monospace,monospace">${esc((pr.kitchen || []).map((r) => r.join(', ')).join('\n'))}</textarea></label>
+    <div class="btns"><button class="btn pri" id="bzSv">프리셋 저장</button><button class="btn" id="bzDel">프리셋 지우기</button></div>`;
+}
+function bizBind(body) {
+  const pr = SH.BIZ[AUTO.kind]; if (!pr || !pr.custom || !$('#bzSv', body)) return; const id = pr.custom.id;
+  $('#bzSv', body).onclick = () => { const list = bizList(), p = list.find((q) => q.id === id); if (!p) return; p.name = $('#bzN').value.trim() || p.name; p.pel = $('#bzPel').checked ? 1 : 0; p.ratio = AUTO.ratio ?? p.ratio; p.colors = {}; $$('[data-bzc]', body).forEach((i) => (p.colors[i.dataset.bzc] = i.value));
+    const bad = []; p.kitchen = $('#bzK').value.split('\n').map((l) => l.split(/[,\t]/).map((x) => x.trim())).filter((r) => r[0]).filter((r) => (S.lib[r[0]] ? true : (bad.push(r[0]), false))).map((r) => [r[0], +r[1] || 0, +r[2] || 0, +r[3] || 1, r[4] || 'prep']);
+    bizSave(list); if (S.model) { S.model.bizpre = list; commit(); } renderProps(); toast(bad.length ? `저장했어요 · 모르는 기물 빼고: ${bad.join(', ')}` : '프리셋을 저장했어요'); };
+  $('#bzDel', body).onclick = async () => { if (!(await ask('이 프리셋을 지울까요?', pr.name, [{ label: '취소', value: false }, { label: '지우기', value: true }]))) return; const list = bizList().filter((q) => q.id !== id); bizSave(list); if (S.model && S.model.bizpre) { S.model.bizpre = S.model.bizpre.filter((q) => q.id !== id); commit(); } AUTO.kind = 'pel_hall'; AUTO.ratio = null; renderProps(); };
+}
 const AUTO = { kind: 'pel_delivery', ratio: null, front: 'auto', clear: false, newVar: false, scope: { kitchen: 1, hall: 1, mep: 1, finish: 1 } };
 function renderAuto(body) {
-  varEnsure(); const M = S.model, pr = SH.BIZ[AUTO.kind], ratio = AUTO.ratio ?? pr.ratio, fd = SH.frontSide(level()), FN = { N: '위', S: '아래', E: '오른쪽', W: '왼쪽' };
+  SH.setCustomBiz(bizList()); if (!SH.BIZ[AUTO.kind]) AUTO.kind = 'pel_hall'; varEnsure(); const M = S.model, pr = SH.BIZ[AUTO.kind], ratio = AUTO.ratio ?? pr.ratio, fd = SH.frontSide(level()), FN = { N: '위', S: '아래', E: '오른쪽', W: '왼쪽' };
   $('#propsTitle').textContent = '자동 배치 · A안/B안';
-  body.innerHTML = `<div class="sec">업종</div><div class="chips">${Object.entries(SH.BIZ).map(([k, b]) => `<button data-bz="${k}" aria-pressed="${AUTO.kind === k}">${esc(b.name)}</button>`).join('')}</div>
+  body.innerHTML = `<div class="sec">업종</div><div class="chips">${Object.entries(SH.BIZ).map(([k, b]) => `<button data-bz="${k}" aria-pressed="${AUTO.kind === k}">${b.custom ? '★ ' : ''}${esc(b.name)}</button>`).join('')}<button id="bzDoc" title="인테리어 시방서 · 계획서를 올리면 색 · 주방 기물을 읽어 내 프리셋으로 저장해요">+ 시방서 · 계획서로 프리셋</button></div>${bizEditor()}
     <label class="fld">주방 비율 <b>${Math.round(ratio * 100)}%${ratio >= 0.95 ? ' · 배달 전용 (홀 없음)' : ''}</b><input type="range" id="auR" min="15" max="100" step="1" value="${Math.round(ratio * 100)}"></label>
     <div class="chips"><button data-rq="${pr.ratio}">기본 ${Math.round(pr.ratio * 100)}%</button><button data-rq="0.5">50%</button><button data-rq="0.7">70%</button><button data-rq="1">100% 배달 전용</button></div>
     <label class="fld">정면 (출입구 쪽, 2D 기준)<select id="auF"><option value="auto">자동${fd ? ` · 문이 있는 ${FN[fd.side]}` : ' · 아래'}</option>${Object.entries(FN).map(([k, n]) => `<option value="${k}" ${AUTO.front === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <div class="row">${num('주방 통로 폭', 'aisle', aisleOf(), 50)}</div>
     <div class="sec">넣을 것</div><div class="chips">${[['kitchen', '주방 기물'], ['hall', '홀 (카운터 · 테이블)'], ['mep', '설비 (후드 · 배수 · 가스 · 3상)'], ['finish', '마감 색']].map(([k, n]) => `<button data-sc="${k}" aria-pressed="${!!AUTO.scope[k]}">${n}</button>`).join('')}</div>
+    <label class="chk"><input type="checkbox" id="auDish" ${(AUTO.dish ?? (/hall/.test(AUTO.kind) && !/deliv/.test(AUTO.kind))) ? 'checked' : ''}> 식기세척기 넣기 (싱크 옆 · 벽에 안 붙게)</label>
     <label class="chk"><input type="checkbox" id="auClr" ${AUTO.clear ? 'checked' : ''}> 직접 놓은 기물도 모두 지우고 배치</label>
     <label class="chk"><input type="checkbox" id="auNew" ${AUTO.newVar ? 'checked' : ''}> 새 안으로 배치 (지금 안은 그대로 둠)</label>
     <div class="btns"><button class="btn pri" id="auGo">배치하기</button></div>
@@ -614,17 +642,17 @@ function renderAuto(body) {
     ${M.variants.map((v) => { const m = SH.metrics(varLevel(v), S.lib, PRICE()); return `<div class="lvrow ${v.id === M.varId ? 'on' : ''}"><button class="lvgo" data-vsw="${v.id}">${esc(v.name)}${v.id === M.varId ? ' · 지금' : ''}</button><small>기물 ${m.items} · 좌석 ${m.seats} · ${m.kw}kW</small><button class="qb" data-vren="${v.id}">이름</button>${M.variants.length > 1 ? `<button class="qb danger" data-vdel="${v.id}">지우기</button>` : ''}</div>`; }).join('')}
     <div id="vRen" hidden class="row"><input id="vRenIn" aria-label="안 이름"><button class="btn pri" id="vRenOk">바꾸기</button></div>
     <div class="btns"><button class="btn" id="vAdd">+ 지금 안 복사해서 새 안</button><button class="btn" id="vCmp" ${M.variants.length < 2 ? 'disabled' : ''}>비교하기</button></div>`;
-  $$('[data-bz]', body).forEach((b) => (b.onclick = () => { AUTO.kind = b.dataset.bz; AUTO.ratio = null; renderProps(); }));
+  $$('[data-bz]', body).forEach((b) => (b.onclick = () => { AUTO.kind = b.dataset.bz; AUTO.ratio = null; AUTO.dish = undefined; renderProps(); })); $('#bzDoc', body).onclick = bizFromDoc; bizBind(body);
   $('#auR').oninput = (e) => { AUTO.ratio = +e.target.value / 100; e.target.previousElementSibling.textContent = `${e.target.value}%${+e.target.value >= 95 ? ' · 배달 전용 (홀 없음)' : ''}`; };
   $$('[data-rq]', body).forEach((b) => (b.onclick = () => { AUTO.ratio = +b.dataset.rq; renderProps(); }));
   $('#auF').onchange = (e) => (AUTO.front = e.target.value);
   $('[data-k=aisle]', body).onchange = (e) => { S.model.aisle = clamp(Math.round(+e.target.value || 900), 400, 2000); commit(); };
   $$('[data-sc]', body).forEach((b) => (b.onclick = () => { AUTO.scope[b.dataset.sc] = AUTO.scope[b.dataset.sc] ? 0 : 1; renderProps(); }));
-  $('#auClr').onchange = (e) => (AUTO.clear = e.target.checked); $('#auNew').onchange = (e) => (AUTO.newVar = e.target.checked);
+  $('#auDish').onchange = (e) => (AUTO.dish = e.target.checked); $('#auClr').onchange = (e) => (AUTO.clear = e.target.checked); $('#auNew').onchange = (e) => (AUTO.newVar = e.target.checked);
   $('#auGo').onclick = async () => {
     if (AUTO.clear && level().items.some((it) => !it.pz) && !(await ask('기물을 모두 지우고 배치할까요?', '직접 놓은 기물도 지워져요. 되돌리기(↶)로 되돌릴 수 있어요.', [{ label: '취소', value: false }, { label: '지우고 배치', value: true, kind: 'pri' }]))) return;
     if (AUTO.newVar) varAdd(); setFocus(null);
-    const r = SH.autoLayout(level(), S.lib, { kind: AUTO.kind, ratio: AUTO.ratio ?? pr.ratio, front: AUTO.front, aisle: aisleOf(), clear: AUTO.clear, scope: AUTO.scope }, mkItem, uid);
+    const r = SH.autoLayout(level(), S.lib, { kind: AUTO.kind, ratio: AUTO.ratio ?? pr.ratio, front: AUTO.front, aisle: aisleOf(), clear: AUTO.clear, scope: AUTO.scope, _bz: AUTO.kind.startsWith('u_') && (S.model.bizpre = bizList().filter((q) => 'u_' + q.id === AUTO.kind || (S.model.bizpre || []).some((m) => m.id === q.id))), dish: AUTO.dish ?? (/hall/.test(AUTO.kind) && !/deliv/.test(AUTO.kind)) }, mkItem, uid);
     if (r.error) return toast(r.error);
     S.sel = null; engine.setLevel(level()); applyEnv(); plan.fit(); syncCeilBtn(); commit(); renderProps();
     const a = SH.analyze(level(), S.lib, aisleOf()), w = a.checks.filter((c) => c.lvl !== 'work').length;
@@ -1129,6 +1157,9 @@ function renderOpening(body, o) {
     <div class="row">${num('폭', 'w', o.w)}${num('높이', 'h', o.h)}${num('바닥에서', 'sill', o.sill)}</div>
     <div class="row">${num('벽 시작점에서 (가운데)', 't', o.t)}</div>
     <label class="tog">간유리 띠<input type="checkbox" data-k="frost" ${o.frost ? 'checked' : ''}></label>
+    <div class="sec">천 가림막</div>
+    <label class="tog">가림막 달기${/slide/.test(o.type) ? ' (미닫이는 보통 안 달아요)' : ''}<input type="checkbox" data-cu="on" ${o.curtain && o.curtain.on !== false ? 'checked' : ''}></label>
+    ${o.curtain && o.curtain.on !== false ? `<div class="row"><label class="fld">색<input type="color" data-cu="color" value="${o.curtain.color || '#c4161c'}"></label>${num('길이 (mm)', 'cuLen', o.curtain.len || 600, 50)}${num('천 장수', 'cuN', o.curtain.panels || Math.max(2, Math.round(o.w / 450)), 1)}</div>` : ''}
     <div class="sec">디자인 상세</div>
     <div class="row"><label class="fld">틀 색<input type="color" data-od="frame" value="${o.frame || '#2b2d31'}"></label>${num('틀 굵기 (mm)', 'fw', o.fw ?? 50, 5).replace('data-k=', 'data-on=')}</div>
     ${/window|full|auto|slide/.test(o.type) ? `<div class="row">${num('세로 나눔 (칸)', 'div', o.div || 1, 1).replace('data-k=', 'data-on=')}${num('가로 띠 높이 (바닥 기준, 0=없음)', 'hdiv', o.hdiv || 0, 50).replace('data-k=', 'data-on=')}</div><label class="fld">유리 색<input type="color" data-od="tint" value="${o.tint || '#bfe3f2'}"></label>` : ''}
@@ -1139,11 +1170,13 @@ function renderOpening(body, o) {
     <p class="hint">2D 에서 끌면 벽을 따라 움직여요.</p>
     <div class="btns"><button class="btn danger" data-a="del">삭제</button></div>`;
   const od = () => { engine.rebuildStructure(); commit(); };
+  $$('[data-cu]', body).forEach((i) => { if (i.dataset.cu === 'on') i.onchange = () => { o.curtain = i.checked ? { ...(o.curtain || {}), on: true, color: (o.curtain && o.curtain.color) || '#c4161c', len: (o.curtain && o.curtain.len) || (/pass/.test(o.type) ? 450 : 900) } : { ...(o.curtain || {}), on: false }; od(); renderProps(); }; else { i.oninput = () => { o.curtain.color = i.value; liveStructure(); }; i.onchange = od; } });
+  for (const [k, f] of [['cuLen', 'len'], ['cuN', 'panels']]) { const i = $(`[data-k=${k}]`, body); if (i) i.onchange = (e) => { e.stopImmediatePropagation(); o.curtain[f] = Math.max(f === 'len' ? 100 : 1, Math.round(+i.value || 0)); od(); }; }
   $$('[data-od]', body).forEach((i) => { i.oninput = () => { o[i.dataset.od] = i.value; liveStructure(); }; i.onchange = od; });
   $$('[data-on]', body).forEach((i) => (i.onchange = () => { const v = Math.max(0, Math.round(+i.value || 0)), k = i.dataset.on; o[k] = k === 'div' ? clamp(v || 1, 1, 12) : k === 'fw' ? clamp(v, 10, 200) : v; od(); }));
   $$('[data-os]', body).forEach((i) => (i.onchange = () => { o[i.dataset.os] = i.value; od(); }));
   $$('[data-ot]', body).forEach((i) => (i.onchange = () => { o[i.dataset.ot] = i.checked; od(); }));
-  $$('[data-k]', body).forEach((i) => (i.onchange = () => {
+  $$('[data-k]:not([data-k=cuLen]):not([data-k=cuN])', body).forEach((i) => (i.onchange = () => {
     const k = i.dataset.k, w = level().walls.find((q) => q.id === o.wall), L = w ? Math.hypot(w.x2 - w.x1, w.y2 - w.y1) : 1e9;
     if (k === 'type') { const d = cloud.OPDEF[i.value]; o.type = i.value; if (d) { o.h = d[1]; o.sill = d[2]; } }
     else if (k === 'frost') o.frost = i.checked ? { b: o.sill + 300, t: o.sill + Math.min(o.h - 100, 1500) } : null;

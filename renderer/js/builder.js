@@ -72,12 +72,27 @@ export function partsToMeshes(parts, scale, recolor) {
 
 /* ---------- 기물 ---------- */
 /** 기물 하나 → Group. ctx = { lib, shapes, assets(Map) } */
+/**
+ * 천 가림막 (노렌): 위 봉에 매달린 천 n 장 · 아래로 갈수록 살짝 출렁이는 굴곡 · 원점 = 봉 가운데 (아래로 h 만큼 내려옴)
+ */
+export function makeCurtain(wmm, hmm, color = '#c4161c', n = 3) {
+  const g = new THREE.Group(), W = wmm * MM, H = Math.max(0.1, hmm * MM), gap = n > 1 ? 0.014 : 0, pw = (W - gap * (n - 1)) / n;
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.92, metalness: 0, side: THREE.DoubleSide });
+  for (let i = 0; i < n; i++) {
+    const geo = new THREE.PlaneGeometry(pw, H, 12, 10), pos = geo.attributes.position;
+    for (let k = 0; k < pos.count; k++) { const x = pos.getX(k), y = pos.getY(k), f = (H / 2 - y) / H; pos.setZ(k, Math.sin((x / pw) * Math.PI * 2.5 + i * 1.3) * 0.009 * (0.35 + f) + f * f * 0.025 * (i % 2 ? 1 : -1)); }
+    geo.computeVertexNormals(); const m = new THREE.Mesh(geo, mat); m.position.set(-W / 2 + pw / 2 + i * (pw + gap), -H / 2, 0); m.castShadow = true; m.receiveShadow = true; g.add(m);
+  }
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, W + 0.06, 10), material('steel', '#b9bfc6')); rod.rotation.z = Math.PI / 2; rod.position.y = 0.012; g.add(rod);
+  return g;
+}
 export function buildItem(it, ctx) {
   const g = new THREE.Group(); g.name = it.name || it.type; g.userData.itemId = it.id;
   const L = ctx.lib[it.type], parts = it.parts || ctx.shapes[it.type];
   if (it.asset && ctx.assets.has(it.asset.key)) { // 가져온 외부 3D 에셋
     const a = ctx.assets.get(it.asset.key), o = a.object.clone(true);
     o.scale.set((it.w * MM) / a.size.x, (it.h * MM) / a.size.y, (it.d * MM) / a.size.z); g.add(o);
+  } else if (L && L.shape === 'curtain') { const c = makeCurtain(it.w, it.h, it.color || L.color, it.panels || Math.max(2, Math.round(it.w / 450))); c.position.y = it.h * MM; g.add(c); /* 천 가림막 기물 */
   } else if (parts && parts.length) {
     const pb = it.pb || (L ? { w: L.w, d: L.d, h: L.h } : { w: it.w, d: it.d, h: it.h });
     const baseColor = L ? L.color : null, baseTex = L ? MAT_TEX[L.mat] || 'plain' : null, newTex = it.mat ? MAT_TEX[it.mat] || 'plain' : null;
@@ -159,6 +174,7 @@ export function buildWalls(level) {
     if (frost.length) g.add(meshOf(frost, material('frost', '#eef2f4'), false));
     if (w.form && w.form.o && w.form.o.some((q) => q[0] || q[1] || q[2])) deformWall(g, w, len, w.h, w.t / 2); // 벽 디자인 수정 (8 모서리 끌기)
     addSheet(g, w, len, ops); // 시트지 · 벽 그림
+    for (const q of ops) if (q.o.curtain && q.o.curtain.on !== false) { const c = q.o.curtain, cw = (q.b - q.a) / MM, cl = Math.min(c.len || 600, (q.y1 - q.y0) / MM - 100), m = makeCurtain(cw, cl, c.color || '#c4161c', c.panels || Math.max(2, Math.round(cw / 450))); m.position.set((q.a + q.b) / 2, q.y1 - 0.01, 0); m.userData.curtain = true; g.add(m); } /* 천 가림막 (문 · 배식구 · 창) */
     root.add(g);
   }
   return root;
