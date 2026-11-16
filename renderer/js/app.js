@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.13';
+export const APP_VERSION = '2.1.14';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1339,6 +1339,7 @@ const DOCK = [
   { act: 'ai', g: 'more', label: 'AI', icon: '<path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4z"/><path d="M18 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>' },
   '|',
   { id: 'dkCeil', run: () => toggleCeiling(), g: 'plan', label: '천장', icon: '<path d="M3 6h18M6 6v3M12 6v3M18 6v3"/><circle cx="12" cy="13" r="2.5"/>' },
+  { run: () => present.enter(), g: 'view', label: '발표', icon: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8M10 8l4 2-4 2z"/>' },
   { run: () => startWalk(), g: 'view', label: '걷기', icon: '<circle cx="13" cy="4.5" r="1.8"/><path d="M10 21l2-6-2.5-2.5L11 8l3 2 3 1M12 15l3 6M9.5 12.5L7 14"/>' },
   { id: 'dkXr', act: 'xray', g: 'view', label: '설치물', icon: '<path d="M3 18h18M5 18v-4h14v4"/><path d="M8 14V9h8v5" stroke-dasharray="2 2"/>' },
   { id: 'dkAir', run: () => toggleAir(), g: 'check', label: '공기', icon: '<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h8"/>' },
@@ -1369,6 +1370,47 @@ function buildDock() {
 }
 function stopWalk() { engine.walker.stop(); }
 function setPlanTool(t) { if (S.pane === '3d') setPane('split'); if (t !== 'select' && t !== 'boxsel') tuck(); plan.setTool(t); setTimeout(syncModeChip); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q.dataset.tool === t))); if (t === 'measure') toast('2D 에서 잴 두 점 사이를 끌어요 · 벽 끝 · 모서리에 붙어요 · 3D 에도 보여요', 5000); }
+/* ---------- 프레젠테이션 모드 (고객 · 파트너 시연) ----------
+ * 편집 막대를 숨기고 3D 만 크게. 위: 자유 보기 · 설치물 보기 · 조명 모드 / 아래: 스타일 필터 막대 (언제든 바꿈)
+ * 나가면 재질 · 투명도 · 천장 · 조명 밝기 · 스타일 · 화면 나눔을 모두 들어오기 전으로. 모델은 바꾸지 않는다. */
+const present = {
+  on: false, mode: 'free', prev: null, op: 0.25, master: 0.2,
+  enter() {
+    if (this.on) return; if (engine.walk && engine.walk.on) engine.walk.stop?.(); if (engine.xray) setXray(null);
+    this.prev = { pane: S.pane, style: engine.style, props: S.propsOpen }; this.on = true; S.propsOpen = false; $('#props') && ($('#props').hidden = true);
+    document.body.classList.add('presenting'); setPane('3d'); this.build(); this.set('free'); toast('발표 모드 · Esc 로 나가요', 2500);
+  },
+  exit() {
+    if (!this.on) return; this.on = false; engine.setSpin(false); engine.setPresent(null); this.box && this.box.remove(); this.box = null; document.body.classList.remove('presenting');
+    const p = this.prev || {}; if (p.style && p.style !== engine.style) setStyle(p.style, true); else engine.setStyle(engine.style); setPane(p.pane || '3d'); engine.invalidate(true);
+  },
+  set(m) {
+    this.mode = m; engine.setPresent(m, { opacity: this.op, dim: this.master }); const b = this.box; if (!b) return;
+    $$('[data-pm]', b).forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.pm === m)));
+    const side = $('.pr-side', b); side.hidden = m === 'free';
+    if (m === 'mep') side.innerHTML = `<b>설치물 보기</b><p>벽 · 바닥 · 천장 속 배관 · 전선 · 후드 · 덕트 · 보강재를 진한 색으로, 마감과 가구는 반투명 회색으로 보여요. (조명 기구는 빼요)</p>
+      <label>마감 투명도 <output>${Math.round(this.op * 100)}%</output><input type="range" id="prOp" min="0" max="100" value="${Math.round(this.op * 100)}"></label>`;
+    if (m === 'light') { const L = engine.lightItems(); side.innerHTML = `<b>조명 · 디밍</b><p>천장을 열고 모든 조명을 20% 에서 시작해요. 오른쪽으로 밀면 밝아져요.</p>
+      <label class="pr-master">전체 <output>${Math.round(this.master * 100)}%</output><input type="range" id="prMa" min="0" max="150" value="${Math.round(this.master * 100)}"></label>
+      <div class="pr-dims">${L.length ? L.map((l) => `<label>${esc(l.name)} <output>${Math.round(this.master * 100)}%</output><input type="range" data-dim="${l.id}" min="0" max="150" value="${Math.round(this.master * 100)}"></label>`).join('') : '<p>놓인 조명이 없어요 · 기물 → 조명에서 매입등 · 펜던트를 놓아 보세요</p>'}</div>`; }
+    const op = $('#prOp', b); if (op) op.oninput = (e) => { this.op = +e.target.value / 100; e.target.previousElementSibling.textContent = e.target.value + '%'; engine.setPresentOpacity(this.op); engine.invalidate(false); };
+    const ma = $('#prMa', b); if (ma) ma.oninput = (e) => { this.master = +e.target.value / 100; e.target.previousElementSibling.textContent = e.target.value + '%'; $$('[data-dim]', b).forEach((d) => { d.value = e.target.value; d.previousElementSibling.textContent = e.target.value + '%'; engine.setDim(d.dataset.dim, this.master); }); engine.invalidate(true); };
+    $$('[data-dim]', b).forEach((d) => (d.oninput = (e) => { e.target.previousElementSibling.textContent = e.target.value + '%'; engine.setDim(d.dataset.dim, +e.target.value / 100); engine.invalidate(true); }));
+    engine.invalidate(true);
+  },
+  build() {
+    const b = (this.box = document.createElement('div')); b.className = 'pr-ui';
+    b.innerHTML = `<div class="pr-top"><div class="pr-modes" role="group" aria-label="보기 모드"><button data-pm="free">자유 보기</button><button data-pm="mep">설치물 보기</button><button data-pm="light">조명 모드</button></div>
+      <div class="pr-views"><button data-pv="iso" title="비스듬히">◇</button><button data-pv="top" title="위에서">□</button><button data-pv="spin" title="360° 돌려 보기">⟳</button></div><button class="pr-x" title="발표 끝내기 (Esc)">✕ 끝내기</button></div>
+      <div class="pr-side" hidden></div>
+      <div class="pr-styles" role="group" aria-label="스타일 필터">${Object.entries(STYLES).map(([k, st]) => `<button data-ps="${k}" title="${esc(st.hint)}" aria-pressed="${engine.style === k}">${esc(st.name)}</button>`).join('')}</div>`;
+    document.body.appendChild(b);
+    $$('[data-pm]', b).forEach((x) => (x.onclick = () => this.set(x.dataset.pm)));
+    $$('[data-pv]', b).forEach((x) => (x.onclick = () => { if (x.dataset.pv === 'spin') { engine.setSpin(!engine.controls.autoRotate); x.setAttribute('aria-pressed', String(engine.controls.autoRotate)); } else engine.view(x.dataset.pv); }));
+    $$('[data-ps]', b).forEach((x) => (x.onclick = () => { engine.setStyle(x.dataset.ps); $$('[data-ps]', b).forEach((y) => y.setAttribute('aria-pressed', String(y === x))); this.set(this.mode); })); /* 발표 중 스타일은 프로젝트에 저장하지 않음 */
+    $('.pr-x', b).onclick = () => this.exit();
+  },
+};
 function toggleCeiling() { const L = level(); L.ceiling ||= {}; L.ceiling.on = L.ceiling.on === false; engine.showCeiling(L.ceiling.on); syncCeilBtn(); commit(); toast(L.ceiling.on ? '천장을 보여요 · 위에서 내려다보면 투명해요' : '천장을 껐어요'); }
 function syncCeilBtn() { const b = $('#dkCeil'); if (b && level()) b.setAttribute('aria-pressed', String((level().ceiling || {}).on !== false)); }
 function startWalk() {
@@ -1402,7 +1444,7 @@ async function quitApp() {
   if (window.byr && window.byr.quit) window.byr.quit(); else if (window.Capacitor && window.Capacitor.Plugins.App) window.Capacitor.Plugins.App.exitApp(); else toast('브라우저 탭을 닫으면 돼요 · 작업은 저장돼 있어요');
 }
 /** 뒤로 가기 (안드로이드 뒤로 단추 · Esc): 열린 것부터 하나씩 닫고, 마지막엔 홈 → 종료 확인 */
-async function goBack() {
+async function goBack() { if (present.on) return present.exit();
   if (S.dlgClose) return S.dlgClose();
   if (engine.walker.active) return stopWalk();
   for (const id of ['#fileMenu', '#styleMenu']) if (!$(id).hidden) { $(id).hidden = true; return; }
@@ -1523,6 +1565,7 @@ async function boot() {
   // 안드로이드 뒤로 단추 (Capacitor App 플러그인)
   try { const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App; if (A) A.addListener('backButton', () => { goBack(); }); } catch (e) { console.warn(e); }
   window.addEventListener('keydown', (e) => {
+    if (present.on) { if (e.key === 'Escape') { e.preventDefault(); present.exit(); } else if (/^[123]$/.test(e.key)) present.set(['free', 'mep', 'light'][+e.key - 1]); if (!/^[wasd]$/i.test(e.key) || e.ctrlKey || e.metaKey) return; } /* 발표 중엔 편집 단축키 끔 */
     if (e.key === 'Escape' && (S.dlgClose || !$('#home').hidden && !S.propsOpen)) { e.preventDefault(); if (S.dlgClose) S.dlgClose(); else closeHome(); return; }
     if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (engine.design.active) { e.shiftKey ? engine.design.redo() : engine.design.undo(); return; } e.shiftKey ? redo() : undo(); }

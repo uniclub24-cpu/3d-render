@@ -12,6 +12,7 @@ import { buildItem, buildWalls, buildFloors, placeItem, levelBounds, MM , buildC
 import { Walker } from './walk.js';
 import { buildDims } from './dims.js';
 import { buildLines, itemCat } from './lines.js';
+const lumC = (c) => c.r * 0.3 + c.g * 0.59 + c.b * 0.11;
 import { AirSim } from './air.js';
 import { KitchenSim } from './sim.js';
 import { setEnvMap } from './materials.js';
@@ -264,6 +265,40 @@ export class Engine {
     this.world.traverse((o) => { if (!o.isMesh) return; o.userData.baseMat ||= o.material; if (!keep(o)) o.material = gray; });
     if (this.structure) for (const g of this.structure.getObjectsByProperty('name', '천장')) g.visible = cat === 'ceil' || g.visible;
   }
+  /* ---------- 프레젠테이션 모드: free · mep(설치물 투시) · light(조명 · 디밍) ----------
+   * 모델은 건드리지 않고 보이는 재질 · 천장 · 광원 세기만 바꾼다. 나가면 setPresent(null) 로 모두 원래대로. */
+  _isLightItem(g) { const it = this.level && this.level.items.find((q) => q.id === g.userData.itemId), L = it && this.ctx.lib[it.type]; return !!(L && (L.cat === '조명' || /^l_/.test(it.type))); }
+  _presentClear() {
+    for (const e of this._pEdges || []) { e.parent && e.parent.remove(e); e.geometry.dispose(); } this._pEdges = [];
+    if (this.presentLights) { this.presentLights = false; }
+    this.setStyle(this.style); /* 재질 · 빛 · 노출 · 후처리를 스타일 기본으로 */
+  }
+  setPresent(mode, o = {}) {
+    this._presentClear(); this.present = mode || null; const st = STYLES[this.style];
+    this.showCeiling(!this.level || !this.level.ceiling || this.level.ceiling.on !== false);
+    if (mode === 'mep') {
+      const gray = (this._pGray ||= new THREE.MeshStandardMaterial({ color: '#d0d4d9', transparent: true, opacity: 0.25, depthWrite: false, roughness: 1 })), bur = (this._pBur ||= new THREE.MeshStandardMaterial({ color: '#6e1423', roughness: 0.55, metalness: 0.1 })), edge = (this._pEdge ||= new THREE.LineBasicMaterial({ color: '#000000' }));
+      gray.opacity = o.opacity ?? gray.opacity;
+      const isMep = (m) => { for (let p = m; p; p = p.parent) { if (p.userData.xr) return true; if (p.userData.itemId) { if (this._isLightItem(p)) return false; const it = this.level.items.find((q) => q.id === p.userData.itemId), L = it && this.ctx.lib[it.type]; return !!(L && (itemCat(L) || /hood|duct|gas|drain|trench|trap|outlet|fan|aircon|ac_|brace|vent|boiler/.test(it.type))); } } return false; };
+      const list = []; this.world.traverse((m) => { if (m.isMesh) list.push(m); });
+      for (const m of list) { m.userData.baseMat ||= m.material; if (isMep(m)) { m.material = bur; const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 25), edge); e.raycast = () => {}; m.add(e); this._pEdges.push(e); } else m.material = gray; }
+      if (this.envGroup) this.envGroup.visible = false;
+    } else if (mode === 'light') {
+      this.showCeiling(false); this.presentLights = true; this.ambient.intensity = Math.min(0.04, st.ambient * 0.15); this.sun.intensity = this.opt.sunPower * st.sun * 0.05; this.scene.environmentIntensity *= 0.08; this.renderer.toneMappingExposure *= 1.1;
+      const u = this.stylePass.mat.uniforms; u.uGlow.value = Math.max(u.uGlow.value, 0.55); u.uVig.value = Math.max(u.uVig.value, 0.35); this.stylePass.enabled = true; /* 어두운 데서 빛 번짐이 보이게 */
+      for (const g of this.items.children) if (this._isLightItem(g)) this.setDim(g.userData.itemId, o.dim ?? 0.2);
+    } else if (this.envGroup) this.envGroup.visible = !this.focusPts;
+    this._limitLights(); this.renderer.shadowMap.needsUpdate = true;
+  }
+  setPresentOpacity(a) { if (this._pGray) { this._pGray.opacity = a; this._pGray.depthWrite = a > 0.95; this._pGray.transparent = a < 1; this._pGray.needsUpdate = true; } }
+  /** 조명 기물 목록 (프레젠테이션 디머용) */
+  lightItems() { return this.items.children.filter((g) => this._isLightItem(g)).map((g) => { const it = this.level.items.find((q) => q.id === g.userData.itemId); return { id: it.id, name: it.name || (this.ctx.lib[it.type] || {}).name || '조명', dim: g.userData.dim ?? 1 }; }); }
+  /** 한 조명의 밝기 (0 ~ 1.5). 광원 세기 + 전등 몸체 발광 같이 */
+  setDim(id, v) {
+    const g = this.itemGroup(id); if (!g) return; g.userData.dim = v;
+    g.traverse((o) => { if (o.userData.itemLight) o.userData.dim = v; if (o.isMesh && o.material && o.material.emissive) { const u = o.userData; if (!u.dimMat || o.material !== u.dimMat) { u.dimBase = o.material; u.dimMat = o.material.clone(); o.material = u.dimMat; } u.dimMat.emissiveIntensity = (u.dimBase.emissiveIntensity || 1) * v; if (lumC(u.dimBase.emissive) < 0.05 && v > 0) { u.dimMat.emissive.set('#ffe2bd'); u.dimMat.emissiveIntensity = 0.9 * v; } } });
+    this._limitLights();
+  }
   /** 천장 보이기 · 끄기 (모델의 level.ceiling.on 과 함께) */
   showCeiling(on) { if (this.structure) for (const g of this.structure.getObjectsByProperty('name', '천장')) g.visible = on; }
   /** 배경(상권) 다시 세우기. E = model.env */
@@ -296,8 +331,8 @@ export class Engine {
     applyStyleMaterials(this.world, name); if (this.envGroup) applyStyleMaterials(this.envGroup, name); this._applyXray();
     this.scene.background = new THREE.Color(st.bg); this.ground.material.color.set(st.ground);
     this.ambient.intensity = st.ambient; this.sun.intensity = this.opt.sunPower * st.sun;
-    this.renderer.toneMapping = name === 'real' || name === 'clay' ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping; this.renderer.toneMappingExposure = this.opt.exposure * (st.exposure || 1);
-    this.scene.environmentIntensity = name === 'real' ? 0.38 : name === 'clay' ? 0.35 : 0.25;
+    this.renderer.toneMapping = name === 'real' || name === 'clay' || st.aces ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping; this.renderer.toneMappingExposure = this.opt.exposure * (st.exposure || 1);
+    this.scene.environmentIntensity = name === 'real' ? 0.38 : name === 'clay' ? 0.35 : st.mat === 'izakaya' || st.mat === 'oriental' ? 0.06 : st.mat === 'industrial' ? 0.14 : 0.25;
     this.ssaoPass.kernelRadius = st.ssaoRadius || this.opt.ssaoRadius;
     this.stylePass.setStyle(st);
     this._useCamera(st.ortho ? this.ortho : this.persp);
@@ -331,7 +366,8 @@ export class Engine {
     const L = []; this.items.traverse((o) => { if (o.userData.itemLight) L.push(o); });
     const t = this.controls.target, p = new THREE.Vector3();
     L.sort((a, b) => a.getWorldPosition(p).distanceToSquared(t) - b.getWorldPosition(p).distanceToSquared(t));
-    const on = this.opt.itemLights && STYLES[this.style].lights; const N = QUALITY[this.qual].lights; L.forEach((o, i) => (o.visible = on && i < N));
+    const pl = this.presentLights, on = pl || (this.opt.itemLights && STYLES[this.style].lights), N = pl ? Math.max(24, QUALITY[this.qual].lights) : QUALITY[this.qual].lights, boost = STYLES[this.style].lightBoost || 1;
+    L.forEach((o, i) => { o.visible = on && i < N; o.intensity = (o.userData.bi ??= o.intensity) * boost * (pl ? (o.userData.dim ?? 1) * 3 : 1); }); /* 스타일 밝기 · 프레젠테이션 디밍 */
     this.lightInfo = { total: L.length, on: on ? Math.min(L.length, N) : 0 };
   }
 
