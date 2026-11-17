@@ -6,7 +6,7 @@ import { material } from './materials.js';
 import { MM, levelBounds } from './builder.js';
 
 export const ENVTYPES = [
-  ['basic', '기본 거리'], ['plaza', '프라자상권'], ['apt', '아파트상가'], ['main', '메인상권'], ['park', '공원 앞 상가'], ['none', '배경 없음'],
+  ['map', '지도 캡처 (AI)'], ['basic', '기본 거리'], ['plaza', '프라자상권'], ['apt', '아파트상가'], ['main', '메인상권'], ['park', '공원 앞 상가'], ['none', '배경 없음'],
 ];
 export const ENVCOL = [['bld', '주변 건물'], ['glass', '유리 · 창'], ['apt', '아파트'], ['road', '도로'], ['walk', '보도 · 바닥'], ['green', '나무 · 잔디']];
 export const ENVLV = { 5: [1, 1], 4: [0.8, 0.85], 3: [0.6, 0.7], 2: [0.42, 0.5], 1: [0.25, 0.3] };
@@ -37,6 +37,7 @@ export function buildEnv(level, E, { above = false, slabH = 3300, ceilingH = 270
   const cyl = (x, z, r, y0, y1, col, key, n = 8) => { const g = new THREE.CylinderGeometry(r * MM, r * MM, (y1 - y0) * MM, n); g.translate(x * MM, ((y0 + y1) / 2) * MM, z * MM); add(g, col, key); };
   const sph = (x, y, z, rx, ry, rz, col) => { const g = new THREE.SphereGeometry(1, 10, 7); g.scale(rx * MM, ry * MM, rz * MM); g.translate(x * MM, y * MM, z * MM); add(g, col, 'plain'); };
   const b = levelBounds(level), C = E.colors, EK = { h: E.hk ?? 1, n: E.nk ?? 1 };
+  if (type === 'map') { if (E.map) mapEnv(E.map, b, C, EK, add); return finish(root, bins); }
   if (type === 'basic') {
     box(b[0] - 20000, b[2] + 20000, -60 - 120, -40 - 120, b[1] - 20000, b[3] + 20000, '#9a9c98', 'concrete');
     box(b[0] - 20000, b[2] + 20000, -40 - 120, -20 - 120, b[1] - 9000, b[1] - 3500, '#4a4c50', 'concrete');
@@ -107,6 +108,19 @@ export function buildEnv(level, E, { above = false, slabH = 3300, ceilingH = 270
     aptRow(-D - 26000, 5, -60000, 55000); aptRow(-D - 56000, 5, -45000, 65000);
   }
   return finish(root, bins);
+}
+/** 지도 캡처를 AI 가 읽은 결과(mm, 도면 좌표) → 단순한 덩어리 건물 · 도로 · 녹지 · 나무 */
+function mapEnv(M, b, C, EK, add0) {
+  const add = (g, col, key, al) => add0(g.index ? g.toNonIndexed() : g, col, key, al);
+  const R = (M.rangeM || 200) * 1000, cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+  const slab = (x0, x1, y0, y1, h0, h1, col, key) => { const g = new THREE.BoxGeometry((x1 - x0) * MM, (h1 - h0) * MM, (y1 - y0) * MM); g.translate(((x0 + x1) / 2) * MM, ((h0 + h1) / 2) * MM, ((y0 + y1) / 2) * MM); add(g, col, key); };
+  const ext = (pts, h0, h1, col, key) => { if (!pts || pts.length < 3) return; const sh = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x * MM, -y * MM))); const g = new THREE.ExtrudeGeometry(sh, { depth: Math.max(1, h1 - h0) * MM, bevelEnabled: false }); g.rotateX(-Math.PI / 2); g.translate(0, h0 * MM, 0); add(g, col, key); };
+  slab(cx - R * 0.6, cx + R * 0.6, cy - R * 0.6, cy + R * 0.6, -80, -60, C.walk, 'tile');
+  for (const gr of M.green || []) ext(gr.p, -60, -30, C.green, 'grass');
+  for (const r of M.roads || []) { const P = r.p || [], w = Math.max(3000, r.w || 8000); for (let i = 1; i < P.length; i++) { const [x0, y0] = P[i - 1], [x1, y1] = P[i], L = Math.hypot(x1 - x0, y1 - y0); if (L < 100) continue; const g = new THREE.BoxGeometry((L + w * 0.5) * MM, 20 * MM, w * MM); g.rotateY(-Math.atan2(y1 - y0, x1 - x0)); g.translate(((x0 + x1) / 2) * MM, -50 * MM, ((y0 + y1) / 2) * MM); add(g, C.road, 'concrete'); } }
+  const hit = (pts) => { const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]); return Math.min(...xs) < b[2] + 800 && Math.max(...xs) > b[0] - 800 && Math.min(...ys) < b[3] + 800 && Math.max(...ys) > b[1] - 800; };
+  let k = 0; for (const B of M.buildings || []) { if (!B.p || B.p.length < 3 || hit(B.p)) continue; k++; if (((k * 37) % 100) / 100 >= Math.max(0.25, EK.n)) continue; const h = Math.max(3500, (B.h || 3 * 3300)) * EK.h; ext(B.p, -30, h, B.apt ? C.apt : ['#cfd3d8', '#c9c3b8', '#d8d2c6', '#b9c0c7'][k % 4] === '#cfd3d8' ? C.bld : ['#cfd3d8', '#c9c3b8', '#d8d2c6', '#b9c0c7'][k % 4], 'concrete'); }
+  for (const [x, y] of M.trees || []) { const t = new THREE.CylinderGeometry(0.12, 0.16, 2.2, 6); t.translate(x * MM, 1.1, y * MM); add(t, '#6b5040', 'wood'); const c = new THREE.SphereGeometry(1, 9, 6); c.scale(1.6, 1.9, 1.6); c.translate(x * MM, 3.4, y * MM); add(c, C.green, 'plain'); }
 }
 function finish(root, bins) {
   for (const { key, col, al, g } of bins.values()) { const m = new THREE.Mesh(mergeGeometries(g), material(key, col, al)); m.receiveShadow = true; m.castShadow = !(al < 1); root.add(m); g.forEach((x) => x.dispose()); }

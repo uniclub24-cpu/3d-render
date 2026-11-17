@@ -237,6 +237,7 @@ button { cursor: pointer; }
 #toast { bottom: calc(158px + env(safe-area-inset-bottom, 0px)); z-index: 40; }
 @media (max-width: 520px) { #topbar #btnUndo, #topbar #btnRedo { min-width: 36px; padding: 0 4px; } #modeChip { font-size: 11px; padding: 3px 10px; top: calc(80px + env(safe-area-inset-top, 0px)); } }
 #modeChip { min-height: 0; height: auto; line-height: 1.4; }
+#styleMenu .qlab { font-size: 11px; font-weight: 600; color: var(--muted); padding: 6px 6px 0; } #styleMenu .qlab small { font-weight: 400; opacity: .8; margin-left: 4px; }
 #styleMenu .qrow { display: flex; gap: 4px; padding: 4px 4px 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 #styleMenu .qrow button { flex: 1; min-height: 34px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--fg); font-size: 12px; padding: 0 6px; }
 #styleMenu .qrow button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
@@ -329,3 +330,74 @@ body.presenting #stage { inset: 0 !important; }
 .kres { white-space: pre-wrap; margin-top: 8px; padding: 9px 11px; border-radius: 10px; font-size: 12.5px; line-height: 1.5; background: rgba(255,255,255,.06); }
 .kres.ok { background: rgba(40,170,90,.18); }
 .kres.bad { background: rgba(215,0,21,.16); }
+
+/* ===== 가로 모드: 손잡이 서랍 (화면 설정에서 고름) ===== */
+#dockHandle { display: none; }
+body.uih #dock { transition: transform .26s cubic-bezier(.2,.8,.2,1); }
+body.uih #dockHandle { display: flex; position: absolute; align-items: center; justify-content: center; pointer-events: auto; background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(14px); color: var(--muted); padding: 0; z-index: 2; }
+body.uih #dockHandle span { display: block; background: currentColor; border-radius: 3px; opacity: .7; }
+body.uih-left #dock { left: 0; right: auto; top: calc(8px + env(safe-area-inset-top, 0px)); bottom: calc(8px + env(safe-area-inset-bottom, 0px)); padding-left: calc(6px + env(safe-area-inset-left, 0px)); flex-direction: row-reverse; align-items: center; gap: 6px; transform: translateX(-100%); }
+body.uih-left #dockIn, body.uih-left #dockTabs { flex-direction: column; max-height: 100%; overflow-y: auto; overflow-x: hidden; -webkit-mask-image: none; mask-image: none; }
+body.uih-left #dockTabs .dg { flex-direction: column; padding: 6px 4px; min-height: 46px; }
+body.uih-left .dsep { width: 70%; height: 1px; }
+body.uih-left #dockHandle { right: -26px; top: 50%; width: 22px; height: 76px; transform: translateY(-50%); border-left: 0; border-radius: 0 13px 13px 0; }
+body.uih-left #dockHandle span { width: 4px; height: 30px; }
+body.uih-bottom #dock { bottom: 0; padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); transform: translateY(100%); }
+body.uih-bottom #dockHandle { top: -26px; left: 50%; width: 84px; height: 22px; transform: translateX(-50%); border-bottom: 0; border-radius: 13px 13px 0 0; }
+body.uih-bottom #dockHandle span { width: 34px; height: 4px; }
+body.uih.dock-open #dock { transform: none; }
+body.uih.dock-open #dockHandle { color: var(--accent); }
+/* 상단 바 최소: 홈 + 이름만, 띠 배경 없이. 이름을 누르면 전체가 서랍처럼 열린다 */
+body.topmini #topbar:not(.open) { background: transparent; border-color: transparent; backdrop-filter: none; right: auto; height: 44px; gap: 6px; }
+body.topmini #topbar:not(.open) > :not(#btnHome):not(.title) { display: none !important; }
+body.topmini #topbar:not(.open) #btnHome, body.topmini #topbar:not(.open) .title { background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(14px); border-radius: 14px; min-height: 40px; }
+body.topmini #topbar .title { cursor: pointer; padding: 3px 12px; }
+body.topmini #topbar:not(.open) .title::after { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); content: '▾'; font-size: 10px; color: var(--muted); margin-left: 2px; }
+body.topmini #topbar.open { animation: tbdrop .2s ease-out; }
+@keyframes tbdrop { from { transform: translateY(-12px); opacity: 0; } }
+body.topmini #modeChip { top: calc(60px + env(safe-area-inset-top, 0px)); }
+/* 화면 설정 패널 */
+.seg2 { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.seg2 button { flex: 1 1 auto; min-height: 34px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--fg); font-size: 12.5px; padding: 0 8px; }
+.seg2 button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.uih4 { margin: 14px 0 6px; font-size: 13px; } .uih4 small { font-weight: 400; color: var(--muted); margin-left: 4px; }
+.uigrp { border: 1px solid var(--line); border-radius: 12px; padding: 6px 8px; margin-bottom: 8px; } .uigrp > b { font-size: 12px; color: var(--muted); }
+.uirow { display: flex; align-items: center; gap: 4px; min-height: 36px; } .uirow label { flex: 1; display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.uirow svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.uirow .ib.sm { min-width: 30px; min-height: 30px; padding: 0; font-size: 14px; }
+/* 발표 · 조명 판: 휴대폰(좁거나 낮은 화면)에서는 아래 시트. 접힘 = 전체 + 무리 칩 하나씩, 손잡이로 펼치면 전부 */
+.pr-grab, .pr-chips, .pr-one { display: none; }
+@media (max-width: 640px), (max-height: 600px) {
+  .pr-side { top: auto !important; left: 0; right: 0 !important; width: auto !important; bottom: calc(58px + env(safe-area-inset-bottom, 0px)) !important; max-height: 30vh; border-radius: 16px 16px 0 0; padding: 4px max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px)); }
+  .pr-side:not(.full) { max-height: none; overflow: visible; }
+  .pr-side.full { max-height: 62vh; }
+  .pr-side:not(.full) > b { display: none; }
+  .pr-side .pr-one { margin: 2px 0 0; }
+  .pr-side .pr-grab { display: flex; justify-content: center; width: 100%; background: none; border: 0; padding: 4px 0 6px; }
+  .pr-side .pr-grab span { width: 40px; height: 4px; border-radius: 3px; background: rgba(255,255,255,.4); }
+  .pr-side > p { display: none; }
+  .pr-side:not(.full) .pr-dims { display: none; }
+  .pr-side:not(.full) .pr-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px 0 4px; }
+  .pr-side:not(.full) .pr-one { display: grid; }
+  .pr-chips button { flex: none; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); background: transparent; color: #e8ecf2; padding: 5px 11px; font-size: 12px; }
+  .pr-chips button i { font-style: normal; opacity: .7; margin-left: 2px; }
+  .pr-chips button[aria-pressed="true"] { background: #ffb547; color: #1a1206; border-color: transparent; }
+  .pr-side .pr-master { margin: 2px 0 6px; padding-bottom: 6px; }
+  .pr-styles { max-width: calc(100vw - 16px); overflow-x: auto; }
+}
+@media (orientation: landscape) and (max-height: 600px) {
+  .pr-side { left: auto !important; width: min(440px, 52vw) !important; border-radius: 16px 0 0 0; }
+  .pr-side.full { max-height: calc(100vh - 140px); }
+}
+/* 가로로 눕힌 휴대폰: 속성 카드는 오른쪽 세로 판 (높이를 다 쓴다) */
+@media (orientation: landscape) and (max-height: 600px) {
+  .card { left: auto !important; top: calc(8px + env(safe-area-inset-top, 0px)) !important; bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important; right: calc(84px + env(safe-area-inset-right, 0px)) !important; width: min(340px, 46vw) !important; max-height: none !important; border-radius: var(--r) !important; }
+}
+body.topmini #topbar:not(.open) .title::after { position: absolute; right: 6px; bottom: 4px; }
+body.topmini #topbar .title { position: relative; padding-right: 18px; }
+/* 기물을 끌고 있는 동안 서랍은 비켜 준다 (아래 화면에 놓을 수 있게) */
+body.catdrag #drawer { opacity: .25; pointer-events: none; transition: opacity .15s; }
+.mapbox { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); cursor: crosshair; }
+.mapbox img { display: block; width: 100%; }
+.mapbox .mcrop { position: absolute; border: 2px solid #3d7bff; background: rgba(61,123,255,.08); pointer-events: none; }
+.mapbox .mpin { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #ff3b30; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); pointer-events: none; }

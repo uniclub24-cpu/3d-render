@@ -89,7 +89,7 @@ async function doSync() {
       seen.add(rec.id); if (rec.owner && rec.owner !== uid) continue; /* 다른 계정 작업은 이 계정에 섞지 않음 */ const r = idx[rec.id];
       const edited = rec.dirty ?? rec.updated > (rec.synced || 0);              // 마지막 동기화 뒤 이 기기에서 고쳤나
       const changed = !!r && (r.deleted || r.updated !== rec.synced);          // 마지막 동기화 뒤 계정 쪽이 바뀌었나 (시계가 달라도 안전하게 "같은지"로 본다)
-      const up = async () => { let g; try { g = await putProject(rec.id, rec.data); } catch (e) { res.err.push(`${rec.name}: ${e.message || e}`); return; } idx[rec.id] = { name: rec.name, updated: rec.updated, ...(g ? { gz: true } : {}) }; idxDirty = true; res.up++;
+      const up = async () => { let g; try { g = await putProject(rec.id, rec.data); } catch (e) { res.err.push(`${rec.name}: ${/bucket not found/i.test(String(e.message || e)) ? '저장 공간(models 버킷)이 없어요' : e.message || e}`); return; } idx[rec.id] = { name: rec.name, updated: rec.updated, ...(g ? { gz: true } : {}) }; idxDirty = true; res.up++;
         /* 목록(_index)까지 올라간 뒤에 "올림" 확정 · 올리는 사이 새로 고친 내용은 덮지 않고 dirty 로 둔다 */
         done.push(async () => { const cur = await getRec(rec.id); if (!cur) return; await putRec({ ...cur, owner: uid, synced: rec.updated, dirty: cur.updated !== rec.updated }); }); };
       if (rec.deleted) { // 이 기기에서 지움
@@ -118,7 +118,7 @@ async function doSync() {
     for (const f of done) await f();
     ls.set('byr.syncAt', Date.now());
     status(res.err.length ? `일부 못 올림 · ${res.err[0]}` : `동기화됨 · ${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`);
-  } catch (e) { console.warn('[sync]', e); status('동기화 실패 · ' + (e.message || e)); throw e; }
+  } catch (e) { console.warn('[sync]', e); const m = String(e.message || e); status(/bucket not found/i.test(m) ? '동기화 실패 · 서버에 저장 공간(models 버킷)이 없어요 — 관리자가 Supabase Storage 에 models 버킷을 만들어야 해요' : /row-level security|unauthorized|403/i.test(m) ? '동기화 실패 · 저장 공간 권한(정책)이 없어요 — models 버킷 정책을 확인해 주세요' : '동기화 실패 · ' + m); throw e; }
   return res;
 }
 export const lastSync = () => ls.get('byr.syncAt', 0);

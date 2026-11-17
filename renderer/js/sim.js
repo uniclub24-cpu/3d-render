@@ -3,6 +3,7 @@
 // model.sim = { actors: [{ id, name, role, color, plan: ['fridge', 'work', …] }], walkers: [{ id, name, sex: 'm'|'f', color, path: [[x,y]…], mode: 'pingpong'|'loop', speed }] }
 // 사람 기준: 벽 · 기물은 통과하지 않고(길이 없으면 멈춤), 서로 마주치면 비켜 가거나 잠깐 기다렸다 다시 길을 찾는다.
 import * as THREE from 'three';
+import { figKind, realPerson, cutePerson } from './figures.js';
 import { pointInPoly, polyEdgeDist } from './slope.js';
 const MM = 0.001;
 export const FAM = { fridge: /^(fridge|freezer|tfridge|showcase)/, work: /^work/, fryer: /^fryer/, range: /^(range|griddle|oven)/, sink: /^(sink|handsink)/, dish: /^dishwasher/, rack: /^(rack|shelf|holding)/, counter: /^(counter|pos)/ };
@@ -107,7 +108,10 @@ export class KitchenSim {
   }
   buildMeshes() {
     for (const c of [...this.root.children]) { this.root.remove(c); c.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
-    this.root.position.y = (this.e.level.elev || 0) * MM; this.figs = this.all().map((A) => {
+    this.root.position.y = (this.e.level.elev || 0) * MM; const fk = figKind(this.e.style); this.figKind = fk; this.figs = this.all().map((A, idx) => {
+      if (fk) { /* 스타일에 맞는 사람 모양 (실사 · 귀여운) */ const o = A.walker ? { sex: A.w.sex, shirt: A.w.color, top: A.w.color, seed: idx, kind: A.w.sex === 'f' ? 'girl' : idx % 2 ? 'kid' : 'boy' } : { sex: idx % 2 ? 'f' : 'm', chef: true, seed: idx };
+        const F = fk === 'real' ? realPerson(o) : cutePerson(o); this.root.add(F.g);
+        const line = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: A.walker ? A.w.color : A.a.color, dashSize: 0.15, gapSize: 0.1, depthTest: false, transparent: true, opacity: 0.6 })); line.renderOrder = 990; this.root.add(line); return { g: F.g, line, anim: F.anim }; }
       if (A.walker) return this.person(A); const g = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: A.a.color, roughness: 0.6 }), skin = new THREE.MeshStandardMaterial({ color: '#f1d3b5', roughness: 0.8 });
       const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 0.75, 4, 10), mat); body.position.y = 0.6; const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 10), skin); head.position.y = 1.33;
       const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.08, 14), new THREE.MeshStandardMaterial({ color: '#ffffff' })); cap.position.y = 1.45; const nose = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.06), mat); nose.position.set(0.15, 1.0, 0);
@@ -128,7 +132,7 @@ export class KitchenSim {
   }
   draw() {
     if (!this.figs) return; const m4 = new THREE.Matrix4(), c = new THREE.Color();
-    this.all().forEach((A, i) => { const f = this.figs[i]; if (!f) return; const bob = A.wait > 0 ? 0 : Math.abs(Math.sin(A.ph)) * 0.03; f.g.position.set(A.pos[0] * MM, bob, A.pos[1] * MM); if (A.dir != null) f.g.rotation.y = -A.dir;
+    this.all().forEach((A, i) => { const f = this.figs[i]; if (!f) return; const moving = !(A.wait > 0) && !A.stuck, bob = f.anim || !moving ? 0 : Math.abs(Math.sin(A.ph)) * 0.03; f.g.position.set(A.pos[0] * MM, bob, A.pos[1] * MM); if (f.anim) f.anim(A.ph, moving); if (A.dir != null) f.g.rotation.y = -A.dir;
       const pts = A.path ? [A.pos, ...A.path.slice(A.pi)].map((p) => new THREE.Vector3(p[0] * MM, 0.05, p[1] * MM)) : []; f.line.geometry.dispose(); f.line.geometry = new THREE.BufferGeometry().setFromPoints(pts); if (pts.length > 1) f.line.computeLineDistances(); });
     let n = 0, mx = 0; if (this.heatOn) { for (const v of this.heat.values()) mx = Math.max(mx, v); for (const [k, v] of this.heat) { if (n >= 4000) break; const [i, j] = k.split(',').map(Number), t = v / (mx || 1); m4.makeTranslation(i * 0.3, 0.02, j * 0.3); this.heatMesh.setMatrixAt(n, m4); c.setHSL(0.6 - 0.6 * t, 0.85, 0.5); this.heatMesh.setColorAt(n, c); n++; } }
     this.heatMesh.count = n; this.heatMesh.instanceMatrix.needsUpdate = true; if (this.heatMesh.instanceColor) this.heatMesh.instanceColor.needsUpdate = true;

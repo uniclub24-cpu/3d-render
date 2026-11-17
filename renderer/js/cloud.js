@@ -177,6 +177,24 @@ Rules:
   return { walls, openings, height: +res.wall_height_mm || null, widthMm: Math.round(W) };
 }
 
+/** 지도 캡처(위성 · 일반 지도, 북쪽이 위) → 주변 건물 · 도로 · 녹지 · 나무. 좌표는 그림 가로/세로 0..1, 가게 자리는 (sx, sy) */
+export async function readMap(file, { sx = 0.5, sy = 0.5, detail = 'mid', maxTokens = 6000 } = {}) {
+  const lim = { low: [25, 6, 30], mid: [60, 12, 80], high: [120, 20, 160] }[detail] || [60, 12, 80];
+  const prompt = `This is a top-down map capture (satellite or street map, north is up). Our store is at x=${sx.toFixed(3)}, y=${sy.toFixed(3)}. Build a SIMPLE 3D context massing. Answer JSON only, exactly in this shape:
+{"buildings":[{"p":[[0,0],[0,0],[0,0],[0,0]],"floors":3,"apt":false}],
+ "roads":[{"p":[[0,0],[0,0]],"lanes":2}],
+ "green":[{"p":[[0,0],[0,0],[0,0]]}],
+ "trees":[[0,0]]}
+All coordinates are fractions 0..1 of the image width (x) and height (y), origin top-left.
+Rules:
+- buildings: footprint as a simple polygon (4-8 points, clockwise), at most ${lim[0]}, biggest and closest to the store first. floors = your estimate from shadows / labels / type (houses 2-3, shops 3-5, apartments 10-25; apt=true for apartment towers). Skip the building that contains the store point.
+- roads: centre lines as polylines (2-6 points), at most ${lim[1]}; lanes = total lanes (alley 1, street 2, main road 4-8).
+- green: parks / lawns / planted areas, at most ${Math.round(lim[1] / 2)} polygons.
+- trees: individual street trees or tree clusters, at most ${lim[2]}.
+- Ignore text labels, icons, markers, the UI and the copyright line. Keep shapes simple (massing only).`;
+  return ask(prompt, file, maxTokens);
+}
+
 /** 벽 하나를 정면으로 찍은 사진 → 기물 · 문/창 (기존 앱 "사진 4면 AI 인식" 지시문을 벽 하나 기준으로) */
 export const AI_TYPES = ['fridge45', 'fridge25', 'tfridge', 'work', 'work2', 'sink1', 'sink2', 'fryer1', 'fryer2', 'fryer4', 'range', 'range3', 'dishwasher', 'icemaker', 'holding', 'rack', 'tank', 'hood', 'shelf', 'uppercab', 'showcase', 't2', 't4', 't6', 'tround', 'tbar', 'counter', 'chair', 'stool', 'barchair', 'bench', 'banquette', 'lounge', 'column', 'partition', 'glasspart', 'tv', 'ac_wall', 'ac_cassette', 'ac_stand', 'wallvent', 'pendant', 'frame', 'monstera', 'olive', 'planterbox', 'panel'];
 export async function readPhoto(file, wallLen, lib) {

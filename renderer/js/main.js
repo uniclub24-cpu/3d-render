@@ -12,6 +12,7 @@ import { buildItem, buildWalls, buildFloors, placeItem, levelBounds, MM , buildC
 import { Walker } from './walk.js';
 import { buildDims } from './dims.js';
 import { buildLines, itemCat } from './lines.js';
+import { figKind } from './figures.js';
 const lumC = (c) => c.r * 0.3 + c.g * 0.59 + c.b * 0.11;
 import { AirSim } from './air.js';
 import { KitchenSim } from './sim.js';
@@ -28,6 +29,13 @@ export const QUALITY = {
   normal: { name: '보통', pr: 1.5, ssao: 'rest', shadow: 2048, soft: true, lights: 20 },
   high: { name: '고급 (보여 주기)', pr: 2, ssao: true, shadow: 4096, soft: true, lights: 40 },
 };
+/* 해상도: idle = 멈췄을 때 화면 배율 · move = 움직이는 동안 (빠르게 돌릴 땐 거칠게, 멈추면 또렷하게). 최고는 화면보다 크게 그려 줄여 보인다 */
+export const RES = {
+  low: { name: '낮음', idle: 0.75, move: 0.5 },
+  normal: { name: '보통', idle: 1.25, move: 0.75 },
+  high: { name: '높음', idle: 2, move: 1 },
+  max: { name: '최고', idle: 3, move: 1, sup: true },
+};
 
 export class Engine {
   constructor(canvas, ctx) {
@@ -39,7 +47,8 @@ export class Engine {
     /* ----- 렌더러 ----- */
     const r = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: false }));
     this.qual = QUALITY[(() => { try { return JSON.parse(localStorage.getItem('byr.quality')); } catch { return null; } })()] ? (() => { try { return JSON.parse(localStorage.getItem('byr.quality')); } catch { return 'normal'; } })() : matchMedia('(pointer: coarse)').matches ? 'fast' : 'normal';
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, QUALITY[this.qual].pr));
+    this.res = (() => { try { const v = localStorage.getItem('byr.res'); return RES[v] ? v : null; } catch { return null; } })() || (matchMedia('(pointer: coarse)').matches ? 'normal' : 'high');
+    r.setPixelRatio(this._pr(false));
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = this.opt.exposure;
     r.shadowMap.enabled = true; r.shadowMap.type = QUALITY[this.qual].soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap; r.shadowMap.autoUpdate = false; /* 그림자는 장면이 바뀔 때만 다시 그린다 (시점만 돌릴 때는 그대로) */
@@ -107,7 +116,7 @@ export class Engine {
     new ResizeObserver(() => this.resize()).observe(canvas);
     /* 필요할 때만 그리기: 엔진 함수가 불리거나(장면 바뀜) 시점이 움직이거나 움직이는 것(공기 · 동선 · 걷기 …)이 있을 때만 */
     this._need = 2; this._moveT = 0; this._lastR = 0;
-    const skip = new Set(['constructor', '_frame', 'getView', 'centerOnFloor', 'snapshot', 'snapshotAt', 'invalidate', 'pick', '_pickAt']);
+    const skip = new Set(['constructor', '_frame', 'getView', 'centerOnFloor', 'snapshot', 'snapshotAt', 'invalidate', 'pick', '_pickAt', '_pr', 'floorAt']);
     for (const k of Object.getOwnPropertyNames(Engine.prototype)) { const d = Object.getOwnPropertyDescriptor(Engine.prototype, k); if (skip.has(k) || !d || typeof d.value !== 'function') continue; const f = d.value; this[k] = (...a) => { const out = f.apply(this, a); this.invalidate(true); return out; }; }
     this.controls.addEventListener('change', () => { this._need = Math.max(this._need, 1); this._moveT = performance.now(); this._lightsFollow(); });
     for (const ev of ['pointerdown', 'pointermove', 'wheel', 'pointerup']) canvas.addEventListener(ev, () => (this._need = Math.max(this._need, 1)), { passive: true });
@@ -127,16 +136,23 @@ export class Engine {
   invalidate(scene = true) { this._need = 2; if (scene && this.renderer) this.renderer.shadowMap.needsUpdate = true; }
   setQuality(q) {
     if (!QUALITY[q]) return; this.qual = q; const Q = QUALITY[q], r = this.renderer; try { localStorage.setItem('byr.quality', JSON.stringify(q)); } catch {}
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, Q.pr)); r.shadowMap.type = Q.soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    r.shadowMap.type = Q.soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     if (this.sun.shadow.mapSize.x !== Q.shadow) { this.sun.shadow.mapSize.set(Q.shadow, Q.shadow); if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; } }
     this.scene.traverse((o) => { if (o.material) for (const m of [].concat(o.material)) m.needsUpdate = true; }); /* 그림자 방식이 바뀌면 재질을 한 번 다시 만든다 */
     this.resize(); this._limitLights(); this.invalidate(true);
   }
 
+  /** 해상도 배율 — moving 이면 가볍게 */
+  _pr(moving) {
+    const R = RES[this.res] || RES.normal, d = window.devicePixelRatio || 1;
+    const idle = R.sup ? Math.min(3, Math.max(d * 1.5, 2)) : Math.min(d, R.idle); return Math.round((moving ? Math.min(idle, R.move * Math.max(1, d / 1.5)) : idle) * 100) / 100;
+  }
+  setRes(v) { if (!RES[v]) return; this.res = v; try { localStorage.setItem('byr.res', v); } catch {} this.renderer.setPixelRatio(this._pr(false)); this.resize(); this.invalidate(false); }
+
   /* ---------- 크기 · 그리기 ---------- */
   resize() {
     const el = this.canvas; if (!el.clientWidth) return; const w = Math.max(2, el.clientWidth), h = Math.max(2, el.clientHeight), pr = this.renderer.getPixelRatio();
-    this.renderer.setSize(w, h, false); this.composer.setSize(w, h); this.ssaoPass.setSize(w * pr, h * pr); this.stylePass.setSize(w * pr, h * pr);
+    this.renderer.setSize(w, h, false); this.composer.setPixelRatio && this.composer.setPixelRatio(pr); this.composer.setSize(w, h); this.ssaoPass.setSize(w * pr, h * pr); this.stylePass.setSize(w * pr, h * pr);
     this.fxaaPass.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
     this.persp.aspect = w / h; this.persp.updateProjectionMatrix(); this.aspect = w / h; this._fitOrtho(); this._applyShift();
   }
@@ -154,6 +170,7 @@ export class Engine {
     const moving = anim || now - this._moveT < 220;
     if (!anim && !this._need && !(this._wasMoving && !moving) && now - this._lastR < 2000) return; /* 아무것도 안 바뀌면 그리지 않음 (멈춘 화면은 GPU 를 쉬게) */
     if (this._need > 0) this._need--; this._wasMoving = moving; this._lastR = now;
+    { const pr = this._pr(!this._fixPr && (now - this._moveT < 220 || !!this._fly || !!this.dragging)); if (Math.abs(pr - this.renderer.getPixelRatio()) > 0.01) { this.renderer.setPixelRatio(pr); this.resize(); } } /* 움직일 땐 낮은 해상도, 멈추면 정한 해상도로 다시 */
     if (this.selBox.visible) this.selBox.update();
     const Q = QUALITY[this.qual]; /* 움직이는 동안에는 짙은 그림자(SSAO)를 끄고, 멈추면 한 번 곱게 다시 그린다 */
     this.ssaoPass.enabled = this.opt.ssao && STYLES[this.style].ssao && !this.camera.isOrthographicCamera && (Q.ssao === true || (Q.ssao === 'rest' && !moving)); this.fxaaPass.enabled = this.opt.fxaa;
@@ -362,6 +379,7 @@ export class Engine {
     this.stylePass.setStyle(st);
     this._useCamera(st.ortho ? this.ortho : this.persp);
     this._limitLights();
+    if (this.sim && this.sim.figs && this.sim.figKind !== figKind(name)) this.sim.buildMeshes(); /* 스타일에 맞는 사람 모양으로 */
   }
   /** 원근 ↔ 정투영 카메라를 같은 시점으로 바꿔 끼운다 */
   _useCamera(cam) {
@@ -423,6 +441,8 @@ export class Engine {
     if (g) { this.selBox.setFromObject(g); this.selBox.visible = true; } else this.selBox.visible = false;
     this.onSelect(this.selId);
   }
+  /** 화면 좌표 → 바닥(높이 mm) 위 점 (mm) · 못 맞추면 null */
+  floorAt(e, hMm = 0) { const p = new THREE.Vector3(); return this._ray(e).ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -hMm * MM), p) ? { x: Math.round(p.x / MM / 10) * 10, y: Math.round(p.z / MM / 10) * 10 } : null; }
   _ray(e) {
     const r = this.canvas.getBoundingClientRect(), ray = (this._rc ||= new THREE.Raycaster());
     ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera); return ray;

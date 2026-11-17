@@ -1,5 +1,5 @@
 // 앱 상태 · 파일 관리(기존 데이터 가져오기 포함) · 태블릿 UI 연결
-import { Engine, QUALITY } from './main.js';
+import { Engine, QUALITY, RES as RESV } from './main.js';
 import { findLegacyProjects, convertLegacy, isNextProject, emptyProject, reportText, defaultLight, FORMAT, migrate } from './legacy.js';
 import { loadAsset, exportGLB, exportOBJ, openFiles, saveFile, extOf, ASSET_EXT, RES_EXT, bytesToB64, b64ToBytes } from './io.js';
 import { MAT_LABEL } from './materials.js';
@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.23';
+export const APP_VERSION = '2.1.24';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -111,7 +111,7 @@ function setStyle(name, fromModel) {
 const SPEEDS = [[0.6, '이동 느리게'], [1, '이동 보통'], [1.5, '이동 빠르게']];
 function setMoveSpeed(k) { engine.setMoveSpeed(k); plan.moveK = k; try { localStorage.setItem('byr.speed', String(k)); } catch {} }
 function renderStyleMenu(name = engine.style) {
-  $('#styleMenu').innerHTML = `<div class="qrow" role="group" aria-label="화질">${Object.entries(QUALITY).map(([k, q]) => `<button data-qual="${k}" aria-pressed="${engine.qual === k}">${q.name}</button>`).join('')}</div><div class="qrow" role="group" aria-label="이동 속도">${SPEEDS.map(([v, n]) => `<button data-spd="${v}" aria-pressed="${Math.abs((engine.moveK || 1) - v) < 0.01}">${n}</button>`).join('')}</div>`
+  $('#styleMenu').innerHTML = `<div class="qlab">해상도 <small>움직일 땐 가볍게 · 멈추면 또렷하게</small></div><div class="qrow" role="group" aria-label="해상도">${Object.entries(RESV).map(([k, q]) => `<button data-res="${k}" aria-pressed="${engine.res === k}">${q.name}</button>`).join('')}</div><div class="qlab">효과</div><div class="qrow" role="group" aria-label="화질">${Object.entries(QUALITY).map(([k, q]) => `<button data-qual="${k}" aria-pressed="${engine.qual === k}">${q.name}</button>`).join('')}</div><div class="qrow" role="group" aria-label="이동 속도">${SPEEDS.map(([v, n]) => `<button data-spd="${v}" aria-pressed="${Math.abs((engine.moveK || 1) - v) < 0.01}">${n}</button>`).join('')}</div>`
     + Object.entries(STYLES).map(([k, st]) => `<button role="menuitemradio" aria-checked="${k === name}" data-style="${k}"><b>${st.name}</b><small>${st.hint}</small></button>`).join('');
 }
 
@@ -186,6 +186,7 @@ const ACT = {
   view: () => { S.panel = 'view'; S.propsOpen = true; renderProps(); },
   keys: () => showKeys(),
   hist: () => { S.panel = 'hist'; S.propsOpen = true; renderProps(); },
+  uiset: () => { S.panel = 'uiset'; S.propsOpen = true; renderProps(); },
   lang: () => { setLang(lang() === 'en' ? 'ko' : 'en'); renderProps(); if (!$('#home').hidden) renderHome(); toast(lang() === 'en' ? 'English screen (names in your project stay as they are)' : '한국어 화면으로 바꿨어요'); },
   sketch: () => setPlanTool('sketch'),
   cmt: () => { S.panel = 'cmt'; S.propsOpen = true; renderProps(); },
@@ -220,8 +221,8 @@ const ACT = {
 };
 
 /* ---------- 기물 추가 · 수정 ---------- */
-function addFromCatalog(id) {
-  const L = S.lib[id]; if (!L) return; const lv = level(), c = engine.centerOnFloor();
+function addFromCatalog(id, at) {
+  const L = S.lib[id]; if (!L) return; const lv = level(), c = at || engine.centerOnFloor();
   const elev = L.elev != null ? L.elev : L.layer === 'ceil' || L.layer === 'ceiling' ? lv.ceilingH - L.h : 0;
   const it = { id: uid('i'), type: id, name: L.name, x: c.x, y: c.y, elev, rot: 0, w: L.w, d: L.d, h: L.h, color: null, mat: null, parts: L.parts ? JSON.parse(JSON.stringify(L.parts)) : null, ...(L.parts ? { pb: { w: L.w, d: L.d, h: L.h } } : {}), light: L.light ? defaultLight(L) : null, kw: L.kw };
   lv.items.push(it); engine.rebuildItem(it); engine.select(it.id); commit(); closeDrawer(); setMode('move'); toast(`${L.name} 을 놓았어요 · 끌어서 자리를 잡으세요`);
@@ -247,6 +248,7 @@ function renderProps() {
   if (S.panel === 'cmp') return renderCmp(body);
   if (S.panel === 'view') return renderView(body);
   if (S.panel === 'hist') return renderHist(body);
+  if (S.panel === 'uiset') return renderUiSet(body);
   if (S.panel === 'cmt') return renderCmt(body);
   if (S.panel === 'multi' && (S.multi || []).length) return renderMulti(body);
   if (S.panel === 'dxf') return renderDxf(body);
@@ -1021,7 +1023,8 @@ function renderBg(body) {
   const E = envOf(S.model), L = level(), bg = L.bg, hk = E.hk ?? 1, nk = E.nk ?? 1, lv = Object.entries(ENVLV).reduce((b, [k, v]) => (Math.abs(v[0] - hk) + Math.abs(v[1] - nk) < Math.abs(ENVLV[b][0] - hk) + Math.abs(ENVLV[b][1] - nk) ? k : b), '5');
   $('#propsTitle').textContent = '배경 · 밑그림';
   body.innerHTML = `<div class="sec">배경 (상권 조감도)</div>
-    <div class="chips">${ENVTYPES.map(([k, n]) => `<button data-env="${k}" aria-pressed="${E.type === k}">${n}</button>`).join('')}</div>
+    <div class="chips">${ENVTYPES.filter(([k]) => k !== 'map' || E.map).map(([k, n]) => `<button data-env="${k}" aria-pressed="${E.type === k}">${n}</button>`).join('')}</div>
+    ${mapSecHtml(E)}
     <label class="fld">매장 정면<select id="envFront"><option value="auto">자동 (출입문 쪽)</option><option value="N">도면 위쪽</option><option value="E">도면 오른쪽</option><option value="S">도면 아래쪽</option><option value="W">도면 왼쪽</option></select></label>
     <div class="row2"><span class="hint">배경 레벨 ${lv} / 5 · 낮출수록 건물이 적고 낮아져요</span><button class="btn" data-elv="-1" aria-label="배경 줄이기">▼</button><button class="btn" data-elv="1" aria-label="배경 늘리기">▲</button></div>
     <label class="fld">건물 높이 <b id="vHk">${Math.round(hk * 100)}%</b><input type="range" id="envHk" min="0.2" max="1" step="0.05" value="${hk}"></label>
@@ -1032,6 +1035,7 @@ function renderBg(body) {
     <div class="sec">도면 밑그림 (사진 · 스캔을 깔고 따라 그리기)</div>
     <div class="btns"><button class="btn" id="bgPick">${bg ? '밑그림 바꾸기' : '도면 이미지 고르기'}</button>${bg ? '<button class="btn danger" id="bgDel">밑그림 지우기</button>' : ''}</div>
     ${bg ? `<div class="row">${num('이미지 가로 mm', 'wmm', bg.wmm)}${num('X', 'x', bg.x || 0)}${num('Y', 'y', bg.y || 0)}</div><label class="fld">불투명도<input type="range" id="bgO" min="0.1" max="1" step="0.05" value="${bg.opacity ?? 0.5}"></label>` : '<p class="hint">손그림 · PDF 캡처 · 사진을 깔고 2D "벽 그리기" 로 따라 그리면 돼요. 도면의 긴 벽 하나 길이를 보고 "이미지 가로 mm" 로 축척을 맞추세요.</p>'}`;
+  bindMapSec(body, E);
   $('#envFront').value = E.front || 'auto';
   const re = () => { applyEnv(); commit(); };
   $$('[data-env]', body).forEach((b) => (b.onclick = () => { E.type = b.dataset.env; re(); if (E.type !== 'none') { if (S.pane === '2d') setPane('split'); envBird(); } renderProps(); }));
@@ -1043,6 +1047,60 @@ function renderBg(body) {
   $('#envReset').onclick = () => { delete E.colors; envOf(S.model); re(); renderProps(); };
   $('#bgPick').onclick = async () => { const f = (await openFiles({ title: '도면 이미지', extensions: ['png', 'jpg', 'jpeg', 'webp'] }))[0]; if (!f) return; const src = await shrinkToDataUrl(f.data, 2400); const b = SL.polyArea ? levelBox() : [0, 0, 10000, 0]; L.bg = { src, wmm: Math.max(3000, Math.round(b[2] - b[0]) || 10000), x: Math.round(b[0]) || 0, y: Math.round(b[1]) || 0, opacity: 0.5 }; if (S.pane === '3d') setPane('split'); commit(); renderProps(); toast('밑그림을 깔았어요 · 가로 mm 로 축척을 맞추세요'); };
   if (bg) { $('#bgDel').onclick = () => { L.bg = null; commit(); renderProps(); }; $$('[data-k]', body).forEach((i) => (i.onchange = () => { const v = +i.value; if (Number.isFinite(v)) bg[i.dataset.k] = i.dataset.k === 'wmm' ? Math.max(100, v) : v; commit(); })); const o = $('#bgO'); o.oninput = () => { bg.opacity = +o.value; plan.redraw(); }; o.onchange = () => commit(); }
+}
+/* ---------- 지도 캡처 → AI 가 주변 건물 · 도로 · 녹지 · 나무를 단순한 덩어리로 (AI 키가 있을 때만) ----------
+ * 캡처 가로 실제 길이(m)와 가게 자리(그림을 눌러 찍음)로 축척을 잡고, 고른 범위만 잘라 보낸다 → 범위가 넓을수록 토큰이 많이 든다 */
+const MAPQ = { url: null, w: 0, h: 0, sx: 0.5, sy: 0.5, widthM: 300, range: 'mid', top: 'N', busy: false, log: '' };
+const MRANGE = { low: ['좁게', 100, 3000], mid: ['보통', 200, 6000], high: ['넓게', 400, 12000] };
+function mapCrop() {
+  const Q = MAPQ, pxPerM = Q.w / Math.max(20, Q.widthM), side = Math.min(Q.w, Q.h, MRANGE[Q.range][1] * pxPerM), x0 = clamp(Q.sx * Q.w - side / 2, 0, Q.w - side), y0 = clamp(Q.sy * Q.h - side / 2, 0, Q.h - side), out = Math.min(1568, Math.round(side));
+  return { x0, y0, side, out, sideM: side / pxPerM, tokIn: Math.round((out * out) / 750) + 700, tokOut: MRANGE[Q.range][2] };
+}
+function mapSecHtml(E) {
+  const Q = MAPQ, key = cloud.aiKey && cloud.aiKey(), c = Q.url ? mapCrop() : null;
+  return `<div class="sec">지도 캡처로 주변 만들기 <small>AI</small></div>
+    ${key ? '' : '<p class="hint">네이버 · 구글 지도(위성 · 일반) 캡처를 AI 가 읽어 주변 건물 · 도로 · 나무를 세워요. <b>AI 키가 있어야 해요</b> — <button class="btn sm" id="mapAiGo">AI 키 넣기</button></p>'}
+    <div class="btns"><button class="btn" id="mapPick" ${key ? '' : 'disabled'}>${Q.url ? '캡처 바꾸기' : '지도 캡처 고르기'}</button>${E.map ? '<button class="btn danger" id="mapDel">지도 배경 지우기</button>' : ''}</div>
+    ${Q.url ? `<div class="mapbox" id="mapBox"><img src="${Q.url}" alt="지도 캡처"><i class="mcrop" style="left:${(c.x0 / Q.w) * 100}%;top:${(c.y0 / Q.h) * 100}%;width:${(c.side / Q.w) * 100}%;height:${(c.side / Q.h) * 100}%"></i><i class="mpin" style="left:${Q.sx * 100}%;top:${Q.sy * 100}%"></i></div>
+    <p class="hint">그림에서 <b>우리 가게 자리</b>를 눌러 찍으세요. 파란 네모 안만 AI 에 보내요.</p>
+    <label class="fld">캡처 가로 실제 길이 (m) <small>지도 축척 막대로 어림</small><input type="number" id="mapW" min="20" max="5000" step="10" value="${Q.widthM}"></label>
+    <div class="fld">범위<div class="seg2">${Object.entries(MRANGE).map(([k, [n, m]]) => `<button data-mr="${k}" aria-pressed="${Q.range === k}">${n} ${m}m</button>`).join('')}</div></div>
+    <label class="fld">도면 위쪽이 지도의<select id="mapTop">${[['N', '북쪽 (기본)'], ['E', '동쪽'], ['S', '남쪽'], ['W', '서쪽']].map(([k, n]) => `<option value="${k}" ${Q.top === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <p class="hint">실제 범위 약 ${Math.round(c.sideM)}m · 예상 토큰: 보내기 약 ${c.tokIn.toLocaleString()} + 받기 최대 ${c.tokOut.toLocaleString()}</p>
+    <div class="btns"><button class="btn pri" id="mapGo" ${Q.busy || !key ? 'disabled' : ''}>${Q.busy ? 'AI 가 지도를 읽는 중…' : 'AI 로 주변 만들기'}</button></div>` : ''}
+    <div class="ilive" id="mapLive" hidden></div><pre class="ilog" id="mapLog" ${Q.log ? '' : 'hidden'}>${esc(Q.log)}</pre>`;
+}
+function bindMapSec(body, E) {
+  const Q = MAPQ, go = $('#mapAiGo', body); if (go) go.onclick = () => ACT.ai();
+  $('#mapPick', body) && ($('#mapPick', body).onclick = async () => { const f = (await openFiles({ title: '지도 캡처', extensions: ['png', 'jpg', 'jpeg', 'webp'] }))[0]; if (!f) return; Q.url = await shrinkToDataUrl(f.data, 3000); const im = new Image(); im.onload = () => { Q.w = im.naturalWidth; Q.h = im.naturalHeight; Q.sx = 0.5; Q.sy = 0.5; renderProps(); }; im.src = Q.url; });
+  $('#mapDel', body) && ($('#mapDel', body).onclick = () => { delete E.map; if (E.type === 'map') E.type = 'basic'; applyEnv(); commit(); renderProps(); });
+  const box = $('#mapBox', body); if (box) box.onclick = (e) => { const r = box.getBoundingClientRect(); Q.sx = clamp((e.clientX - r.left) / r.width, 0, 1); Q.sy = clamp((e.clientY - r.top) / r.height, 0, 1); renderProps(); };
+  $('#mapW', body) && ($('#mapW', body).onchange = (e) => { Q.widthM = clamp(+e.target.value || 300, 20, 5000); renderProps(); });
+  $$('[data-mr]', body).forEach((b) => (b.onclick = () => { Q.range = b.dataset.mr; renderProps(); }));
+  $('#mapTop', body) && ($('#mapTop', body).onchange = (e) => (Q.top = e.target.value));
+  $('#mapGo', body) && ($('#mapGo', body).onclick = () => mapRun(E));
+}
+async function mapRun(E) {
+  const Q = MAPQ; if (Q.busy || !Q.url) return; Q.busy = true; Q.log = ''; renderProps();
+  const log = (t) => { Q.log += (Q.log ? '\n' : '') + t; const el = $('#mapLog'); if (el) { el.hidden = false; el.textContent = Q.log; el.scrollTop = 1e9; } };
+  const stop = aiWatch(log, $('#mapLive'));
+  try {
+    const c = mapCrop(), im = new Image(); im.src = Q.url; await im.decode(); const cv = document.createElement('canvas'); cv.width = cv.height = c.out; cv.getContext('2d').drawImage(im, c.x0, c.y0, c.side, c.side, 0, 0, c.out, c.out);
+    const bytes = Uint8Array.from(atob(cv.toDataURL('image/jpeg', 0.9).split(',')[1]), (x) => x.charCodeAt(0));
+    const sx = (Q.sx * Q.w - c.x0) / c.side, sy = (Q.sy * Q.h - c.y0) / c.side; log(`범위 약 ${Math.round(c.sideM)}m 를 ${c.out}px 로 잘라 보내요`);
+    const res = await cloud.readMap({ name: '지도 캡처.jpg', mime: 'image/jpeg', bytes, aspect: 1 }, { sx, sy, detail: Q.range, maxTokens: c.tokOut });
+    const b = levelBox(), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, S2 = c.sideM * 1000;
+    const rot = { N: ([x, y]) => [x, y], E: ([x, y]) => [y, -x], S: ([x, y]) => [-x, -y], W: ([x, y]) => [-y, x] }[Q.top] || ((p) => p);
+    const P = (pt) => { const [x, y] = rot([((+pt[0] || 0) - sx) * S2, ((+pt[1] || 0) - sy) * S2]); return [Math.round(cx + x), Math.round(cy + y)]; };
+    const ok = (a) => Array.isArray(a) && a.length >= 2 && a.every((p) => Array.isArray(p) && p.length >= 2);
+    const M = { rangeM: Math.round(c.sideM),
+      buildings: (res.buildings || []).filter((x) => x && ok(x.p) && x.p.length >= 3).map((x) => ({ p: x.p.map(P), h: Math.round(clamp(+x.floors || 3, 1, 60) * (x.apt ? 2900 : 3300)), apt: !!x.apt })),
+      roads: (res.roads || []).filter((x) => x && ok(x.p)).map((x) => ({ p: x.p.map(P), w: Math.round(clamp(+x.lanes || 2, 1, 10) * 3200) })),
+      green: (res.green || []).filter((x) => x && ok(x.p) && x.p.length >= 3).map((x) => ({ p: x.p.map(P) })),
+      trees: (res.trees || []).filter((p) => Array.isArray(p) && p.length >= 2).map(P) };
+    log(`✓ 건물 ${M.buildings.length} · 도로 ${M.roads.length} · 녹지 ${M.green.length} · 나무 ${M.trees.length}`);
+    E.map = M; E.type = 'map'; applyEnv(); commit(); if (S.pane === '2d') setPane('split'); envBird(); toast('지도 캡처로 주변을 세웠어요 · 건물 높이 · 수는 아래 막대로');
+  } catch (e) { console.error(e); log('⛔ ' + errTxt(e)); } finally { stop(); Q.busy = false; renderProps(); }
 }
 function levelBox() { const L = level(), b = [Infinity, Infinity, -Infinity, -Infinity]; L.walls.forEach((w) => { b[0] = Math.min(b[0], w.x1, w.x2); b[1] = Math.min(b[1], w.y1, w.y2); b[2] = Math.max(b[2], w.x1, w.x2); b[3] = Math.max(b[3], w.y1, w.y2); }); return Number.isFinite(b[0]) ? b : [0, 0, 10000, 8000]; }
 async function shrinkToDataUrl(bytes, max) { const bmp = await createImageBitmap(new Blob([bytes])), s = Math.min(1, max / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas'); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.85); }
@@ -1393,7 +1451,7 @@ function renderCatalog(q = '') {
   const by = new Map(); q = q.trim().toLowerCase();
   for (const [id, L] of Object.entries(S.lib)) { if (['zone', 'mesh', 'decal', 'mark'].includes(L.shape)) continue; if (q && !(L.name + ' ' + (L.sub || '') + ' ' + L.cat).toLowerCase().includes(q)) continue; if (!by.has(L.cat)) by.set(L.cat, []); by.get(L.cat).push([id, L]); }
   const cats = [...by.keys()].sort((a, b) => (CAT_ORDER.indexOf(a) + 99) % 99 - (CAT_ORDER.indexOf(b) + 99) % 99);
-  $('#catalog').innerHTML = cats.length ? cats.map((c, i) => `<div class="acc ${q || i === 0 ? 'open' : ''}"><button aria-expanded="${!!q || i === 0}">${esc(c)} <small>${by.get(c).length}</small></button><div class="list">${by.get(c).map(([id, L]) => `<button class="item" data-add="${esc(id)}"><b>${esc(L.name)}</b><small><i style="background:${esc(L.color)}"></i>${L.w}×${L.d}×${L.h}</small></button>`).join('')}</div></div>`).join('') : '<p class="hint" style="padding:12px">찾는 기물이 없어요</p>';
+  $('#catalog').innerHTML = cats.length ? cats.map((c, i) => `<div class="acc ${q || i === 0 ? 'open' : ''}"><button aria-expanded="${!!q || i === 0}">${esc(c)} <small>${by.get(c).length}</small></button><div class="list">${by.get(c).map(([id, L]) => `<button class="item" data-add="${esc(id)}" draggable="true"><b>${esc(L.name)}</b><small><i style="background:${esc(L.color)}"></i>${L.w}×${L.d}×${L.h}</small></button>`).join('')}</div></div>`).join('') : '<p class="hint" style="padding:12px">찾는 기물이 없어요</p>';
 }
 function openDrawer() { $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); $('#scrim').hidden = false; $('#btnDrawer')?.setAttribute('aria-expanded', 'true'); }
 function closeDrawer() { $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); $('#scrim').hidden = true; $('#btnDrawer')?.setAttribute('aria-expanded', 'false'); }
@@ -1440,12 +1498,12 @@ const DOCK = [
 ];
 /* 작업군 5개 (선택 중심): 아래 줄 = 작업군 탭, 위 줄 = 그 작업군 도구. 고른 작업군은 기억 */
 const DGROUPS = [['edit', '편집', '<path d="M6 3l13 8-6 1.8L10.5 19z"/>'], ['plan', '설계', '<path d="M4 4h16v16H4z"/><path d="M4 10h9v10"/>'], ['view', '보기', '<path d="M2.5 12c2.4-4.4 5.6-6.6 9.5-6.6s7.1 2.2 9.5 6.6c-2.4 4.4-5.6 6.6-9.5 6.6S4.9 16.4 2.5 12z"/><circle cx="12" cy="12" r="3"/>'], ['check', '검토', '<path d="M9 11l2.5 2.5L16 9"/><rect x="4" y="3.5" width="16" height="17" rx="2"/>'], ['more', '더보기', '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>']];
-const MORE = [{ g: 'more', run: () => checkUpdate(true), label: '업데이트 확인', icon: '<path d="M12 4v10M8 10l4 4 4-4M5 18h14"/>' }, { g: 'more', run: () => showKeys(), label: '단축키', icon: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h1M9 10h1M12 10h1M15 10h1M18 10h0M7 14h10"/>' }, { g: 'more', act: 'hist', label: '작업 기록', icon: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3h3"/><path d="M12 8v4l3 2"/>' }, { g: 'more', act: 'lang', label: 'English', icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/>' }, { g: 'more', run: () => $('#btnFile').click(), label: '파일', icon: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>' }];
+const MORE = [{ g: 'more', act: 'uiset', label: '화면 설정', icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>' }, { g: 'more', run: () => checkUpdate(true), label: '업데이트 확인', icon: '<path d="M12 4v10M8 10l4 4 4-4M5 18h14"/>' }, { g: 'more', run: () => showKeys(), label: '단축키', icon: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h1M9 10h1M12 10h1M15 10h1M18 10h0M7 14h10"/>' }, { g: 'more', act: 'hist', label: '작업 기록', icon: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3h3"/><path d="M12 8v4l3 2"/>' }, { g: 'more', act: 'lang', label: 'English', icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/>' }, { g: 'more', run: () => $('#btnFile').click(), label: '파일', icon: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>' }];
 let dockG = store.get('byr.dockG', 'edit');
 function buildDock() {
-  const ALL = [...DOCK.filter((d) => d !== '|'), ...MORE], list = ALL.filter((d) => d.g === dockG);
+  const ALL = [...DOCK.filter((d) => d !== '|'), ...MORE], list = dockList(dockG);
   $('#dockTabs').innerHTML = DGROUPS.map(([k, n, ic]) => `<button class="dg" data-dg="${k}" aria-pressed="${k === dockG}"><svg viewBox="0 0 24 24">${ic}</svg><span>${n}</span></button>`).join('');
-  $$('[data-dg]').forEach((b) => (b.onclick = () => { dockG = b.dataset.dg; store.set('byr.dockG', dockG); buildDock(); syncDockState(); }));
+  $$('[data-dg]', $('#dockTabs')).forEach((b) => (b.onclick = () => { dockG = b.dataset.dg; store.set('byr.dockG', dockG); buildDock(); syncDockState(); }));
   const DOCK0 = DOCK; /* 같은 그리기 코드를 쓰려고 */
   $('#dockIn').innerHTML = list.map((d) => d === '|' ? '<span class="dsep" aria-hidden="true"></span>'
     : `<button class="dk${d.soon ? ' soon' : ''}" ${d.id ? `id="${d.id}"` : ''} ${d.mode ? `data-mode="${d.mode}" aria-pressed="false"` : ''} ${d.view ? `data-view="${d.view}"` : ''} ${d.act ? `data-dact="${d.act}"` : ''} ${d.attrs || ''} title="${d.label}${d.soon ? ` (${d.soon} 업데이트)` : ''}" aria-label="${d.label}">${SV(d.icon)}<span>${d.label}</span></button>`).join('');
@@ -1455,6 +1513,61 @@ function buildDock() {
     else if (d.mode) b.onclick = () => setMode(d.mode); /* 작업군을 바꾸면 단추를 새로 그리므로 여기서 묶는다 */
     else if (d.view) b.onclick = () => { closeHome(); if (S.pane === '2d') setPane('split'); engine.view(d.view); };
     else if (d.run) b.onclick = () => { closeHome(); d.run(); }; });
+}
+/* ---------- 화면 설정: 가로 모드 손잡이 서랍 · 상단 바 · 도구 고르기/순서 ----------
+ * 도구 설정은 세로 / 가로 따로 기억 (byr.dock.port / byr.dock.land) = { hide: [키], order: { 작업군: [키] } } */
+const dkKey = (d) => d.id || (d.mode && 'm:' + d.mode) || (d.view && 'v:' + d.view) || (d.act && 'a:' + d.act) || 'l:' + d.label;
+const UIQ = matchMedia('(orientation: landscape) and (max-height: 600px)');
+const isLandC = () => UIQ.matches;
+const uiCfg = () => ({ land: 'handle', side: 'left', top: 'mini', ...store.get('byr.ui', {}) });
+const dockCfgK = () => 'byr.dock.' + (isLandC() ? 'land' : 'port');
+const dockCfg = () => ({ hide: [], order: {}, ...store.get(dockCfgK(), {}) });
+function dockList(g, all = false) {
+  const ALL = [...DOCK.filter((d) => d !== '|'), ...MORE].filter((d) => d.g === g), c = dockCfg(), ord = c.order[g] || [];
+  const L = ALL.slice().sort((a, b) => { const ia = ord.indexOf(dkKey(a)), ib = ord.indexOf(dkKey(b)); return (ia < 0 ? 999 + ALL.indexOf(a) : ia) - (ib < 0 ? 999 + ALL.indexOf(b) : ib); });
+  return all ? L : L.filter((d) => !c.hide.includes(dkKey(d)) || d.act === 'uiset'); /* 화면 설정은 숨길 수 없게 */
+}
+function applyUi() {
+  const c = uiCfg(), land = isLandC(), h = land && c.land === 'handle', b = document.body;
+  b.classList.toggle('uih', h); b.classList.toggle('uih-left', h && c.side === 'left'); b.classList.toggle('uih-bottom', h && c.side === 'bottom');
+  b.classList.toggle('topmini', land && c.top === 'mini'); if (!h) b.classList.remove('dock-open'); if (!(land && c.top === 'mini')) $('#topbar').classList.remove('open');
+  let hd = $('#dockHandle'); if (!hd) { hd = document.createElement('button'); hd.id = 'dockHandle'; hd.setAttribute('aria-label', '도구 서랍 열기 · 닫기'); hd.innerHTML = '<span></span>'; $('#dock').appendChild(hd); hd.onclick = () => dockOpen(!b.classList.contains('dock-open')); }
+  hd.hidden = !h; setTimeout(() => engine.resize(), 50);
+}
+function dockOpen(on) { document.body.classList.toggle('dock-open', on); $('#dockHandle') && $('#dockHandle').setAttribute('aria-expanded', String(on)); }
+function bindUi() {
+  (UIQ.addEventListener ? UIQ.addEventListener('change', () => { applyUi(); buildDock(); syncDockState(); }) : UIQ.addListener(() => { applyUi(); buildDock(); }));
+  /* 손잡이 쪽 가장자리에서 안으로 쓸면 열고, 반대로 쓸면 닫는다 */
+  let t0 = null; const st = $('#stage') || document.body;
+  document.addEventListener('touchstart', (e) => { if (!document.body.classList.contains('uih')) return; const p = e.touches[0]; t0 = { x: p.clientX, y: p.clientY }; }, { passive: true });
+  document.addEventListener('touchend', (e) => { if (!t0 || !document.body.classList.contains('uih')) return; const p = e.changedTouches[0], dx = p.clientX - t0.x, dy = p.clientY - t0.y, left = document.body.classList.contains('uih-left'), H = innerHeight;
+    const open = document.body.classList.contains('dock-open');
+    if (left && !open && t0.x < 24 && dx > 40 && Math.abs(dy) < 60) dockOpen(true);
+    else if (!left && !open && t0.y > H - 24 && dy < -40 && Math.abs(dx) < 80) dockOpen(true);
+    else if (open && e.target.closest && e.target.closest('#dock') && (left ? dx < -50 && Math.abs(dy) < 60 : dy > 50 && Math.abs(dx) < 80)) dockOpen(false);
+    t0 = null; }, { passive: true });
+  st.addEventListener('pointerdown', (e) => { if (document.body.classList.contains('dock-open') && !e.target.closest('#dock,#dockHandle')) dockOpen(false); if ($('#topbar').classList.contains('open') && !e.target.closest('#topbar,#fileMenu')) $('#topbar').classList.remove('open'); });
+  $('#topbar .title').addEventListener('click', () => { if (document.body.classList.contains('topmini')) $('#topbar').classList.toggle('open'); });
+  applyUi();
+}
+const DGN = () => Object.fromEntries(DGROUPS.map(([k, n]) => [k, n]));
+function renderUiSet(body) {
+  $('#propsTitle').textContent = '화면 설정'; const c = uiCfg(), dc = dockCfg(), land = isLandC();
+  const seg = (k, opts) => `<div class="seg2" role="group">${opts.map(([v, n]) => `<button data-uk="${k}" data-uv="${v}" aria-pressed="${c[k] === v}">${n}</button>`).join('')}</div>`;
+  body.innerHTML = `<p class="hint">휴대폰 · 태블릿을 <b>가로</b>로 눕혔을 때의 화면을 정해요. (지금: ${land ? '가로 화면' : '세로 · 큰 화면'})</p>
+    <div class="fld">해상도 <small>움직일 땐 가볍게, 멈추면 또렷하게</small><div class="seg2" role="group">${Object.entries(RESV).map(([k, q]) => `<button data-res2="${k}" aria-pressed="${engine.res === k}">${q.name}</button>`).join('')}</div></div>
+    <div class="fld">가로 모드 도구 막대${seg('land', [['handle', '손잡이 (서랍)'], ['fixed', '항상 보이기']])}</div>
+    <div class="fld">손잡이 위치${seg('side', [['left', '왼쪽'], ['bottom', '아래']])}</div>
+    <div class="fld">가로 모드 상단 바${seg('top', [['mini', '최소 (이름 누르면 열림)'], ['full', '전체']])}</div>
+    <h4 class="uih4">도구 막대에 넣을 기능 <small>${land ? '가로' : '세로'} 화면용 · 화살표로 순서</small></h4>
+    ${DGROUPS.map(([g, n]) => `<div class="uigrp"><b>${n}</b>${dockList(g, true).map((d, i, A) => { const k = dkKey(d), on = !dc.hide.includes(k), lock = d.act === 'uiset'; return `<div class="uirow"><label><input type="checkbox" data-dk="${esc(k)}" ${on ? 'checked' : ''} ${lock ? 'disabled' : ''}><svg viewBox="0 0 24 24">${d.icon}</svg>${esc(d.label)}</label><button class="ib sm" data-up="${esc(k)}" data-g="${g}" ${i ? '' : 'disabled'} aria-label="위로">↑</button><button class="ib sm" data-dn="${esc(k)}" data-g="${g}" ${i < A.length - 1 ? '' : 'disabled'} aria-label="아래로">↓</button></div>`; }).join('')}</div>`).join('')}
+    <button class="btn" id="uiReset">기본값으로</button>`;
+  const re = () => { buildDock(); syncDockState(); renderUiSet(body); };
+  $$('[data-uk]', body).forEach((b) => (b.onclick = () => { store.set('byr.ui', { ...uiCfg(), [b.dataset.uk]: b.dataset.uv }); applyUi(); re(); }));
+  $$('[data-res2]', body).forEach((b) => (b.onclick = () => { engine.setRes(b.dataset.res2); re(); }));
+  $$('[data-dk]', body).forEach((b) => (b.onchange = () => { const x = dockCfg(), k = b.dataset.dk; x.hide = x.hide.filter((h) => h !== k); if (!b.checked) x.hide.push(k); store.set(dockCfgK(), x); re(); }));
+  $$('[data-up],[data-dn]', body).forEach((b) => (b.onclick = () => { const g = b.dataset.g, k = b.dataset.up || b.dataset.dn, x = dockCfg(), L = dockList(g, true).map(dkKey), i = L.indexOf(k), j = i + (b.dataset.up ? -1 : 1); if (j < 0 || j >= L.length) return; [L[i], L[j]] = [L[j], L[i]]; x.order = { ...x.order, [g]: L }; store.set(dockCfgK(), x); re(); }));
+  $('#uiReset', body).onclick = () => { try { localStorage.removeItem('byr.ui'); localStorage.removeItem(dockCfgK()); } catch {} applyUi(); re(); };
 }
 function stopWalk() { engine.walker.stop(); }
 function setPlanTool(t) { if (engine.design.active && t !== 'select') { endDesign(true); renderProps(); } if (S.pane === '3d') setPane('split'); if (t !== 'select' && t !== 'boxsel') tuck(); plan.setTool(t); setTimeout(syncModeChip); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q.dataset.tool === t))); if (t === 'measure') toast('2D 에서 잴 두 점 사이를 끌어요 · 벽 끝 · 모서리에 붙어요 · 3D 에도 보여요', 5000); }
@@ -1480,14 +1593,21 @@ const present = {
     if (m === 'mep') side.innerHTML = `<b>설치물 보기</b><p>벽 · 바닥 · 천장 속 배관 · 전선 · 후드 · 덕트 · 보강재를 진한 색으로, 마감과 가구는 반투명 회색으로 보여요. (조명 기구는 빼요)</p>
       <label>마감 투명도 <output>${Math.round(this.op * 100)}%</output><input type="range" id="prOp" min="0" max="100" value="${Math.round(this.op * 100)}"></label>`;
     if (m === 'light') { const L = engine.lightItems(), G = {}; for (const l of L) (G[l.group] ||= []).push(l); this.gv ||= {};
-      side.innerHTML = `<b>조명 · 디밍</b><p>천장을 열고 모든 조명을 20% 에서 시작해요. 오른쪽으로 밀면 밝아지고, 모두 0% 면 거의 깜깜해져요.</p>
+      const GS = LGROUPS.filter(([g]) => G[g]); if (!GS.some(([g]) => g === this.gsel)) this.gsel = GS[0] && GS[0][0];
+      side.innerHTML = `<button class="pr-grab" aria-label="조명 판 크게 · 작게"><span></span></button><b>조명 · 디밍</b><p>천장을 열고 모든 조명을 20% 에서 시작해요. 오른쪽으로 밀면 밝아지고, 모두 0% 면 거의 깜깜해져요.</p>
       <label class="pr-master">전체 <output>${Math.round(this.master * 100)}%</output><input type="range" id="prMa" min="0" max="150" value="${Math.round(this.master * 100)}"></label>
-      <div class="pr-dims">${L.length ? LGROUPS.filter(([g]) => G[g]).map(([g, n]) => { const v = Math.round((this.gv[g] ?? this.master) * 100); return `<details class="pr-g"><summary><label>${n} · ${G[g].length}개 <output>${v}%</output><input type="range" data-dg="${g}" min="0" max="150" value="${v}"></label></summary>${G[g].map((l) => `<label class="pr-i">${esc(l.name)} <output>${v}%</output><input type="range" data-dim="${l.id}" data-of="${g}" min="0" max="150" value="${v}"></label>`).join('')}</details>`; }).join('') : '<p>놓인 조명이 없어요 · 기물 → 조명에서 직부등 · 펜던트 · 평판등 · 핀조명을 놓아 보세요</p>'}</div>`; }
+      <div class="pr-dims">${L.length ? LGROUPS.filter(([g]) => G[g]).map(([g, n]) => { const v = Math.round((this.gv[g] ?? this.master) * 100); return `<details class="pr-g"><summary><label>${n} · ${G[g].length}개 <output>${v}%</output><input type="range" data-dg="${g}" min="0" max="150" value="${v}"></label></summary>${G[g].map((l) => `<label class="pr-i">${esc(l.name)} <output>${v}%</output><input type="range" data-dim="${l.id}" data-of="${g}" min="0" max="150" value="${v}"></label>`).join('')}</details>`; }).join('') : '<p>놓인 조명이 없어요 · 기물 → 조명에서 직부등 · 펜던트 · 평판등 · 핀조명을 놓아 보세요</p>'}</div>
+      <div class="pr-chips">${GS.map(([g, n]) => `<button data-gc="${g}" aria-pressed="${g === this.gsel}">${n.split(' ')[0]} <i>${Math.round((this.gv[g] ?? this.master) * 100)}%</i></button>`).join('')}</div>
+      ${this.gsel ? `<label class="pr-one">${(GS.find(([g]) => g === this.gsel) || [, ''])[1]} <output>${Math.round((this.gv[this.gsel] ?? this.master) * 100)}%</output><input type="range" id="prOne" min="0" max="150" value="${Math.round((this.gv[this.gsel] ?? this.master) * 100)}"></label>` : ''}`;
+      side.classList.toggle('full', !!this.full); }
     const op = $('#prOp', b); if (op) op.oninput = (e) => { this.op = +e.target.value / 100; e.target.previousElementSibling.textContent = e.target.value + '%'; engine.setPresentOpacity(this.op); engine.invalidate(false); };
     const setIn = (sel, v) => $$(sel, b).forEach((d) => { d.value = Math.round(v * 100); d.previousElementSibling.textContent = Math.round(v * 100) + '%'; if (d.dataset.dim) engine.setDim(d.dataset.dim, v, true); });
     const done = () => { engine.setDim('__none__', 0); engine._limitLights(); engine._darkness(); engine.invalidate(true); };
     const ma = $('#prMa', b); if (ma) ma.oninput = (e) => { this.master = +e.target.value / 100; e.target.previousElementSibling.textContent = e.target.value + '%'; this.gv = {}; setIn('[data-dg]', this.master); setIn('[data-dim]', this.master); done(); };
     $$('[data-dg]', b).forEach((d) => { d.onclick = (e) => e.stopPropagation(); d.oninput = (e) => { const g = d.dataset.dg, v = +e.target.value / 100; this.gv[g] = v; e.target.previousElementSibling.textContent = e.target.value + '%'; setIn(`[data-of="${g}"]`, v); done(); }; });
+    const gr = $('.pr-grab', b); if (gr) gr.onclick = () => { this.full = !this.full; side.classList.toggle('full', this.full); };
+    $$('[data-gc]', b).forEach((c) => (c.onclick = () => { this.gsel = c.dataset.gc; this.set(this.mode); }));
+    const one = $('#prOne', b); if (one) one.oninput = (e) => { const t = $(`[data-dg="${this.gsel}"]`, b); e.target.previousElementSibling.textContent = e.target.value + '%'; const ch = $(`[data-gc="${this.gsel}"] i`, b); if (ch) ch.textContent = e.target.value + '%'; if (t) { t.value = e.target.value; t.dispatchEvent(new Event('input')); } };
     $$('[data-dim]', b).forEach((d) => (d.oninput = (e) => { e.target.previousElementSibling.textContent = e.target.value + '%'; engine.setDim(d.dataset.dim, +e.target.value / 100); engine.invalidate(true); }));
     engine.invalidate(true);
   },
@@ -1737,6 +1857,7 @@ async function boot() {
   const [lib, shapes] = await Promise.all([fetch('./data/legacy-lib.json').then((r) => r.json()), fetch('./data/legacy-shapes.json').then((r) => r.json())]);
   S.lib = lib.items; S.shapes = shapes; loadMyLib();
   engine = new Engine($('#view'), { lib: S.lib, shapes: S.shapes, assets: S.assets, zOf: (it) => SL.itemZ(level(), it, S.lib) });
+  try { bindUi(); } catch (e) { console.warn(e); }
   lib2.onStatus(setSaveState);
   engine.onSelect = (id) => { if (id) { S.sel = { kind: 'item', id }; S.propsOpen = true; S.panel = 'props'; } else if (S.sel && S.sel.kind === 'item') S.sel = null; plan && plan.select(S.sel, true); renderProps(); };
   engine.onChange = () => { commit(); renderProps(); };
@@ -1767,7 +1888,7 @@ async function boot() {
   /* 도구 막대 단추는 작업군을 바꿀 때마다 새로 그려지므로 이벤트는 문서에서 받는다 */
   const sm = $('#styleMenu'), sbA = (v) => { const sb = $('#btnStyle'); if (sb) sb.setAttribute('aria-expanded', v); };
   document.addEventListener('click', (e) => { if (e.target.closest('#btnStyle')) { sm.hidden = !sm.hidden; sbA(String(!sm.hidden)); } else if (e.target.closest('#btnDrawer')) openDrawer(); });
-  sm.onclick = (e) => { const sp = e.target.closest('[data-spd]'); if (sp) { setMoveSpeed(+sp.dataset.spd); renderStyleMenu(); toast(sp.textContent); return; } const q = e.target.closest('[data-qual]'); if (q) { engine.setQuality(q.dataset.qual); renderStyleMenu(); toast(`화질: ${QUALITY[q.dataset.qual].name}`); return; } const b = e.target.closest('[data-style]'); if (!b) return; setStyle(b.dataset.style); sm.hidden = true; sbA('false'); };
+  sm.onclick = (e) => { const sp = e.target.closest('[data-spd]'); if (sp) { setMoveSpeed(+sp.dataset.spd); renderStyleMenu(); toast(sp.textContent); return; } const rs = e.target.closest('[data-res]'); if (rs) { engine.setRes(rs.dataset.res); renderStyleMenu(); toast(`해상도: ${RESV[rs.dataset.res].name}`); return; } const q = e.target.closest('[data-qual]'); if (q) { engine.setQuality(q.dataset.qual); renderStyleMenu(); toast(`화질: ${QUALITY[q.dataset.qual].name}`); return; } const b = e.target.closest('[data-style]'); if (!b) return; setStyle(b.dataset.style); sm.hidden = true; sbA('false'); };
   document.addEventListener('pointerdown', (e) => { if (!sm.hidden && !e.target.closest('#styleMenu, #btnStyle')) { sm.hidden = true; sbA('false'); } });
   setPane(store.get('byr.pane', innerWidth < 700 ? '3d' : 'split')); setStyle(STYLES[store.get('byr.style', 'real')] ? store.get('byr.style', 'real') : 'real');
   renderCatalog();
@@ -1861,7 +1982,16 @@ async function boot() {
   window.addEventListener('dragenter', (e) => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { depth++; drop.hidden = false; } });
   window.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; drop.hidden = true; } });
   window.addEventListener('dragover', (e) => e.preventDefault());
-  window.addEventListener('drop', async (e) => { e.preventDefault(); depth = 0; drop.hidden = true; const fs = await Promise.all([...e.dataTransfer.files].map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) }))); handleFiles(fs); });
+  /* PC: 기물 목록에서 3D · 2D 화면으로 바로 끌어다 놓기 */
+  $('#catalog').addEventListener('dragstart', (e) => { const b = e.target.closest && e.target.closest('[data-add]'); if (!b) return; e.dataTransfer.setData('application/x-byr-item', b.dataset.add); e.dataTransfer.effectAllowed = 'copy'; setTimeout(() => document.body.classList.add('catdrag'), 0); });
+  $('#catalog').addEventListener('dragend', () => document.body.classList.remove('catdrag'));
+  const dropItem = (e, id) => {
+    document.body.classList.remove('catdrag'); let at = null; const inPlan = e.target.closest && e.target.closest('#plan'), inView = e.target.closest && e.target.closest('#view');
+    if (inPlan && plan) { const m = plan.evMm(e); at = { x: Math.round(m.x / 10) * 10, y: Math.round(m.y / 10) * 10 }; }
+    else if (inView) at = engine.floorAt(e, level().elev || 0);
+    if (!at) { toast('2D 도면이나 3D 화면 위에 놓아 주세요'); return; } addFromCatalog(id, at);
+  };
+  window.addEventListener('drop', async (e) => { const it = e.dataTransfer && e.dataTransfer.getData('application/x-byr-item'); if (it) { e.preventDefault(); depth = 0; drop.hidden = true; dropItem(e, it); return; } e.preventDefault(); depth = 0; drop.hidden = true; const fs = await Promise.all([...e.dataTransfer.files].map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) }))); handleFiles(fs); });
 
   // 마지막으로 작업하던 프로젝트를 연다 (자동 저장)
   let first = null; try { const id = lib2.lastId(); first = id && (await lib2.loadLocal(id)); } catch (e) { console.warn(e); }
