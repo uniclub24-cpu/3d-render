@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.17';
+export const APP_VERSION = '2.1.18';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1275,14 +1275,14 @@ function renderAi(body) {
     <div class="row"><label class="fld">${PV.name} 키<input type="password" id="kIn" placeholder="${PV.keyHint}" autocomplete="off"></label><label class="fld">모델<input type="text" id="kModel" value="${esc(cloud.aiModel())}" spellcheck="false"></label></div>
     <div class="btns"><button class="btn" id="kSave">이 기기에 저장</button>${s && pv === 'claude' ? '<button class="btn" id="kAcct">계정에서 받기</button><button class="btn" id="kPut">계정에 저장</button>' : ''}${key ? '<button class="btn" id="kTest">키 시험</button><button class="btn danger" id="kDel">지우기</button>' : ''}</div>${key ? `<p class="hint">지금 키: ${esc(key.slice(0, 7))}…${esc(key.slice(-4))}${store.get('byr.aiKeyAcct') ? ' (계정에서 받은 키)' : ' (이 기기)'}${cloud.keyProblem(key, pv) ? ' · ⚠ ' + esc(cloud.keyProblem(key, pv)) : ''}</p>` : ''}
     <div class="sec">도면 → 벽 · 문/창</div>
-    <p class="hint">도면 사진 · 스캔 · PDF 를 고르면 연결한 AI 가 벽 중심선과 문/창 자리를 읽어 바로 2D · 3D 에 그려요. 치수선을 읽어 축척을 잡고, 못 읽으면 아래 가로 길이를 써요.</p>
+    <p class="hint"><b>지금 열린 프로젝트(이 층)</b>에 도면의 벽 · 문 · 창을 그려 넣는 기능이에요. 고른 뒤 AI 가 읽으면 2D 에 <b>주황 점선 미리보기</b>가 나오고, 위에 뜨는 <b>적용</b>을 눌러야 실제로 들어가요.<br>· 지우고 바꾸기: 지금 벽을 모두 지우고 도면대로 다시 그림 · 그대로 두고 더하기: 지금 벽에 덧붙임<br>· 새 매장으로 만들려면: 홈 → <b>자료로 매장 만들기</b> (도면 · 렌더 · 전열도를 한꺼번에)</p>
     <div class="row"><label class="fld">도면 가로 실제 길이 mm (선택)<input type="number" id="pW" inputmode="numeric" placeholder="예: 12000"></label>
     <label class="fld">기존 벽<select id="pMode"><option value="replace">지우고 바꾸기</option><option value="add">그대로 두고 더하기</option></select></label></div>
     <div class="btns"><button class="btn" id="pGo" ${key ? '' : 'disabled'}>도면 파일 고르기</button></div>
     <div class="sec">현장 사진 → 기물</div>
     <p class="hint">${w ? `고른 벽(${Math.round(Math.hypot(w.x2 - w.x1, w.y2 - w.y1)).toLocaleString()}mm)을 방 안에서 정면으로 찍은 사진을 고르세요. 보이는 기물 · 문/창을 그 벽 앞에 놓아요.` : '2D 도면에서 사진에 찍힌 벽을 먼저 톡 눌러 고른 뒤, 다시 이 메뉴를 여세요.'}</p>
     <div class="btns"><button class="btn" id="phGo" ${key && w ? '' : 'disabled'}>벽 사진 고르기</button></div>
-    <p class="hint" id="aiMsg"></p>`;
+    <div class="ailive" id="aiLive" hidden></div><pre class="ailog" id="aiLog"></pre><p class="hint" id="aiMsg"></p>`;
   // AI 결과 미리보기: 바로 넣지 않고 확인한 뒤 적용
   const P = S.aiPrev;
   if (P) {
@@ -1298,6 +1298,8 @@ function renderAi(body) {
     }));
   }
   const msg = (t) => ($('#aiMsg').textContent = t);
+  const aLog = (t) => { const el = $('#aiLog'); if (el) { el.textContent += (el.textContent ? '\n' : '') + t; el.scrollTop = 1e9; } };
+  const watch = () => { const el = $('#aiLog'); if (el) el.textContent = ''; msg(''); return aiWatch(aLog, $('#aiLive')); };
   $$('[data-pv]', body).forEach((b) => (b.onclick = () => { cloud.setAiProvider(b.dataset.pv); renderProps(); }));
   $('#kModel').onchange = (e) => { cloud.setAiModel(pv, e.target.value === PV.model ? '' : e.target.value); toast('모델을 바꿨어요'); };
   $('#kSave').onclick = () => { const v = $('#kIn').value.trim(); if (!v) return msg('키를 넣어 주세요'); cloud.setAiKey(v); renderProps(); toast(`${PV.name} 키를 이 기기에 저장했어요`); };
@@ -1309,17 +1311,17 @@ function renderAi(body) {
     const f = (await openFiles({ title: '도면 (이미지 · PDF)', extensions: ['png', 'jpg', 'jpeg', 'webp', 'pdf'] }))[0]; if (!f) return;
     msg(`${PV.name} 가 도면을 읽는 중… (30초~1분)`); $('#pGo').disabled = true;
     const ctx = { pid: S.model.id, lv: S.model.activeLevel, w: +($('#pW') || {}).value || 0, mode: ($('#pMode') || {}).value || 'add' }; /* 요청할 때의 프로젝트 · 층 · 설정을 기억 */
-    try { const r = await cloud.readPlan(await cloud.prepFile(f.name, f.data), ctx.w); if (S.model.id !== ctx.pid || S.model.activeLevel !== ctx.lv) return toast('AI 가 읽는 동안 프로젝트나 층이 바뀌어서 결과를 넣지 않았어요', 6000); S.aiPrev = { kind: 'plan', r, mode: ctx.mode, pid: ctx.pid, lv: ctx.lv }; plan.preview = r; if (S.pane === '3d') setPane('split'); plan.redraw(); renderProps(); toast('2D 에 주황 점선으로 미리 보여요 · 확인하고 "적용"을 누르세요', 6000); }
-    catch (e) { console.error(e); msg('읽지 못했어요: ' + (e.message || e)); }
-    $('#pGo').disabled = false;
+    const stopW = watch(); try { const r = await cloud.readPlan(await cloud.prepFile(f.name, f.data), ctx.w); if (S.model.id !== ctx.pid || S.model.activeLevel !== ctx.lv) return toast('AI 가 읽는 동안 프로젝트나 층이 바뀌어서 결과를 넣지 않았어요', 6000); S.aiPrev = { kind: 'plan', r, mode: ctx.mode, pid: ctx.pid, lv: ctx.lv }; plan.preview = r; if (S.pane === '3d') setPane('split'); plan.redraw(); renderProps(); toast('2D 에 주황 점선으로 미리 보여요 · 확인하고 "적용"을 누르세요', 6000); }
+    catch (e) { console.error(e); msg('읽지 못했어요 · 위 기록의 ⛔ 줄과 → 안내를 보세요'); toast('⛔ ' + (e.code || '') + ' 도면을 읽지 못했어요', 5000); }
+    finally { stopW(); } $('#pGo') && ($('#pGo').disabled = false);
   };
   $('#phGo').onclick = async () => {
     const f = (await openFiles({ title: '현장 사진', extensions: ['png', 'jpg', 'jpeg', 'webp'] }))[0]; if (!f || !selWall()) return;
     msg(`${PV.name} 가 사진을 보는 중…`); $('#phGo').disabled = true;
     const ctx = { pid: S.model.id, lv: S.model.activeLevel };
-    try { const wall = selWall(), objs = await cloud.readPhoto(await cloud.prepFile(f.name, f.data), Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1), S.lib); if (S.model.id !== ctx.pid || S.model.activeLevel !== ctx.lv) return toast('AI 가 읽는 동안 프로젝트나 층이 바뀌어서 결과를 넣지 않았어요', 6000); S.aiPrev = { ...ctx, kind: 'photo', wall: wall.id, objs: objs.map((o) => ({ ...o, on: true })) }; renderProps(); }
-    catch (e) { console.error(e); msg('읽지 못했어요: ' + (e.message || e)); }
-    $('#phGo').disabled = false;
+    const stopW = watch(); try { const wall = selWall(), objs = await cloud.readPhoto(await cloud.prepFile(f.name, f.data), Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1), S.lib); if (S.model.id !== ctx.pid || S.model.activeLevel !== ctx.lv) return toast('AI 가 읽는 동안 프로젝트나 층이 바뀌어서 결과를 넣지 않았어요', 6000); S.aiPrev = { ...ctx, kind: 'photo', wall: wall.id, objs: objs.map((o) => ({ ...o, on: true })) }; renderProps(); }
+    catch (e) { console.error(e); msg('읽지 못했어요 · 위 기록의 ⛔ 줄과 → 안내를 보세요'); toast('⛔ ' + (e.code || '') + ' 사진을 읽지 못했어요', 5000); }
+    finally { stopW(); } $('#phGo') && ($('#phGo').disabled = false);
   };
 }
 function applyPlan(r, mode) {
@@ -1595,13 +1597,14 @@ function aiWatch(log, live) {
 const imLog = (t) => { const el = $('#imLog'); if (el) { el.textContent += (el.textContent ? '\n' : '') + t; el.scrollTop = 1e9; } };
 async function buildFromDocs(useAI) {
   const W = Math.round(+IMP.w * 1000) || 0, D = Math.round(+IMP.d * 1000) || 0, plans = IMP.files.filter((f) => f.role === 'plan'), dxf = plans.find((f) => /\.dxf$/i.test(f.name)), pics = plans.filter((f) => !/\.dxf$/i.test(f.name));
-  const key = !!cloud.aiKey(); let walls = null, openings = [], how = '';
+  const key = !!cloud.aiKey(); let walls = null, openings = [], how = '', aiErr = null;
   /* 1) 벽 */
   if (dxf) { try { const X = CAD.parseDxf(new TextDecoder().decode(dxf.data)), r = CAD.dxfWalls(X, { wallT: 150 }); if (r.walls.length >= 3) { walls = r.walls; how = `DXF "${dxf.name}" 에서 벽 ${walls.length}개`; } else imLog('DXF 에서 벽을 거의 못 찾았어요'); } catch (e) { imLog('DXF 읽기 실패: ' + (e.message || e)); } }
-  if (!walls && useAI && pics.length) { imLog(`AI 가 평면도 "${pics[0].name}" 를 읽는 중…`); try { const r = await cloud.readPlan(await cloud.prepFile(pics[0].name, pics[0].data), 0); if (r.walls.length >= 3) { walls = r.walls; openings = r.openings; how = `AI 평면도 읽기 · 벽 ${walls.length}개 · 문/창 ${openings.length}개`; } } catch (e) { imLog('AI 평면도 읽기 실패 (위 기록 참고)' + (e.code ? ' · ' + e.code : '')); } }
+  if (!walls && useAI && pics.length) { imLog(`AI 가 평면도 "${pics[0].name}" 를 읽는 중…`); try { const r = await cloud.readPlan(await cloud.prepFile(pics[0].name, pics[0].data), 0); if (r.walls.length >= 3) { walls = r.walls; openings = r.openings; how = `AI 평면도 읽기 · 벽 ${walls.length}개 · 문/창 ${openings.length}개`; } } catch (e) { aiErr = e; imLog('AI 평면도 읽기 실패 (위 기록 참고)' + (e.code ? ' · ' + e.code : '')); } }
   if (!walls && W >= 2000 && D >= 2000) { how = `치수 ${W / 1000}×${D / 1000}m 사각 매장`; }
   if (!walls && !(W >= 2000 && D >= 2000)) {
     if (!useAI && key && pics.length) { imLog('인터넷 없이 만들 수 있는 자료(DXF · 치수)가 없어 AI 로 이어서 해요…'); return buildFromDocs(true); }
+    if (aiErr) throw new Error(`AI 가 평면도를 읽지 못해 멈췄어요 (${aiErr.code || '오류'})${aiErr.detail ? '\n   → ' + aiErr.detail : ''}\n   → 또는 가로 × 세로 치수를 넣고 "인터넷 없이 만들기"`);
     throw new Error(key ? '벽을 만들 수 없어요 · 가로 × 세로 치수를 넣어 주세요' : '벽을 만들 수 없어요 · 가로 × 세로 치수를 넣거나(인터넷 없이), DXF 도면을 올리거나, AI 키를 연결해 주세요');
   }
   imLog('벽: ' + how); await lib2.flush();
@@ -1797,7 +1800,7 @@ async function boot() {
   window.__goBack = goBack; window.BYR = { S, engine, plan, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
   initLang(); checkUpdate(); showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
   if ($('#introVer')) $('#introVer').textContent = 'v' + APP_VERSION;
-  const intro = $('#intro'), wait = Math.max(1000, 2400 - performance.now()); /* 로딩 화면 약 1초 더 */ setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
+  const intro = $('#intro'), wait = Math.max(1200, 3000 - performance.now()); /* 로딩 화면: 처음부터 최소 3초 · 준비가 끝난 뒤에도 1.2초 더 */ setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
   // 계정 동기화: 켤 때 · 1분마다 · 앱으로 돌아올 때
   const sync = () => { if (!cloud.session() || document.visibilityState === 'hidden') return; lib2.syncNow().then(reloadIfChanged).catch(() => {}); };
   sync(); setInterval(sync, 60000); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });

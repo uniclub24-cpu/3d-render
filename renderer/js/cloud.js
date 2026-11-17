@@ -73,19 +73,19 @@ async function httpErr(r, provider) {
 const keyTag = (k) => (k.length > 12 ? `${k.slice(0, 7)}…${k.slice(-4)}` : '(짧음)');
 const pdfPages = (bytes) => { const t = new TextDecoder('latin1').decode(bytes); const m = t.match(/\/Type\s*\/Page(?!s)\b/g); return m ? m.length : 0; };
 /** 키 형식만 미리 확인 (보내기 전에) */
-export function keyProblem(k, provider = aiProvider()) { if (!k) return '키가 없어요'; if (/\s/.test(k)) return '키 안에 빈칸 · 줄바꿈이 있어요'; if (provider === 'claude' && !/^sk-ant-/.test(k)) return 'Claude 키는 sk-ant- 로 시작해요'; if (provider === 'gemini' && !/^AIza/.test(k)) return 'Gemini 키는 AIza 로 시작해요'; if (provider === 'openai' && !/^sk-/.test(k)) return 'OpenAI 키는 sk- 로 시작해요'; return ''; }
+export function keyProblem(k, provider = aiProvider()) { if (!k) return '키가 없어요'; if (/\s/.test(k)) return '키 안에 빈칸 · 줄바꿈이 있어요'; if (provider === 'claude' && !/^sk-ant-api/.test(k)) return `Console API 키는 sk-ant-api03- 로 시작해요 (지금 키는 ${k.slice(0, 9)}… 로 시작 → API 키가 아니에요)`; if (provider === 'gemini' && !/^AIza/.test(k)) return 'Gemini 키는 AIza 로 시작해요'; if (provider === 'openai' && !/^sk-/.test(k)) return 'OpenAI 키는 sk- 로 시작해요'; return ''; }
 /** 키가 실제로 되는지 아주 작은 요청으로 확인 */
 export async function testKey(provider = aiProvider()) {
-  const key = aiKey(provider), bad = keyProblem(key, provider); if (bad) throw new AiError('E-KEY', bad, aiHint('E-KEY'));
+  const key = aiKey(provider), bad = keyProblem(key, provider); if (!key || /빈칸/.test(bad)) throw new AiError('E-KEY', bad, aiHint('E-KEY'));
   const r = provider === 'claude' ? await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: aiModel(provider), max_tokens: 5, messages: [{ role: 'user', content: 'ok' }] }) })
     : provider === 'openai' ? await fetch('https://api.openai.com/v1/models', { headers: { Authorization: 'Bearer ' + key } }) : await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key } });
-  if (!r.ok) throw await httpErr(r, provider); return `${PROVIDERS[provider].name} 키 정상 · ${keyTag(key)} · 모델 ${aiModel(provider)}`;
+  if (!r.ok) { const e = await httpErr(r, provider); if (bad) e.detail = bad + ' · ' + e.detail; throw e; } return `${PROVIDERS[provider].name} 키 정상 · ${keyTag(key)} · 모델 ${aiModel(provider)}`;
 }
 const LIMIT = { claude: { pdf: 32e6, pages: 100, img: 5e6 }, openai: { pdf: 50e6, pages: 100, img: 20e6 }, gemini: { pdf: 20e6, pages: 1000, img: 20e6 } };
 /** 고른 AI 에 그림/PDF + 지시문을 보내 JSON 을 받는다 (제공자마다 요청 모양만 다르고 지시문은 같다) · 진행 상황은 onAiStep 으로 */
 export async function ask(prompt, file, maxTokens = 8000, provider = aiProvider()) {
   const key = aiKey(provider), P = PROVIDERS[provider]; if (!key) throw new AiError('E-KEY', `${P.name} 키가 없어요`, 'AI 화면에서 키를 넣어 주세요');
-  const bad = keyProblem(key, provider); if (bad) throw new AiError('E-KEY', `${bad} · 지금 키 ${keyTag(key)}`, aiHint('E-KEY'));
+  const bad = keyProblem(key, provider); if (bad && /빈칸/.test(bad)) throw new AiError('E-KEY', `${bad} · 지금 키 ${keyTag(key)}`, aiHint('E-KEY')); if (bad) step('prep', '⚠ ' + bad);
   const pdf = file.mime === 'application/pdf', model = aiModel(provider), txt = /^text\//.test(file.mime) ? '[첨부 문서]\n' + new TextDecoder().decode(file.bytes).slice(0, 150000) : null, pages = pdf ? pdfPages(file.bytes) : 0, mb = (file.bytes.length / 1e6).toFixed(1), Lm = LIMIT[provider];
   step('prep', `파일 준비: ${file.name || ''} · ${pdf ? `PDF ${pages || '?'}쪽` : txt ? '글' : '그림'} · ${mb}MB`, { pages, bytes: file.bytes.length });
   if (pdf && (file.bytes.length > Lm.pdf || pages > Lm.pages)) throw new AiError('E-SIZE', `PDF ${mb}MB · ${pages}쪽 — ${P.name} 한도(${Lm.pdf / 1e6}MB · ${Lm.pages}쪽)를 넘어요`, aiHint('E-SIZE'));
