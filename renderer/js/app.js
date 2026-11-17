@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.16';
+export const APP_VERSION = '2.1.17';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -643,7 +643,7 @@ const BIZC = [['main', '대표색'], ['hallWall', '홀 벽'], ['hallFloor', '홀
 async function bizFromDoc() {
   const f = (await openFiles({ title: '시방서 · 계획서 (PDF · 이미지 · 글)', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'txt', 'md', 'csv'] }))[0]; if (!f) return;
   const base = SH.BIZ[AUTO.kind] || SH.BIZ.pel_hall, id = uid('bz').slice(-8); let p = { id, name: f.name.replace(/\.[^.]+$/, '').slice(0, 40), base: AUTO.kind.startsWith('u_') ? (base.custom?.base || 'pel_hall') : AUTO.kind, ratio: base.ratio, pel: base.pel, colors: { ...(base.colors || {}) }, kitchen: base.kitchen.map((r) => [...r]), notes: [], doc: f.name };
-  if (cloud.aiKey && cloud.aiKey()) { toast('AI 가 문서를 읽는 중… (30초~1분)', 60000); try { const r = await cloud.readSpec(await cloud.prepFile(f.name, f.data), S.lib); p = { ...p, ...r, kitchen: r.kitchen.length ? r.kitchen : p.kitchen, colors: { ...p.colors, ...r.colors }, pel: SH.BIZ[r.base]?.pel ?? p.pel, id, doc: f.name }; toast(`"${p.name}" 프리셋을 만들었어요 · 아래에서 고칠 수 있어요`, 5000); } catch (e) { console.error(e); toast('AI 가 읽지 못해서 지금 업종을 복사했어요 · 직접 고쳐 주세요 (' + (e.message || e) + ')', 7000); } }
+  if (cloud.aiKey && cloud.aiKey()) { toast('AI 가 문서를 읽는 중…', 60000); const stopW = aiWatch((t) => toast(t.replace(/^\[\d+:\d+\] /, ''), /⛔/.test(t) ? 12000 : 300000), null); cloud.onAiStep((st) => toast(`${st.phase === 'error' ? '⛔ ' : ''}${st.msg}${st.detail ? ' → ' + st.detail : ''}`, st.phase === 'error' ? 15000 : 300000)); try { const r = await cloud.readSpec(await cloud.prepFile(f.name, f.data), S.lib); p = { ...p, ...r, kitchen: r.kitchen.length ? r.kitchen : p.kitchen, colors: { ...p.colors, ...r.colors }, pel: SH.BIZ[r.base]?.pel ?? p.pel, id, doc: f.name }; toast(`"${p.name}" 프리셋을 만들었어요 · 아래에서 고칠 수 있어요`, 5000); } catch (e) { console.error(e); toast('AI 가 읽지 못해서 지금 업종을 복사했어요 · 직접 고쳐 주세요 · ' + errTxt(e).replace('\n', ' '), 15000); } finally { stopW(); } }
   else toast('AI 키가 없어서 지금 업종을 복사했어요 · 색 · 기물을 직접 고쳐 주세요 (AI 화면에서 키를 넣으면 문서를 읽어 채워요)', 7000);
   const list = bizList(); list.push(p); bizSave(list); AUTO.kind = 'u_' + id; AUTO.ratio = null; renderProps();
 }
@@ -1273,7 +1273,7 @@ function renderAi(body) {
     <p class="hint">본인 계정의 API 키로 연결해요 · 키 만드는 곳: <b>${PV.where}</b>. (claude.ai · ChatGPT · Gemini 앱의 구독 로그인은 다른 앱에서 쓸 수 없어서 API 키가 필요해요. 쓴 만큼 각 회사에 요금이 나가요.)</p>
     <p class="hint">${key ? '이 기기에 키가 있어요 · ' + esc(key.slice(0, 8)) + '…' : pv === 'claude' ? '키가 없어요. 기존 앱에서 "계정에 저장"했다면 계정에 로그인하면 자동으로 들어와요.' : '키가 없어요.'}</p>
     <div class="row"><label class="fld">${PV.name} 키<input type="password" id="kIn" placeholder="${PV.keyHint}" autocomplete="off"></label><label class="fld">모델<input type="text" id="kModel" value="${esc(cloud.aiModel())}" spellcheck="false"></label></div>
-    <div class="btns"><button class="btn" id="kSave">이 기기에 저장</button>${s && pv === 'claude' ? '<button class="btn" id="kAcct">계정에서 받기</button><button class="btn" id="kPut">계정에 저장</button>' : ''}${key ? '<button class="btn danger" id="kDel">지우기</button>' : ''}</div>
+    <div class="btns"><button class="btn" id="kSave">이 기기에 저장</button>${s && pv === 'claude' ? '<button class="btn" id="kAcct">계정에서 받기</button><button class="btn" id="kPut">계정에 저장</button>' : ''}${key ? '<button class="btn" id="kTest">키 시험</button><button class="btn danger" id="kDel">지우기</button>' : ''}</div>${key ? `<p class="hint">지금 키: ${esc(key.slice(0, 7))}…${esc(key.slice(-4))}${store.get('byr.aiKeyAcct') ? ' (계정에서 받은 키)' : ' (이 기기)'}${cloud.keyProblem(key, pv) ? ' · ⚠ ' + esc(cloud.keyProblem(key, pv)) : ''}</p>` : ''}
     <div class="sec">도면 → 벽 · 문/창</div>
     <p class="hint">도면 사진 · 스캔 · PDF 를 고르면 연결한 AI 가 벽 중심선과 문/창 자리를 읽어 바로 2D · 3D 에 그려요. 치수선을 읽어 축척을 잡고, 못 읽으면 아래 가로 길이를 써요.</p>
     <div class="row"><label class="fld">도면 가로 실제 길이 mm (선택)<input type="number" id="pW" inputmode="numeric" placeholder="예: 12000"></label>
@@ -1302,6 +1302,7 @@ function renderAi(body) {
   $('#kModel').onchange = (e) => { cloud.setAiModel(pv, e.target.value === PV.model ? '' : e.target.value); toast('모델을 바꿨어요'); };
   $('#kSave').onclick = () => { const v = $('#kIn').value.trim(); if (!v) return msg('키를 넣어 주세요'); cloud.setAiKey(v); renderProps(); toast(`${PV.name} 키를 이 기기에 저장했어요`); };
   if ($('#kDel')) $('#kDel').onclick = () => { cloud.setAiKey(''); renderProps(); };
+  if ($('#kTest')) $('#kTest').onclick = async (e) => { e.target.disabled = true; try { msg('✅ ' + (await cloud.testKey(pv))); } catch (er) { msg('⛔ ' + er.message + (er.detail ? ' → ' + er.detail : '')); } e.target.disabled = false; };
   if ($('#kAcct')) $('#kAcct').onclick = async () => { try { msg((await cloud.loadAccountKey()) ? '계정의 키를 받았어요' : '계정에 저장된 키가 없어요'); renderProps(); } catch (e) { msg(e.message || e); } };
   if ($('#kPut')) $('#kPut').onclick = async () => { try { await cloud.saveAccountKey(cloud.aiKey('claude')); msg('계정에 저장했어요 · 다른 기기에서 로그인하면 자동으로 써요'); } catch (e) { msg(e.message || e); } };
   $('#pGo').onclick = async () => {
@@ -1572,13 +1573,24 @@ function renderImport(log) {
       <label class="fld">업종 · 프리셋<select id="imK"><option value="">자동 배치 안 함 (벽만)</option>${Object.entries(SH.BIZ).map(([k, b]) => `<option value="${k}" ${IMP.kind === k ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label></section>
     <section class="hsec"><b>3. 만들기</b><div class="btns"><button class="btn" data-im="off">인터넷 없이 만들기</button><button class="btn pri" data-im="ai" ${key ? '' : 'disabled'}>AI 로 자료 읽어 만들기</button></div>
       <p class="hint">${key ? `AI: ${esc(cloud.PROVIDERS[cloud.aiProvider()].name)} 키 연결됨 · 그림 · PDF 자료는 AI 가 읽어요 (자료마다 30초~1분).` : 'AI 키가 없어요 · 홈 → AI 설정에서 키를 넣으면 그림 · PDF 자료도 읽어요. 지금은 DXF · 치수로만 만들어요.'}</p>
-      <pre class="ilog" id="imLog">${esc(log || '')}</pre></section>`;
+      <div class="ilive" id="imLive" hidden></div><pre class="ilog" id="imLog">${esc(log || '')}</pre></section>`;
   const sync = () => { IMP.name = $('#imN').value; IMP.w = $('#imW').value; IMP.d = $('#imD').value; IMP.kind = $('#imK').value; };
   $$('[data-ir]', B).forEach((x) => (x.onchange = () => { IMP.files[+x.dataset.ir].role = x.value; }));
   $$('[data-ix]', B).forEach((x) => (x.onclick = () => { sync(); IMP.files.splice(+x.dataset.ix, 1); renderImport(); }));
   $$('[data-im]', B).forEach((x) => (x.onclick = async () => { const a = x.dataset.im; if (a === 'back') return renderHome(); sync();
     if (a === 'add') { const fs = await openFiles({ title: '도면 · 렌더 · 전열도', extensions: ['dxf', 'pdf', 'png', 'jpg', 'jpeg', 'webp'], multi: true }); for (const f of fs) IMP.files.push({ ...f, role: guessRole(f.name) }); return renderImport(); }
-    $$('[data-im]', B).forEach((q) => (q.disabled = true)); try { await buildFromDocs(a === 'ai'); } catch (e) { console.error(e); imLog('⛔ ' + (e.message || e)); $$('[data-im]', B).forEach((q) => (q.disabled = false)); } }));
+    $$('[data-im]', B).forEach((q) => (q.disabled = true)); $('#imLog').textContent = ''; const stopW = aiWatch(imLog, $('#imLive'));
+    try { await buildFromDocs(a === 'ai'); } catch (e) { console.error(e); imLog('⛔ ' + errTxt(e)); $$('[data-im]', B).forEach((q) => (q.disabled = false)); } finally { stopW(); } }));
+}
+const errTxt = (e) => (e && e.message ? e.message : String(e)) + (e && e.detail ? `\n   → ${e.detail}` : '');
+/** AI 진행 상황을 화면에 보여 준다: 단계는 기록(log)에 시각과 함께, "답 쓰는 중" 같은 계속 바뀌는 건 한 줄(live)에 경과 시간과 함께 */
+function aiWatch(log, live) {
+  const t0 = Date.now(), mmss = () => { const s = Math.round((Date.now() - t0) / 1000); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; }; let cur = '', since = Date.now();
+  const paint = () => { if (!live) return; live.hidden = !cur; live.innerHTML = cur ? `<span class="spin"></span><span>${esc(cur)}</span><b>${Math.round((Date.now() - since) / 1000)}초</b>` : ''; };
+  const iv = setInterval(paint, 1000);
+  cloud.onAiStep((st) => { if (st.phase === 'write') { cur = st.msg; paint(); return; } if (st.phase === 'send' || st.phase === 'read') { cur = st.phase === 'send' ? 'AI 가 문서를 읽는 중…' : st.msg; since = st.phase === 'send' ? Date.now() : since; } if (st.phase === 'done' || st.phase === 'error') cur = '';
+    log(`[${mmss()}] ${st.phase === 'error' ? '⛔ ' : ''}${st.msg}${st.detail ? `\n   → ${st.detail}` : ''}`); paint(); });
+  return () => { clearInterval(iv); cloud.onAiStep(null); cur = ''; paint(); };
 }
 const imLog = (t) => { const el = $('#imLog'); if (el) { el.textContent += (el.textContent ? '\n' : '') + t; el.scrollTop = 1e9; } };
 async function buildFromDocs(useAI) {
@@ -1586,7 +1598,7 @@ async function buildFromDocs(useAI) {
   const key = !!cloud.aiKey(); let walls = null, openings = [], how = '';
   /* 1) 벽 */
   if (dxf) { try { const X = CAD.parseDxf(new TextDecoder().decode(dxf.data)), r = CAD.dxfWalls(X, { wallT: 150 }); if (r.walls.length >= 3) { walls = r.walls; how = `DXF "${dxf.name}" 에서 벽 ${walls.length}개`; } else imLog('DXF 에서 벽을 거의 못 찾았어요'); } catch (e) { imLog('DXF 읽기 실패: ' + (e.message || e)); } }
-  if (!walls && useAI && pics.length) { imLog(`AI 가 평면도 "${pics[0].name}" 를 읽는 중…`); try { const r = await cloud.readPlan(await cloud.prepFile(pics[0].name, pics[0].data), 0); if (r.walls.length >= 3) { walls = r.walls; openings = r.openings; how = `AI 평면도 읽기 · 벽 ${walls.length}개 · 문/창 ${openings.length}개`; } } catch (e) { imLog('AI 평면도 읽기 실패: ' + (e.message || e)); } }
+  if (!walls && useAI && pics.length) { imLog(`AI 가 평면도 "${pics[0].name}" 를 읽는 중…`); try { const r = await cloud.readPlan(await cloud.prepFile(pics[0].name, pics[0].data), 0); if (r.walls.length >= 3) { walls = r.walls; openings = r.openings; how = `AI 평면도 읽기 · 벽 ${walls.length}개 · 문/창 ${openings.length}개`; } } catch (e) { imLog('AI 평면도 읽기 실패 (위 기록 참고)' + (e.code ? ' · ' + e.code : '')); } }
   if (!walls && W >= 2000 && D >= 2000) { how = `치수 ${W / 1000}×${D / 1000}m 사각 매장`; }
   if (!walls && !(W >= 2000 && D >= 2000)) {
     if (!useAI && key && pics.length) { imLog('인터넷 없이 만들 수 있는 자료(DXF · 치수)가 없어 AI 로 이어서 해요…'); return buildFromDocs(true); }
@@ -1601,7 +1613,7 @@ async function buildFromDocs(useAI) {
   if (useAI) for (const f of IMP.files.filter((q) => !/\.dxf$/i.test(q.name))) { const kind = f.role === 'elec' ? 'elec' : f.role === 'render' ? 'render' : 'plan'; imLog(`AI 가 ${IMP_ROLE[f.role]} "${f.name}" 를 읽는 중…`);
     try { const r = await cloud.readLayout(await cloud.prepFile(f.name, f.data), kind, S.lib, size); if (kind !== 'elec') fin = { ...r.finishes, ...fin };
       for (const q of r.items) { const it = mkItem(q.type, Math.round(box.x0 + q.x * size.w), Math.round(box.y0 + q.y * size.d), q.rot, { pz: 'ai' }); if (q.w && q.w > 100 && q.w < 12000) it.w = q.w; if (q.d && q.d > 50 && q.d < 6000) it.d = q.d; if (q.color && kind === 'render') it.color = q.color; L.items.push(it); aiN++; }
-      imLog(`  → 기물 ${r.items.length}개${r.notes.length ? ' · ' + r.notes.join(' / ') : ''}`); } catch (e) { imLog('  → 못 읽었어요: ' + (e.message || e)); } }
+      imLog(`  → 기물 ${r.items.length}개 놓음${r.notes.length ? ' · ' + r.notes.join(' / ') : ''}`); } catch (e) { imLog('  → 못 읽었어요' + (e.code ? ' · ' + e.code : ': ' + (e.message || e))); if (e.code === 'E-KEY') break; } }
   if (!aiN && IMP.kind && SH.BIZ[IMP.kind]) { const pr = SH.BIZ[IMP.kind], r = SH.autoLayout(L, S.lib, { kind: IMP.kind, ratio: pr.ratio, front: 'auto', aisle: aisleOf(), clear: true, scope: { kitchen: 1, hall: 1, mep: 1, finish: 1 }, dish: /hall/.test(IMP.kind) && !/deliv/.test(IMP.kind) }, mkItem, uid); imLog(r.error ? '자동 배치 못 함: ' + r.error : `프리셋 "${pr.name}" 자동 배치 · ${r.placed}개 (주방 규칙 적용)`); }
   if (fin.wall) for (const w of L.walls) if (w.pz !== 'part') w.color = fin.wall;
   if (fin.ceiling) L.ceiling = { ...(L.ceiling || {}), on: true, color: fin.ceiling };
@@ -1784,7 +1796,8 @@ async function boot() {
   await setModel(first || emptyProject());
   window.__goBack = goBack; window.BYR = { S, engine, plan, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
   initLang(); checkUpdate(); showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
-  const intro = $('#intro'), wait = Math.max(0, 1400 - performance.now()); setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
+  if ($('#introVer')) $('#introVer').textContent = 'v' + APP_VERSION;
+  const intro = $('#intro'), wait = Math.max(1000, 2400 - performance.now()); /* 로딩 화면 약 1초 더 */ setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
   // 계정 동기화: 켤 때 · 1분마다 · 앱으로 돌아올 때
   const sync = () => { if (!cloud.session() || document.visibilityState === 'hidden') return; lib2.syncNow().then(reloadIfChanged).catch(() => {}); };
   sync(); setInterval(sync, 60000); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });

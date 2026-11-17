@@ -315,3 +315,9 @@ body.presenting #stage { inset: 0 !important; }
 #home .lnk { color: #0071e3; }
 #home .row2 { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
 #home .row2 > .btn { flex: none; }
+#intro .ver { position: absolute; right: calc(18px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); font-size: 12px; color: #8b93a7; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+#home .ilive { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 8px; border-radius: 12px; background: #eef5ff; color: #0b3d91; font-size: 13px; }
+#home .ilive span:nth-child(2) { flex: 1; min-width: 0; }
+#home .ilive b { font-variant-numeric: tabular-nums; font-weight: 600; }
+#home .ilive .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #b8d4ff; border-top-color: #0071e3; animation: ilspin .8s linear infinite; flex: none; }
+@keyframes ilspin { to { transform: rotate(360deg); } }

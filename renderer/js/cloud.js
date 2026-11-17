@@ -57,29 +57,73 @@ export async function saveAccountKey(k) { const s = session(); await sbFetch('/r
 const b64 = (bytes) => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); };
 const jsonOf = (t) => { const a = t.indexOf('{'), b = t.lastIndexOf('}'); if (a < 0 || b < a) throw new Error('AI 가 JSON 으로 답하지 않았어요: ' + t.slice(0, 120)); return JSON.parse(t.slice(a, b + 1)); };
 const errOf = (j, r) => (j.error && (j.error.message || j.error.status)) || (typeof j.error === 'string' ? j.error : '') || 'AI 응답 ' + r.status;
-/** 고른 AI 에 그림/PDF + 지시문을 보내 JSON 을 받는다 (제공자마다 요청 모양만 다르고 지시문은 같다) */
+/* ---------- AI 진행 상황 · 오류 코드 ----------
+ * onAiStep(fn) 로 화면이 받는다: { phase, msg, ...자세한 값 }. phase: prep · send · read · write · done · error
+ * 오류는 AiError(code) — E-KEY(키) · E-PERM(권한) · E-SIZE(파일 큼) · E-RATE(사용량 한도) · E-BUSY(AI 서버 바쁨) · E-NET(인터넷) · E-TIME(시간 초과) · E-JSON(답 형식) · E-CUT(답이 잘림) · E-API(기타) */
+let STEP = null; export function onAiStep(fn) { STEP = fn; }
+const step = (phase, msg, x = {}) => { try { STEP && STEP({ phase, msg, ...x }); } catch {} };
+export class AiError extends Error { constructor(code, msg, detail) { super(`[${code}] ${msg}`); this.code = code; this.detail = detail || ''; } }
+const HINT = { 'E-KEY': '키가 틀렸거나 지워졌어요 · 콘솔에서 새 키를 만들어 AI 화면에 다시 넣어 주세요 (앞뒤 빈칸 · 줄바꿈 없이)', 'E-PERM': '이 키로는 이 모델을 쓸 수 없어요 · 결제 · 권한을 확인하세요', 'E-SIZE': '파일이 너무 커요 · 필요한 쪽만 PDF 로 저장하거나 그림으로 캡처해 올려 주세요', 'E-RATE': '사용량 한도에 걸렸어요 · 잠시 뒤 다시 하거나 콘솔에서 한도 · 잔액을 확인하세요', 'E-BUSY': 'AI 서버가 바빠요 · 1~2분 뒤 다시 해 주세요', 'E-NET': '인터넷 연결을 확인해 주세요', 'E-TIME': '너무 오래 걸려 멈췄어요 · 쪽수를 줄여 다시 해 주세요', 'E-JSON': 'AI 답을 읽지 못했어요 · 한 번 더 해 보세요', 'E-CUT': '답이 길어 중간에 잘렸어요 · 자료를 나눠 올려 주세요', 'E-API': '' };
+export const aiHint = (code) => HINT[code] || '';
+const codeOf = (status, type = '', msg = '') => status === 401 || /authentication|invalid.*key|api.?key/i.test(type + msg) ? 'E-KEY' : status === 403 || /permission/i.test(type) ? 'E-PERM' : status === 413 || /too large|too long|exceed.*(size|page|token)|maximum.*pages|request_too_large/i.test(type + msg) ? 'E-SIZE' : status === 429 || /rate|quota|credit|billing/i.test(type + msg) ? 'E-RATE' : status === 529 || status === 503 || status === 502 || /overload/i.test(type) ? 'E-BUSY' : 'E-API';
+async function httpErr(r, provider) {
+  const j = await r.json().catch(() => ({})), e = j.error || {}, type = e.type || e.status || e.code || '', msg = e.message || (typeof j.error === 'string' ? j.error : '') || r.statusText || '', rid = r.headers.get('request-id') || r.headers.get('x-request-id') || '';
+  const code = codeOf(r.status, String(type), msg); return new AiError(code, `${PROVIDERS[provider].name} HTTP ${r.status}${type ? ' · ' + type : ''} · ${msg}`, `${aiHint(code)}${rid ? ` (요청 ID ${rid})` : ''}`);
+}
+const keyTag = (k) => (k.length > 12 ? `${k.slice(0, 7)}…${k.slice(-4)}` : '(짧음)');
+const pdfPages = (bytes) => { const t = new TextDecoder('latin1').decode(bytes); const m = t.match(/\/Type\s*\/Page(?!s)\b/g); return m ? m.length : 0; };
+/** 키 형식만 미리 확인 (보내기 전에) */
+export function keyProblem(k, provider = aiProvider()) { if (!k) return '키가 없어요'; if (/\s/.test(k)) return '키 안에 빈칸 · 줄바꿈이 있어요'; if (provider === 'claude' && !/^sk-ant-/.test(k)) return 'Claude 키는 sk-ant- 로 시작해요'; if (provider === 'gemini' && !/^AIza/.test(k)) return 'Gemini 키는 AIza 로 시작해요'; if (provider === 'openai' && !/^sk-/.test(k)) return 'OpenAI 키는 sk- 로 시작해요'; return ''; }
+/** 키가 실제로 되는지 아주 작은 요청으로 확인 */
+export async function testKey(provider = aiProvider()) {
+  const key = aiKey(provider), bad = keyProblem(key, provider); if (bad) throw new AiError('E-KEY', bad, aiHint('E-KEY'));
+  const r = provider === 'claude' ? await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: aiModel(provider), max_tokens: 5, messages: [{ role: 'user', content: 'ok' }] }) })
+    : provider === 'openai' ? await fetch('https://api.openai.com/v1/models', { headers: { Authorization: 'Bearer ' + key } }) : await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key } });
+  if (!r.ok) throw await httpErr(r, provider); return `${PROVIDERS[provider].name} 키 정상 · ${keyTag(key)} · 모델 ${aiModel(provider)}`;
+}
+const LIMIT = { claude: { pdf: 32e6, pages: 100, img: 5e6 }, openai: { pdf: 50e6, pages: 100, img: 20e6 }, gemini: { pdf: 20e6, pages: 1000, img: 20e6 } };
+/** 고른 AI 에 그림/PDF + 지시문을 보내 JSON 을 받는다 (제공자마다 요청 모양만 다르고 지시문은 같다) · 진행 상황은 onAiStep 으로 */
 export async function ask(prompt, file, maxTokens = 8000, provider = aiProvider()) {
-  const key = aiKey(provider); if (!key) throw new Error(`${PROVIDERS[provider].name} 키가 없어요 · AI 화면에서 키를 넣어 주세요`);
-  const data = b64(file.bytes), pdf = file.mime === 'application/pdf', model = aiModel(provider), txt = /^text\//.test(file.mime) ? '[첨부 문서]\n' + new TextDecoder().decode(file.bytes).slice(0, 150000) : null;
-  if (provider === 'claude') {
-    const src = txt ? { type: 'text', text: txt } : pdf ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } } : { type: 'image', source: { type: 'base64', media_type: file.mime, data } };
-    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: 'user', content: [src, { type: 'text', text: prompt }] }] }) });
-    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(errOf(j, r));
-    return jsonOf((j.content || []).map((c) => c.text || '').join(''));
-  }
-  if (provider === 'openai') {
-    const src = txt ? { type: 'input_text', text: txt } : pdf ? { type: 'input_file', filename: file.name || 'plan.pdf', file_data: 'data:application/pdf;base64,' + data } : { type: 'input_image', image_url: `data:${file.mime};base64,${data}` };
-    const r = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + key },
-      body: JSON.stringify({ model, max_output_tokens: maxTokens, input: [{ role: 'user', content: [src, { type: 'input_text', text: prompt }] }] }) });
-    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(errOf(j, r));
-    const t = j.output_text || (j.output || []).flatMap((o) => o.content || []).map((c) => c.text || '').join(''); return jsonOf(t);
-  }
-  // Gemini
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [txt ? { text: txt } : { inline_data: { mime_type: file.mime, data } }, { text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens, responseMimeType: 'application/json' } }) });
-  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(errOf(j, r));
-  return jsonOf(((j.candidates || [])[0]?.content?.parts || []).map((p) => p.text || '').join(''));
+  const key = aiKey(provider), P = PROVIDERS[provider]; if (!key) throw new AiError('E-KEY', `${P.name} 키가 없어요`, 'AI 화면에서 키를 넣어 주세요');
+  const bad = keyProblem(key, provider); if (bad) throw new AiError('E-KEY', `${bad} · 지금 키 ${keyTag(key)}`, aiHint('E-KEY'));
+  const pdf = file.mime === 'application/pdf', model = aiModel(provider), txt = /^text\//.test(file.mime) ? '[첨부 문서]\n' + new TextDecoder().decode(file.bytes).slice(0, 150000) : null, pages = pdf ? pdfPages(file.bytes) : 0, mb = (file.bytes.length / 1e6).toFixed(1), Lm = LIMIT[provider];
+  step('prep', `파일 준비: ${file.name || ''} · ${pdf ? `PDF ${pages || '?'}쪽` : txt ? '글' : '그림'} · ${mb}MB`, { pages, bytes: file.bytes.length });
+  if (pdf && (file.bytes.length > Lm.pdf || pages > Lm.pages)) throw new AiError('E-SIZE', `PDF ${mb}MB · ${pages}쪽 — ${P.name} 한도(${Lm.pdf / 1e6}MB · ${Lm.pages}쪽)를 넘어요`, aiHint('E-SIZE'));
+  if (!pdf && !txt && file.bytes.length > Lm.img) throw new AiError('E-SIZE', `그림 ${mb}MB — 한도 ${Lm.img / 1e6}MB`, aiHint('E-SIZE'));
+  const data = b64(file.bytes), ac = new AbortController(), t0 = Date.now(); let idle = Date.now();
+  const timer = setInterval(() => { const s = (Date.now() - t0) / 1000; if (s > 300 || Date.now() - idle > 120000) ac.abort('time'); }, 1000);
+  step('send', `${P.name} 에 보냄 · 모델 ${model} · 키 ${keyTag(key)}`);
+  const go = async (url, init) => { try { return await fetch(url, { ...init, signal: ac.signal }); } catch (e) { if (ac.signal.aborted) throw new AiError('E-TIME', `${Math.round((Date.now() - t0) / 1000)}초 동안 답이 없어 멈췄어요`, aiHint('E-TIME')); throw new AiError('E-NET', `연결 실패: ${e.message || e}`, aiHint('E-NET')); } };
+  try {
+    let text = '', stop = '';
+    if (provider === 'claude') {
+      const src = txt ? { type: 'text', text: txt } : pdf ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } } : { type: 'image', source: { type: 'base64', media_type: file.mime, data } };
+      const r = await go('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model, max_tokens: maxTokens, stream: true, messages: [{ role: 'user', content: [src, { type: 'text', text: prompt }] }] }) });
+      if (!r.ok) throw await httpErr(r, provider);
+      /* 스트림: 문서를 다 읽으면 message_start(읽은 양) → 답을 쓰는 동안 글자가 조금씩 옴 */
+      const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '', last = 0;
+      for (;;) { let res; try { res = await rd.read(); } catch (e) { if (ac.signal.aborted) throw new AiError('E-TIME', `${Math.round((Date.now() - t0) / 1000)}초 만에 멈춤 · 받은 글자 ${text.length}`, aiHint('E-TIME')); throw new AiError('E-NET', '받는 중 연결이 끊겼어요 · 받은 글자 ' + text.length, aiHint('E-NET')); }
+        if (res.done) break; idle = Date.now(); buf += dec.decode(res.value, { stream: true }); let k;
+        while ((k = buf.indexOf('\n\n')) >= 0) { const ev = buf.slice(0, k); buf = buf.slice(k + 2); const line = ev.split('\n').find((l) => l.startsWith('data:')); if (!line) continue; let d; try { d = JSON.parse(line.slice(5)); } catch { continue; }
+          if (d.type === 'message_start') step('read', `문서 다 읽음 · 입력 ${(d.message?.usage?.input_tokens || 0).toLocaleString()} 토큰 (${Math.round((Date.now() - t0) / 1000)}초) · 이제 답을 쓰는 중`, { inTok: d.message?.usage?.input_tokens });
+          else if (d.type === 'content_block_delta' && d.delta && d.delta.text) { text += d.delta.text; if (Date.now() - last > 400) { last = Date.now(); step('write', `답 쓰는 중 · ${text.length.toLocaleString()}자 · 항목 ${(text.match(/"type"\s*:|^\s*\[/gm) || []).length}개째`, { chars: text.length }); } }
+          else if (d.type === 'message_delta') stop = d.delta?.stop_reason || stop;
+          else if (d.type === 'error') throw new AiError(codeOf(0, d.error?.type, d.error?.message), `${P.name} · ${d.error?.type || ''} · ${d.error?.message || ''}`, aiHint(codeOf(0, d.error?.type, d.error?.message))); } }
+    } else if (provider === 'openai') {
+      const src = txt ? { type: 'input_text', text: txt } : pdf ? { type: 'input_file', filename: file.name || 'plan.pdf', file_data: 'data:application/pdf;base64,' + data } : { type: 'input_image', image_url: `data:${file.mime};base64,${data}` };
+      step('read', '문서를 읽고 답을 만드는 중 (이 AI 는 끝나야 한꺼번에 와요)');
+      const r = await go('https://api.openai.com/v1/responses', { method: 'POST', headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + key }, body: JSON.stringify({ model, max_output_tokens: maxTokens, input: [{ role: 'user', content: [src, { type: 'input_text', text: prompt }] }] }) });
+      if (!r.ok) throw await httpErr(r, provider); const j = await r.json(); text = j.output_text || (j.output || []).flatMap((o) => o.content || []).map((c) => c.text || '').join(''); stop = j.status === 'incomplete' ? 'max_tokens' : '';
+    } else {
+      step('read', '문서를 읽고 답을 만드는 중 (이 AI 는 끝나야 한꺼번에 와요)');
+      const r = await go(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify({ contents: [{ role: 'user', parts: [txt ? { text: txt } : { inline_data: { mime_type: file.mime, data } }, { text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens, responseMimeType: 'application/json' } }) });
+      if (!r.ok) throw await httpErr(r, provider); const j = await r.json(), c0 = (j.candidates || [])[0]; text = (c0?.content?.parts || []).map((p) => p.text || '').join(''); stop = c0?.finishReason === 'MAX_TOKENS' ? 'max_tokens' : '';
+      if (!c0) throw new AiError('E-API', 'Gemini 가 답을 주지 않았어요 · ' + (j.promptFeedback?.blockReason || ''), '');
+    }
+    step('done', `답 받음 · ${text.length.toLocaleString()}자 · ${Math.round((Date.now() - t0) / 1000)}초${stop === 'max_tokens' ? ' · ⚠ 길이 한도에서 잘림' : ''}`);
+    try { return jsonOf(text); } catch (e) { throw new AiError(stop === 'max_tokens' ? 'E-CUT' : 'E-JSON', `${e.message}`, aiHint(stop === 'max_tokens' ? 'E-CUT' : 'E-JSON')); }
+  } catch (e) { step('error', e.message, { code: e.code, detail: e.detail }); throw e; }
+  finally { clearInterval(timer); }
 }
 
 /** 이미지는 긴 변 2000px JPEG 로 줄여 보낸다. 가로·세로 픽셀도 돌려준다 */
