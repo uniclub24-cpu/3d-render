@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.18';
+export const APP_VERSION = '2.1.19';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1273,7 +1273,7 @@ function renderAi(body) {
     <p class="hint">본인 계정의 API 키로 연결해요 · 키 만드는 곳: <b>${PV.where}</b>. (claude.ai · ChatGPT · Gemini 앱의 구독 로그인은 다른 앱에서 쓸 수 없어서 API 키가 필요해요. 쓴 만큼 각 회사에 요금이 나가요.)</p>
     <p class="hint">${key ? '이 기기에 키가 있어요 · ' + esc(key.slice(0, 8)) + '…' : pv === 'claude' ? '키가 없어요. 기존 앱에서 "계정에 저장"했다면 계정에 로그인하면 자동으로 들어와요.' : '키가 없어요.'}</p>
     <div class="row"><label class="fld">${PV.name} 키<input type="password" id="kIn" placeholder="${PV.keyHint}" autocomplete="off"></label><label class="fld">모델<input type="text" id="kModel" value="${esc(cloud.aiModel())}" spellcheck="false"></label></div>
-    <div class="btns"><button class="btn" id="kSave">이 기기에 저장</button>${s && pv === 'claude' ? '<button class="btn" id="kAcct">계정에서 받기</button><button class="btn" id="kPut">계정에 저장</button>' : ''}${key ? '<button class="btn" id="kTest">키 시험</button><button class="btn danger" id="kDel">지우기</button>' : ''}</div>${key ? `<p class="hint">지금 키: ${esc(key.slice(0, 7))}…${esc(key.slice(-4))}${store.get('byr.aiKeyAcct') ? ' (계정에서 받은 키)' : ' (이 기기)'}${cloud.keyProblem(key, pv) ? ' · ⚠ ' + esc(cloud.keyProblem(key, pv)) : ''}</p>` : ''}
+    <div class="btns"><button class="btn" id="kSave">이 기기에 저장</button>${s && pv === 'claude' ? '<button class="btn" id="kAcct">계정에서 받기</button><button class="btn" id="kPut">계정에 저장</button>' : ''}<button class="btn" id="kTest">키 시험</button>${key ? '<button class="btn danger" id="kDel">지우기</button>' : ''}</div><div class="kres" id="kRes" hidden></div>${key ? `<p class="hint">지금 키: ${esc(key.slice(0, 7))}…${esc(key.slice(-4))}${store.get('byr.aiKeyAcct') ? ' (계정에서 받은 키)' : ' (이 기기)'}${cloud.keyProblem(key, pv) ? ' · ⚠ ' + esc(cloud.keyProblem(key, pv)) : ''}</p>` : ''}
     <div class="sec">도면 → 벽 · 문/창</div>
     <p class="hint"><b>지금 열린 프로젝트(이 층)</b>에 도면의 벽 · 문 · 창을 그려 넣는 기능이에요. 고른 뒤 AI 가 읽으면 2D 에 <b>주황 점선 미리보기</b>가 나오고, 위에 뜨는 <b>적용</b>을 눌러야 실제로 들어가요.<br>· 지우고 바꾸기: 지금 벽을 모두 지우고 도면대로 다시 그림 · 그대로 두고 더하기: 지금 벽에 덧붙임<br>· 새 매장으로 만들려면: 홈 → <b>자료로 매장 만들기</b> (도면 · 렌더 · 전열도를 한꺼번에)</p>
     <div class="row"><label class="fld">도면 가로 실제 길이 mm (선택)<input type="number" id="pW" inputmode="numeric" placeholder="예: 12000"></label>
@@ -1298,13 +1298,20 @@ function renderAi(body) {
     }));
   }
   const msg = (t) => ($('#aiMsg').textContent = t);
+  function kRes(t, kind) { const el = $('#kRes'); if (!el) return; el.hidden = false; el.textContent = t; el.className = 'kres ' + (kind || ''); }
   const aLog = (t) => { const el = $('#aiLog'); if (el) { el.textContent += (el.textContent ? '\n' : '') + t; el.scrollTop = 1e9; } };
   const watch = () => { const el = $('#aiLog'); if (el) el.textContent = ''; msg(''); return aiWatch(aLog, $('#aiLive')); };
   $$('[data-pv]', body).forEach((b) => (b.onclick = () => { cloud.setAiProvider(b.dataset.pv); renderProps(); }));
   $('#kModel').onchange = (e) => { cloud.setAiModel(pv, e.target.value === PV.model ? '' : e.target.value); toast('모델을 바꿨어요'); };
-  $('#kSave').onclick = () => { const v = $('#kIn').value.trim(); if (!v) return msg('키를 넣어 주세요'); cloud.setAiKey(v); renderProps(); toast(`${PV.name} 키를 이 기기에 저장했어요`); };
+  $('#kSave').onclick = () => { const v = $('#kIn').value.replace(/\s+/g, ''); if (!v) return kRes('⛔ 위 칸에 키를 붙여 넣은 뒤 눌러 주세요', 'bad'); cloud.setAiKey(v); renderProps(); kRes(`✅ 저장했어요 · ${v.slice(0, 9)}…${v.slice(-4)} · 이제 "키 시험"을 눌러 확인해 보세요`, 'ok'); toast(`${PV.name} 키를 저장했어요 (…${v.slice(-4)})`); };
   if ($('#kDel')) $('#kDel').onclick = () => { cloud.setAiKey(''); renderProps(); };
-  if ($('#kTest')) $('#kTest').onclick = async (e) => { e.target.disabled = true; try { msg('✅ ' + (await cloud.testKey(pv))); } catch (er) { msg('⛔ ' + er.message + (er.detail ? ' → ' + er.detail : '')); } e.target.disabled = false; };
+  /* 키 시험: 칸에 새 키가 있으면 그 키로 (되면 저장), 없으면 저장된 키로. 결과는 버튼 바로 아래 + 알림 */
+  $('#kTest').onclick = async (e) => { const b = e.target, typed = $('#kIn').value.replace(/\s+/g, ''), old = cloud.aiKey(pv); if (!typed && !old) return kRes('⛔ 저장된 키가 없어요 · 위 칸에 키를 붙여 넣어 주세요', 'bad');
+    b.disabled = true; kRes(`⏳ ${typed ? '새로 넣은' : '저장된'} 키(…${(typed || old).slice(-4)})로 시험하는 중…`, '');
+    if (typed) cloud.setAiKey(typed, pv);
+    try { const r = await cloud.testKey(pv); kRes('✅ ' + r + (typed ? ' · 이 키를 저장했어요' : ''), 'ok'); toast('✅ 키 정상'); if (typed) setTimeout(renderProps, 1500); }
+    catch (er) { if (typed) cloud.setAiKey(old, pv); kRes(`⛔ ${er.message}${er.detail ? '\n→ ' + er.detail : ''}${typed ? '\n(새 키가 안 돼서 저장하지 않았어요)' : ''}`, 'bad'); toast('⛔ 키 시험 실패 · ' + (er.code || ''), 5000); }
+    b.disabled = false; };
   if ($('#kAcct')) $('#kAcct').onclick = async () => { try { msg((await cloud.loadAccountKey()) ? '계정의 키를 받았어요' : '계정에 저장된 키가 없어요'); renderProps(); } catch (e) { msg(e.message || e); } };
   if ($('#kPut')) $('#kPut').onclick = async () => { try { await cloud.saveAccountKey(cloud.aiKey('claude')); msg('계정에 저장했어요 · 다른 기기에서 로그인하면 자동으로 써요'); } catch (e) { msg(e.message || e); } };
   $('#pGo').onclick = async () => {

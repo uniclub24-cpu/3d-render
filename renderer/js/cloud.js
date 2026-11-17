@@ -73,7 +73,7 @@ async function httpErr(r, provider) {
 const keyTag = (k) => (k.length > 12 ? `${k.slice(0, 7)}…${k.slice(-4)}` : '(짧음)');
 const pdfPages = (bytes) => { const t = new TextDecoder('latin1').decode(bytes); const m = t.match(/\/Type\s*\/Page(?!s)\b/g); return m ? m.length : 0; };
 /** 키 형식만 미리 확인 (보내기 전에) */
-export function keyProblem(k, provider = aiProvider()) { if (!k) return '키가 없어요'; if (/\s/.test(k)) return '키 안에 빈칸 · 줄바꿈이 있어요'; if (provider === 'claude' && !/^sk-ant-api/.test(k)) return `Console API 키는 sk-ant-api03- 로 시작해요 (지금 키는 ${k.slice(0, 9)}… 로 시작 → API 키가 아니에요)`; if (provider === 'gemini' && !/^AIza/.test(k)) return 'Gemini 키는 AIza 로 시작해요'; if (provider === 'openai' && !/^sk-/.test(k)) return 'OpenAI 키는 sk- 로 시작해요'; return ''; }
+export function keyProblem(k, provider = aiProvider()) { if (!k) return '키가 없어요'; if (/\s/.test(k)) return '키 안에 빈칸 · 줄바꿈이 있어요'; if (provider === 'claude' && !/^sk-ant-api/.test(k)) return `콘솔 API 키는 보통 sk-ant-api03- 로 시작해요 (지금 키 ${k.slice(0, 9)}…) · 다른 종류의 키일 수 있어요`; if (provider === 'gemini' && !/^AIza/.test(k)) return 'Gemini 키는 AIza 로 시작해요'; if (provider === 'openai' && !/^sk-/.test(k)) return 'OpenAI 키는 sk- 로 시작해요'; return ''; }
 /** 키가 실제로 되는지 아주 작은 요청으로 확인 */
 export async function testKey(provider = aiProvider()) {
   const key = aiKey(provider), bad = keyProblem(key, provider); if (!key || /빈칸/.test(bad)) throw new AiError('E-KEY', bad, aiHint('E-KEY'));
