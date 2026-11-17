@@ -270,14 +270,15 @@ export class Engine {
   /* ---------- 프레젠테이션 모드: free · mep(설치물 투시) · light(조명 · 디밍) ----------
    * 모델은 건드리지 않고 보이는 재질 · 천장 · 광원 세기만 바꾼다. 나가면 setPresent(null) 로 모두 원래대로. */
   /** 조명 기물인가 (튀김기 · 레인지의 불빛은 빼고) · 무리: 매입·직부등 / 펜던트 / LED 평판·라인 / 후드등 / 핀·레일 / 스탠드·벽등 */
-  lightGroup(it) { const L = it && this.ctx.lib[it.type]; if (!L) return null; const t = it.type, sh = L.shape || '';
-    if (/fryer|range|griddle|wok|oven|steam|soup/.test(t) || ['fryer', 'range'].includes(sh)) return null;
-    const lit = L.cat === '조명' || /^l_/.test(t) || ((L.light || it.light) && /light|pendant|track|lamp/.test(sh)); if (!lit) return null;
-    if (/hood/.test(t) || /후드등/.test(L.name || '')) return 'hood';
-    if (/pin|spot|track/.test(t) || sh === 'track') return 'pin';
-    if (sh === 'pendant' || /pendant|lantern|globe|ring|bar$|fact/.test(t)) return 'pendant';
-    if (/flat|line|strip|panel/.test(t)) return 'flat';
-    if (sh === 'light' || /down|surface|direct/.test(t)) return 'down';
+  lightGroup(it) { if (!it) return null; const L = this.ctx.lib[it.type] || {}, t = it.type || '', sh = L.shape || '', nm = `${it.name || ''} ${L.name || ''} ${t}`;
+    if (/fryer|range|griddle|wok|oven|steam|soup|튀김|레인지|화구|그리들|오븐|국솥/i.test(t + ' ' + (L.name || '')) && !/등\b|조명/.test(it.name || '')) return null; /* 조리 기구 불빛은 조명 아님 */
+    const byName = /조명|직부|다운라이트|펜던트|매입등|평판|라인등|핀조명|스포트|레일등|후드등|벽등|스탠드|램프|lamp|light|LT-\d/i.test(nm);
+    const lit = (it.light && it.light.on) || L.cat === '조명' || /^l_/.test(t) || (L.light && /light|pendant|track|lamp/.test(sh)) || byName; if (!lit) return null;
+    if (/후드등|hood/i.test(nm)) return 'hood';
+    if (/핀|스포트|레일|spot|track|pin/i.test(nm) || sh === 'track') return 'pin';
+    if (/펜던트|pendant|lantern|globe|초롱|등롱/i.test(nm) || sh === 'pendant') return 'pendant';
+    if (/평판|라인|LED 바|flat|line|strip|panel|형광/i.test(nm)) return 'flat';
+    if (/직부|다운|매입|돔|down|surface|direct/i.test(nm) || sh === 'light') return 'down';
     return 'etc'; }
   _isLightItem(g) { const it = this.level && this.level.items.find((q) => q.id === g.userData.itemId); return !!this.lightGroup(it); }
   _presentClear() {

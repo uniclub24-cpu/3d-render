@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.20';
+export const APP_VERSION = '2.1.21';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1635,7 +1635,34 @@ async function buildFromDocs(useAI) {
   imLog(`✅ 만들었어요 · 벽 ${L.walls.length} · 기물 ${L.items.length}${aiN ? ` (AI ${aiN})` : ''} · 작업 화면에서 이어서 고치세요`); IMP.files = [];
   setTimeout(() => closeHome(), 1200);
 }
+/* ---------- 홈: AI 연결 (프로젝트에 들어가지 않고 여기서 키 넣고 · 시험) ---------- */
+function homeAiHtml() {
+  const pv = cloud.aiProvider(), key = cloud.aiKey(), ok = store.get('byr.aiOk', null), good = ok && ok.ok && ok.key === key.slice(-6);
+  return `<section class="hsec hai" id="hAi"><div class="row2"><b>AI 연결</b><span class="stat ${good ? 'ok' : ''}"><i></i>${good ? '연결됨 ✓' : key ? '시험 안 됨' : '키 없음'}</span></div>
+    <p class="hint">자료로 매장 만들기 · 시방서 프리셋 · 도면/사진 인식에 써요. 키는 이 기기에만 저장돼요.</p>
+    <div class="row"><label class="fld">AI<select id="hPv">${Object.entries(cloud.PROVIDERS).map(([k, P]) => `<option value="${k}" ${k === pv ? 'selected' : ''}>${esc(P.name)}</option>`).join('')}</select></label>
+      <label class="fld">모델<input id="hModel" value="${esc(cloud.aiModel(pv))}" spellcheck="false"></label></div>
+    <label class="fld">API 키 <small class="hint">${key ? `저장됨 ${esc(key.slice(0, 11))}…${esc(key.slice(-4))} (${key.length}자)` : esc(cloud.PROVIDERS[pv].where)}</small><input id="hKey" type="password" placeholder="${key ? '바꿀 때만 새 키를 붙여 넣으세요' : cloud.PROVIDERS[pv].keyHint}" autocomplete="off"></label>
+    ${pv === 'claude' ? `<label class="fld">워크스페이스 ID <small class="hint">(개인 키 sk-ant-usr- 이면 넣기 · 콘솔 → 설정 → 워크스페이스)</small><input id="hWs" value="${esc(cloud.aiWorkspace())}" placeholder="wrkspc_…" spellcheck="false"></label>` : ''}
+    <div class="btns"><button class="btn pri" id="hTest">저장하고 연결 시험</button>${key ? '<button class="btn" id="hDel">키 지우기</button>' : ''}</div>
+    <div class="kres" id="hRes" ${ok && ok.key === key.slice(-6) ? '' : 'hidden'}>${ok && ok.key === key.slice(-6) ? esc(ok.msg) : ''}</div></section>`;
+}
+function bindHomeAi() {
+  const R = (t, k) => { const el = $('#hRes'); el.hidden = false; el.textContent = t; el.className = 'kres ' + (k || ''); };
+  $('#hPv').onchange = (e) => { cloud.setAiProvider(e.target.value); renderHome(); };
+  $('#hModel').onchange = (e) => cloud.setAiModel(cloud.aiProvider(), e.target.value);
+  if ($('#hDel')) $('#hDel').onclick = () => { cloud.setAiKey(''); store.set('byr.aiOk', null); renderHome(); };
+  $('#hTest').onclick = async (e) => {
+    const pv = cloud.aiProvider(), typed = $('#hKey').value.replace(/\s+/g, ''), old = cloud.aiKey(pv); if ($('#hWs')) cloud.setAiWorkspace($('#hWs').value.replace(/\s+/g, '')); cloud.setAiModel(pv, $('#hModel').value);
+    const k = typed || old; if (!k) return R('⛔ API 키를 붙여 넣어 주세요 · ' + cloud.PROVIDERS[pv].where, 'bad');
+    const bad = cloud.keyProblem(k, pv); if (/잘린|빈칸/.test(bad)) return R('⛔ ' + bad, 'bad');
+    e.target.disabled = true; R(`⏳ 시험하는 중… (${k.slice(0, 11)}…${k.slice(-4)} · ${k.length}자)`); cloud.setAiKey(k, pv);
+    try { const m = await cloud.testKey(pv); store.set('byr.aiOk', { ok: true, key: k.slice(-6), msg: '✅ ' + m, at: Date.now() }); R('✅ ' + m, 'ok'); toast('✅ AI 연결됨'); S.aiOk = true; setTimeout(renderHome, 1200); }
+    catch (er) { if (typed && old) cloud.setAiKey(old, pv); store.set('byr.aiOk', { ok: false, key: k.slice(-6), msg: '⛔ ' + er.message, at: Date.now() }); R(`⛔ ${er.message}${er.detail ? '\n→ ' + er.detail : ''}${typed && old ? '\n(새 키가 안 돼서 예전 키로 되돌렸어요)' : ''}`, 'bad'); }
+    e.target.disabled = false; };
+}
 async function renderHome() {
+  { const ok = store.get('byr.aiOk', null), k = cloud.aiKey(); S.aiOk = !!(ok && ok.ok && k && ok.key === k.slice(-6)); }
   const s = cloud.session(), pv = cloud.aiProvider(), key = cloud.aiKey(), last = lib2.lastSync(), list = await lib2.listLocal().catch(() => []), cur = S.model;
   $('#homeVer').textContent = `BYR Next ${APP_VERSION} · ${IS_APP() ? (window.byr ? 'PC' : '모바일') : '웹'}`;
   $('#homeBody').innerHTML = `
@@ -1653,9 +1680,9 @@ async function renderHome() {
     <section class="hsec"><div class="row2"><b>계정 · 동기화</b><span class="stat ${s ? 'ok' : ''}"><i></i>${s ? '로그인됨' : '로그인 안 함'}</span></div>
       <p class="hint">${s ? `${esc(s.email || '')} · PC · 폰에서 같은 계정으로 로그인하면 내 프로젝트가 자동으로 맞춰져요${last ? ` · 마지막 ${new Date(last).toLocaleString('ko-KR')}` : ''}` : '기존 BYR 앱과 같은 이메일 · 비밀번호로 로그인하면, PC 에서 하던 작업을 폰에서 이어 하고 기존 앱 프로젝트도 불러올 수 있어요.'}</p>
       <div class="btns">${s ? '<button class="btn pri" data-h="sync">지금 동기화</button><button class="btn" data-h="account">기존 앱 프로젝트</button><button class="btn" data-h="logout">로그아웃</button>' : '<button class="btn pri" data-h="login">로그인</button>'}</div><p class="hint" id="hMsg"></p></section>
-    <section class="hsec"><div class="row2"><b>AI 연결</b><span class="stat ${key ? 'ok' : ''}"><i></i>${esc(cloud.PROVIDERS[pv].name)} ${key ? '· 키 있음' : '· 키 없음'}</span></div>
-      <p class="hint">도면 사진 · PDF → 벽, 현장 사진 → 기물 인식에 써요. 본인 Claude · ChatGPT · Gemini API 키로 연결해요.</p>
-      <div class="btns"><button class="btn" data-h="ai">${SV(HI.ai)} AI 설정</button></div></section>`;
+`;
+  $('#homeBody').insertAdjacentHTML(S.aiOk ? 'beforeend' : 'afterbegin', homeAiHtml());
+  bindHomeAi();
   const act = async (h) => {
     if (h === 'cont') return closeHome();
     if (h === 'import') return renderImport();
