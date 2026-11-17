@@ -57,6 +57,12 @@ export async function saveAccountKey(k) { const s = session(); await sbFetch('/r
 const b64 = (bytes) => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); };
 const jsonOf = (t) => { const a = t.indexOf('{'), b = t.lastIndexOf('}'); if (a < 0 || b < a) throw new Error('AI 가 JSON 으로 답하지 않았어요: ' + t.slice(0, 120)); return JSON.parse(t.slice(a, b + 1)); };
 const errOf = (j, r) => (j.error && (j.error.message || j.error.status)) || (typeof j.error === 'string' ? j.error : '') || 'AI 응답 ' + r.status;
+/* Claude 키 종류: 예전 워크스페이스 키(sk-ant-api03-) 는 x-api-key, 개인 · 서비스 계정 키(sk-ant-usr- 등)는 Authorization: Bearer.
+ * 워크스페이스에 묶이지 않은 개인 키는 anthropic-workspace-id 도 보내야 한다 (AI 화면에서 넣음) */
+export const aiWorkspace = () => store.get('byr.aiWs', '') || '';
+export function setAiWorkspace(v) { store.set('byr.aiWs', v ? v.trim() : null); }
+function claudeHeaders(key) { const h = { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+  if (/^sk-ant-api/.test(key)) h['x-api-key'] = key; else h.Authorization = 'Bearer ' + key; const ws = aiWorkspace(); if (ws) h['anthropic-workspace-id'] = ws; return h; }
 /* ---------- AI 진행 상황 · 오류 코드 ----------
  * onAiStep(fn) 로 화면이 받는다: { phase, msg, ...자세한 값 }. phase: prep · send · read · write · done · error
  * 오류는 AiError(code) — E-KEY(키) · E-PERM(권한) · E-SIZE(파일 큼) · E-RATE(사용량 한도) · E-BUSY(AI 서버 바쁨) · E-NET(인터넷) · E-TIME(시간 초과) · E-JSON(답 형식) · E-CUT(답이 잘림) · E-API(기타) */
@@ -68,16 +74,16 @@ export const aiHint = (code) => HINT[code] || '';
 const codeOf = (status, type = '', msg = '') => status === 401 || /authentication|invalid.*key|api.?key/i.test(type + msg) ? 'E-KEY' : status === 403 || /permission/i.test(type) ? 'E-PERM' : status === 413 || /too large|too long|exceed.*(size|page|token)|maximum.*pages|request_too_large/i.test(type + msg) ? 'E-SIZE' : status === 429 || /rate|quota|credit|billing/i.test(type + msg) ? 'E-RATE' : status === 529 || status === 503 || status === 502 || /overload/i.test(type) ? 'E-BUSY' : 'E-API';
 async function httpErr(r, provider) {
   const j = await r.json().catch(() => ({})), e = j.error || {}, type = e.type || e.status || e.code || '', msg = e.message || (typeof j.error === 'string' ? j.error : '') || r.statusText || '', rid = r.headers.get('request-id') || r.headers.get('x-request-id') || '';
-  const code = codeOf(r.status, String(type), msg); return new AiError(code, `${PROVIDERS[provider].name} HTTP ${r.status}${type ? ' · ' + type : ''} · ${msg}`, `${aiHint(code)}${rid ? ` (요청 ID ${rid})` : ''}`);
+  const code = codeOf(r.status, String(type), msg), wsHint = provider === 'claude' && /workspace/i.test(msg) ? ' · 개인 키라면 AI 화면에 워크스페이스 ID(wrkspc_…)를 넣어 주세요' : ''; return new AiError(code, `${PROVIDERS[provider].name} HTTP ${r.status}${type ? ' · ' + type : ''} · ${msg}`, `${aiHint(code)}${wsHint}${rid ? ` (요청 ID ${rid})` : ''}`);
 }
 const keyTag = (k) => (k.length > 12 ? `${k.slice(0, 7)}…${k.slice(-4)}` : '(짧음)');
 const pdfPages = (bytes) => { const t = new TextDecoder('latin1').decode(bytes); const m = t.match(/\/Type\s*\/Page(?!s)\b/g); return m ? m.length : 0; };
 /** 키 형식만 미리 확인 (보내기 전에) */
-export function keyProblem(k, provider = aiProvider()) { if (!k) return '키가 없어요'; if (/\s/.test(k)) return '키 안에 빈칸 · 줄바꿈이 있어요'; if (provider === 'claude' && !/^sk-ant-api/.test(k)) return `콘솔 API 키는 보통 sk-ant-api03- 로 시작해요 (지금 키 ${k.slice(0, 9)}…) · 다른 종류의 키일 수 있어요`; if (provider === 'gemini' && !/^AIza/.test(k)) return 'Gemini 키는 AIza 로 시작해요'; if (provider === 'openai' && !/^sk-/.test(k)) return 'OpenAI 키는 sk- 로 시작해요'; return ''; }
+export function keyProblem(k, provider = aiProvider()) { if (!k) return '키가 없어요'; if (/\s/.test(k)) return '키 안에 빈칸 · 줄바꿈이 있어요'; if (provider === 'claude' && !/^sk-ant-/.test(k)) return 'Claude 키는 sk-ant- 로 시작해요'; if (provider === 'gemini' && !/^AIza/.test(k)) return 'Gemini 키는 AIza 로 시작해요'; if (provider === 'openai' && !/^sk-/.test(k)) return 'OpenAI 키는 sk- 로 시작해요'; return ''; }
 /** 키가 실제로 되는지 아주 작은 요청으로 확인 */
 export async function testKey(provider = aiProvider()) {
   const key = aiKey(provider), bad = keyProblem(key, provider); if (!key || /빈칸/.test(bad)) throw new AiError('E-KEY', bad, aiHint('E-KEY'));
-  const r = provider === 'claude' ? await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: aiModel(provider), max_tokens: 5, messages: [{ role: 'user', content: 'ok' }] }) })
+  const r = provider === 'claude' ? await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: claudeHeaders(key), body: JSON.stringify({ model: aiModel(provider), max_tokens: 5, messages: [{ role: 'user', content: 'ok' }] }) })
     : provider === 'openai' ? await fetch('https://api.openai.com/v1/models', { headers: { Authorization: 'Bearer ' + key } }) : await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key } });
   if (!r.ok) { const e = await httpErr(r, provider); if (bad) e.detail = bad + ' · ' + e.detail; throw e; } return `${PROVIDERS[provider].name} 키 정상 · ${keyTag(key)} · 모델 ${aiModel(provider)}`;
 }
@@ -98,7 +104,7 @@ export async function ask(prompt, file, maxTokens = 8000, provider = aiProvider(
     let text = '', stop = '';
     if (provider === 'claude') {
       const src = txt ? { type: 'text', text: txt } : pdf ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } } : { type: 'image', source: { type: 'base64', media_type: file.mime, data } };
-      const r = await go('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model, max_tokens: maxTokens, stream: true, messages: [{ role: 'user', content: [src, { type: 'text', text: prompt }] }] }) });
+      const r = await go('https://api.anthropic.com/v1/messages', { method: 'POST', headers: claudeHeaders(key), body: JSON.stringify({ model, max_tokens: maxTokens, stream: true, messages: [{ role: 'user', content: [src, { type: 'text', text: prompt }] }] }) });
       if (!r.ok) throw await httpErr(r, provider);
       /* 스트림: 문서를 다 읽으면 message_start(읽은 양) → 답을 쓰는 동안 글자가 조금씩 옴 */
       const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '', last = 0;
