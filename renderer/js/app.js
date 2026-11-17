@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.21';
+export const APP_VERSION = '2.1.22';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1575,7 +1575,7 @@ const guessRole = (n) => (/\.dxf$/i.test(n) || /평면|도면|plan|layout/i.test
 function renderImport(log) {
   SH.setCustomBiz(bizList()); const key = !!cloud.aiKey(), B = $('#homeBody');
   B.innerHTML = `<div class="row2"><button class="btn" data-im="back">‹ 홈</button><b class="htitle">자료로 매장 만들기</b></div>
-    <section class="hsec"><b>1. 자료 올리기</b><p class="hint">평면도(DXF · 그림 · PDF), 3D 렌더 · 현장 사진, 전열 · 설비 도면을 섞어 올려도 돼요. 직영점 도면과 렌더를 같이 올리면 벽은 도면에서, 기물 · 색은 렌더에서 가져와요.</p>
+    <section class="hsec"><b>1. 자료 올리기</b><p class="hint">자료마다 역할을 골라 주세요. <b>평면도</b> = 벽 · 기물의 기준, <b>전열 · 설비도</b> = 평면도에 없는 설비(콘센트 · 조명 · 급수 · 가스 · 배수 · 에어컨)만 더함, <b>3D 렌더 · 사진</b> = 새로 넣지 않고 색 · 마감만 맞춤. 같은 기물은 두 번 넣지 않아요.</p>
       <div class="ifiles">${IMP.files.map((f, i) => `<div class="ifile"><span>${esc(f.name)}</span><select data-ir="${i}">${Object.entries(IMP_ROLE).map(([k, n]) => `<option value="${k}" ${f.role === k ? 'selected' : ''}>${n}</option>`).join('')}</select><button class="lnk" data-ix="${i}">빼기</button></div>`).join('') || '<p class="hint">아직 올린 자료가 없어요</p>'}</div>
       <div class="btns"><button class="btn" data-im="add">+ 자료 추가</button></div></section>
     <section class="hsec"><b>2. 치수 · 옵션</b><p class="hint">치수를 넣으면 인터넷 없이도 바로 만들어요. 도면에 치수선이 있으면 비워도 돼요(DXF · AI).</p>
@@ -1621,11 +1621,23 @@ async function buildFromDocs(useAI) {
   if (walls) { applyPlan({ walls, openings, height: null }, 'replace'); }
   /* 2) 기물 · 마감: AI(렌더 · 전열 · 평면 그림) → 없으면 프리셋 자동 배치 */
   const b = SH.bounds(L), T = (L.walls[0] && L.walls[0].t || 150) / 2, box = { x0: b[0] + T, y0: b[1] + T, x1: b[2] - T, y1: b[3] - T }, size = { w: box.x1 - box.x0, d: box.y1 - box.y0 };
-  let aiN = 0, fin = {};
-  if (useAI) for (const f of IMP.files.filter((q) => !/\.dxf$/i.test(q.name))) { const kind = f.role === 'elec' ? 'elec' : f.role === 'render' ? 'render' : 'plan'; imLog(`AI 가 ${IMP_ROLE[f.role]} "${f.name}" 를 읽는 중…`);
-    try { const r = await cloud.readLayout(await cloud.prepFile(f.name, f.data), kind, S.lib, size); if (kind !== 'elec') fin = { ...r.finishes, ...fin };
-      for (const q of r.items) { const it = mkItem(q.type, Math.round(box.x0 + q.x * size.w), Math.round(box.y0 + q.y * size.d), q.rot, { pz: 'ai' }); if (q.w && q.w > 100 && q.w < 12000) it.w = q.w; if (q.d && q.d > 50 && q.d < 6000) it.d = q.d; if (q.color && kind === 'render') it.color = q.color; L.items.push(it); aiN++; }
-      imLog(`  → 기물 ${r.items.length}개 놓음${r.notes.length ? ' · ' + r.notes.join(' / ') : ''}`); } catch (e) { imLog('  → 못 읽었어요' + (e.code ? ' · ' + e.code : ': ' + (e.message || e))); if (e.code === 'E-KEY') break; } }
+  /* 자료를 겹쳐 쌓지 않고 "층"처럼 합친다:
+   *  ① 평면도 → 벽 · 기물의 기준 (먼저)  ② 전열 · 설비도 → 기준에 없는 설비(콘센트 · 조명 · 급수 · 가스 · 배수 · 에어컨 …)만 더함
+   *  ③ 3D 렌더 · 사진 → 새 기물은 넣지 않고, 이미 있는 기물의 색 · 마감 색만 맞춤 (기준 기물이 하나도 없을 때만 렌더로 배치)
+   *  같은 종류가 600mm 안에 이미 있으면 다시 넣지 않는다. */
+  let aiN = 0, fin = {}, tint = 0, skip = 0; const MEP = /^(outlet|tvport|water|gasvalve|drain|trench|hood|exhaustfan|l_|ac_|e_spk|cctv|airlouver)/;
+  const near = (type, x, y, r = 600) => L.items.find((q) => q.type === type && Math.hypot(q.x - x, q.y - y) < r);
+  const order = { plan: 0, elec: 1, render: 2 }, files = IMP.files.filter((q) => !/\.dxf$/i.test(q.name)).sort((a, b) => order[a.role] - order[b.role]);
+  if (useAI) for (const f of files) { const kind = f.role === 'elec' ? 'elec' : f.role === 'render' ? 'render' : 'plan'; imLog(`AI 가 ${IMP_ROLE[f.role]} "${f.name}" 를 읽는 중… (${kind === 'plan' ? '기준: 벽 · 기물' : kind === 'elec' ? '없는 설비만 더함' : '색 · 마감만 맞춤'})`);
+    try { const r = await cloud.readLayout(await cloud.prepFile(f.name, f.data), kind, S.lib, size); fin = kind === 'render' ? { ...fin, ...r.finishes } : { ...r.finishes, ...fin };
+      const base = L.items.filter((q) => !MEP.test(q.type)).length; let add = 0, col = 0;
+      for (const q of r.items) { const x = Math.round(box.x0 + q.x * size.w), y = Math.round(box.y0 + q.y * size.d);
+        if (kind === 'elec' && !MEP.test(q.type)) { skip++; continue; } /* 전열 · 설비도: 가구 · 주방기물은 평면도 것을 씀 */
+        if (kind === 'render' && base > 0) { const m = near(q.type, x, y, 1800) || L.items.filter((z) => z.type === q.type).sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))[0]; if (m && q.color) { m.color = q.color; col++; } continue; } /* 렌더: 색만 */
+        if (near(q.type, x, y)) { skip++; continue; }
+        const it = mkItem(q.type, x, y, q.rot, { pz: 'ai' }); if (q.w && q.w > 100 && q.w < 12000) it.w = q.w; if (q.d && q.d > 50 && q.d < 6000) it.d = q.d; if (q.color) it.color = q.color; L.items.push(it); aiN++; add++; }
+      tint += col; imLog(`  → ${kind === 'render' && base > 0 ? `기물 ${col}개 색 맞춤` : `기물 ${add}개 넣음`}${r.notes.length ? ' · ' + r.notes.join(' / ') : ''}`); } catch (e) { imLog('  → 못 읽었어요' + (e.code ? ' · ' + e.code : ': ' + (e.message || e))); if (e.code === 'E-KEY') break; } }
+  if (skip) imLog(`겹치는 것 ${skip}개는 넣지 않았어요 (같은 기물이 이미 있음 · 전열도의 가구 등)`);
   if (!aiN && IMP.kind && SH.BIZ[IMP.kind]) { const pr = SH.BIZ[IMP.kind], r = SH.autoLayout(L, S.lib, { kind: IMP.kind, ratio: pr.ratio, front: 'auto', aisle: aisleOf(), clear: true, scope: { kitchen: 1, hall: 1, mep: 1, finish: 1 }, dish: /hall/.test(IMP.kind) && !/deliv/.test(IMP.kind) }, mkItem, uid); imLog(r.error ? '자동 배치 못 함: ' + r.error : `프리셋 "${pr.name}" 자동 배치 · ${r.placed}개 (주방 규칙 적용)`); }
   if (fin.wall) for (const w of L.walls) if (w.pz !== 'part') w.color = fin.wall;
   if (fin.ceiling) L.ceiling = { ...(L.ceiling || {}), on: true, color: fin.ceiling };
@@ -1833,7 +1845,7 @@ async function boot() {
   // 마지막으로 작업하던 프로젝트를 연다 (자동 저장)
   let first = null; try { const id = lib2.lastId(); first = id && (await lib2.loadLocal(id)); } catch (e) { console.warn(e); }
   await setModel(first || emptyProject());
-  window.__goBack = goBack; window.BYR = { S, engine, plan, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
+  window.__goBack = goBack; window.BYR = { S, engine, plan, mkItem, emptyProject, setModel, level, commit, uid, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
   initLang(); checkUpdate(); showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
   if ($('#introVer')) $('#introVer').textContent = 'v' + APP_VERSION;
   const intro = $('#intro'), wait = Math.max(1200, 3000 - performance.now()); /* 로딩 화면: 처음부터 최소 3초 · 준비가 끝난 뒤에도 1.2초 더 */ setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
