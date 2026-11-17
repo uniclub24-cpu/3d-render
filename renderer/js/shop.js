@@ -172,7 +172,7 @@ export function setCustomBiz(list) {
     BIZ['u_' + p.id] = { ...base, name: p.name || '내 프리셋', ratio: +p.ratio || base.ratio, pel: p.pel ?? base.pel, colors: p.colors || {}, kitchen: (p.kitchen && p.kitchen.length ? p.kitchen : base.kitchen).map((r) => [r[0], +r[1] || 0, +r[2] || 0, Math.max(1, +r[3] || 1), ROLES.includes(r[4]) ? r[4] : 'prep']), custom: p }; }
 }
 /** 체크 무늬 바닥 이미지 (2×2 칸) · grout = 줄눈만 */
-function checker(a, b, px, grout) {
+export function checker(a, b, px, grout) {
   if (typeof document === 'undefined') return null; const c = document.createElement('canvas'); c.width = c.height = px * 2; const g = c.getContext('2d');
   for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) { g.fillStyle = grout ? a : (i + j) % 2 ? b : a; g.fillRect(i * px, j * px, px, px); }
   g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 1; for (let k = 0; k <= 2; k++) { g.beginPath(); g.moveTo(k * px, 0); g.lineTo(k * px, px * 2); g.moveTo(0, k * px); g.lineTo(px * 2, k * px); g.stroke(); }

@@ -17,7 +17,7 @@ function smoke(win) {
   const t0 = Date.now(), tick = async () => {
     const ok = await win.webContents.executeJavaScript('!!(window.BYR && BYR.S.model && BYR.plan)').catch(() => false);
     if (ok) {
-      const r = await win.webContents.executeJavaScript(`(async () => { const res = await fetch('./data/legacy-sample.json'); await BYR.openJson('샘플', new Uint8Array(await res.arrayBuffer())); for (const s of ['toon','tycoon','comic','clay','plan','real']) BYR.setStyle(s); const L = BYR.S.model.levels[0]; return L.walls.length + '/' + L.items.length; })()`).catch((e) => 'ERR ' + e.message);
+      const r = await win.webContents.executeJavaScript(`(async () => { const res = await fetch('./data/legacy-sample.json'); await BYR.openJson('샘플', new Uint8Array(await res.arrayBuffer())); for (const s of ['toon','tycoon','comic','clay','lowpoly','pop','oriental','plan','real']) BYR.setStyle(s); const L = BYR.S.model.levels[0]; return L.walls.length + '/' + L.items.length; })()`).catch((e) => 'ERR ' + e.message);
       console.log('[smoke] boot ok · sample walls/items', r, errs.length ? '· console errors: ' + errs.join(' | ') : '');
       app.exit(/^ERR/.test(r) || errs.length ? 1 : 0); return;
     }
@@ -56,6 +56,7 @@ function createWindow() {
     dialog.showMessageBox(win, { type: 'question', buttons: ['종료', '취소'], defaultId: 1, cancelId: 1, title: 'BYR2', message: 'BYR2 를 종료할까요?', detail: '작업은 이 PC 에 자동 저장돼 있어요. 다시 켜면 이어서 할 수 있어요.' })
       .then((r) => { if (r.response === 0) { win.__quit = true; win.close(); } });
   });
+  win.removeMenu(); /* Alt 를 눌러도 메뉴 막대가 뜨지 않게 (Alt+끌기 = 공간 그리기) */
   win.loadURL('app://byr/index.html'); autoUpdate(win);
   if (SMOKE) smoke(win);
   // 외부 링크로 창이 넘어가지 않게

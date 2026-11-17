@@ -157,3 +157,27 @@ export async function readSpec(file, lib) {
   const kitchen = (j.kitchen || []).filter((r) => Array.isArray(r) && lib[r[0]]).map((r) => [r[0], Math.round(+r[1] || 0), Math.round(+r[2] || 0), Math.max(1, Math.min(9, Math.round(+r[3] || 1))), String(r[4] || 'prep')]);
   return { name: String(j.name || '내 프리셋').slice(0, 40), base: String(j.base || 'pel_hall'), ratio: Math.min(1, Math.max(0.15, +j.ratio || 0.35)), colors, kitchen, notes: (j.notes || []).map(String).slice(0, 8) };
 }
+
+/**
+ * 매장 자료 → 기물 · 마감 (자료로 매장 만들기)
+ * kind: 'render' (3D 렌더 · 현장 사진) · 'elec' (전열 · 설비 도면) · 'plan' (평면도 안의 기물)
+ * 좌표는 그림이 아니라 "매장 안쪽 네모" 기준 0..1 (위에서 본 평면 · 출입구 쪽이 아래) 로 받는다 → 도면 · 렌더 · 전열도를 같은 틀에 겹칠 수 있다.
+ */
+export async function readLayout(file, kind, lib, size) {
+  const extra = kind === 'elec' ? ['outlet', 'outlet3', 'switch', 'panel', 'l_down', 'l_surface', 'l_flat', 'l_line', 'l_pin', 'l_hood', 'l_globe', 'exitsign', 'aircurtain', 'wallvent'] : ['l_down', 'l_surface', 'l_flat', 'l_line', 'l_globe', 'l_pin', 'pel_neon_h', 'pel_neon_v', 'pel_menu', 'pel_band', 'pel_wood', 'pel_window', 'pel_glass', 'pel_dome', 'menuboard', 'neonsign', 'plant'];
+  const ids = [...new Set([...(kind === 'elec' ? [] : AI_TYPES), ...extra])].filter((k) => lib[k]).map((k) => `${k}=${lib[k].name}`).join(', ');
+  const what = kind === 'render' ? 'a 3D rendering or photo of a restaurant interior' : kind === 'elec' ? 'an electrical / MEP drawing (outlets, switches, lighting, panel) of a restaurant' : 'a floor plan of a restaurant with furniture and equipment';
+  const prompt = `This is ${what}${size ? ` whose interior is about ${Math.round(size.w)} mm wide and ${Math.round(size.d)} mm deep` : ''}. Answer JSON only:
+{"size":{"w_mm":0,"d_mm":0},"items":[{"type":"id","x":0.5,"y":0.5,"rot":0,"w_mm":0,"d_mm":0,"color":"#hex"}],"finishes":{"floor":"#hex","floor2":"#hex","wall":"#hex","ceiling":"#hex","counter":"#hex","accent":"#hex"},"kitchen":{"x0":0,"y0":0,"x1":0,"y1":0},"notes":["short"]}
+Coordinates: imagine the store seen from directly above, the entrance side at the BOTTOM. x = 0..1 from left to right inner wall, y = 0..1 from back (top) to entrance (bottom). Give the CENTER of each item.
+rot: 0 = front faces the entrance (down), 90 = faces left, 180 = faces back, 270 = faces right.
+type must be one of: ${ids}. Use the closest type; skip things you cannot place. Repeat items (each chair / light / outlet separately) up to 150 items.
+size: interior size in mm only if you can read or estimate it (else null). kitchen: the kitchen area rectangle in the same 0..1 frame, or null.
+finishes: dominant colours you can see (null if unknown). floor2 = second floor tile colour for checker floors.`;
+  const j = await ask(prompt, file, 12000), hex = (v) => (/^#[0-9a-f]{6}$/i.test(v || '') ? v : null), cl = (v) => Math.min(1, Math.max(0, +v || 0));
+  const items = (j.items || []).filter((q) => q && lib[q.type]).slice(0, 200).map((q) => ({ type: q.type, x: cl(q.x), y: cl(q.y), rot: (Math.round((+q.rot || 0) / 90) * 90 + 360) % 360, w: Math.round(+q.w_mm || 0) || null, d: Math.round(+q.d_mm || 0) || null, color: hex(q.color) }));
+  const f = j.finishes || {}, finishes = {}; for (const k of ['floor', 'floor2', 'wall', 'ceiling', 'counter', 'accent']) if (hex(f[k])) finishes[k] = f[k];
+  const sz = j.size && +j.size.w_mm > 1000 && +j.size.d_mm > 1000 ? { w: Math.round(+j.size.w_mm), d: Math.round(+j.size.d_mm) } : null;
+  const K = j.kitchen && [j.kitchen.x0, j.kitchen.y0, j.kitchen.x1, j.kitchen.y1].every((v) => v != null) ? [cl(j.kitchen.x0), cl(j.kitchen.y0), cl(j.kitchen.x1), cl(j.kitchen.y1)] : null;
+  return { items, finishes, size: sz, kitchen: K, notes: (j.notes || []).map(String).slice(0, 6) };
+}

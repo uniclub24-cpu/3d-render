@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.15';
+export const APP_VERSION = '2.1.16';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -203,7 +203,11 @@ const ACT = {
   open: async () => handleFiles(await openFiles({ title: 'BYR 프로젝트', extensions: ['json'] })),
   save: async () => { const p = await saveFile({ title: 'BYR 프로젝트', defaultName: safeName() + '.byr.json', extensions: ['json'], data: JSON.stringify(S.model) }); if (p) toast('저장했어요'); },
   legacy: async () => handleFiles(await openFiles({ title: '기존 앱 JSON', extensions: ['json'], multi: false })),
-  sample: async () => { const r = await fetch('./data/legacy-sample.json'); await openJson('샘플', new Uint8Array(await r.arrayBuffer())); },
+  sample: async () => {
+    const k = await ask('샘플 매장', '페리카나 매뉴얼(2025.01) 기준으로 주방 규칙 · 네온 · 시트 · 우드 패널까지 넣은 매장을 만들어요. 만든 뒤 자유롭게 고쳐도 돼요.', [{ label: '취소', value: false }, { label: '예전 앱 샘플', value: 'old' }, { label: '배달 매장 5×8m', value: 'pel_delivery' }, { label: '홀 매장 8×15m', value: 'pel_hall', kind: 'pri' }]);
+    if (!k) return; if (k === 'old') { const r = await fetch('./data/legacy-sample.json'); return openJson('샘플', new Uint8Array(await r.arrayBuffer())); }
+    await makeSample(k);
+  },
   asset: async () => handleFiles(await openFiles({ title: '3D 에셋 (연결된 .bin · 텍스처도 함께 고르세요)', extensions: [...ASSET_EXT, ...RES_EXT], multi: true })),
   glb: async () => { setSel(null); const data = await engine.withRealMaterials(() => exportGLB(engine.world)); const p = await saveFile({ title: 'glTF 바이너리', defaultName: safeName() + '.glb', extensions: ['glb'], data }); if (p) toast(`GLB 로 내보냈어요 (${(data.byteLength / 1e6).toFixed(1)}MB) · Blender · D5 Render · Twinmotion 에서 가져오기`); },
   glbAll: async () => { // 모든 층을 높이대로 쌓아서 한 파일로
@@ -228,6 +232,7 @@ function patchSel(patch, rebuild = true) { const it = selItem(); if (!it) return
 const num = (label, key, v, step = 10) => `<label class="fld">${label}<input type="number" inputmode="numeric" data-k="${key}" value="${Math.round(v)}" step="${step}"></label>`;
 function renderProps() {
   const el = $('#props'), body = $('#propsBody'); el.hidden = !S.propsOpen; $('#fab').setAttribute('aria-expanded', String(S.propsOpen)); if (!S.propsOpen) return;
+  if (engine.design.active && S.panel !== 'design') { const keep = S.panel; endDesign(true); S.panel = keep; toast('디자인 수정을 저장하고 다른 작업으로 넘어갔어요', 2200); } /* 다른 작업으로 넘어가면 커서가 묶이지 않게 */
   if (S.panel === 'ai') return renderAi(body);
   if (S.panel === 'design') return renderDesign(body);
   if (S.panel === 'library') return renderLibrary(body);
@@ -366,8 +371,10 @@ function renderRoom(body, r) {
   const L = level(), s = r.slope && r.slope.drain && r.slope.deg ? r.slope : null; if (s) SW.pct = SL.deg2pct(s.deg);
   const pct = SW.pct, ds = SL.drainsIn(L, r, S.lib), its = SL.itemsIn(L, r, S.lib), bad = its.filter((x) => SL.needFit(L, x, S.lib)), on = its.filter((x) => x.onSlope).length, area = (SL.polyArea(r.pts) / 1e6).toFixed(1);
   const cur = s ? (s.drain2 ? `트렌치 ${(Math.hypot(s.drain2[0] - s.drain[0], s.drain2[1] - s.drain[1]) / 1000).toFixed(2)}m 쪽으로` : '배수구(점) 쪽으로') + ` · 가장 높은 곳 +${SL.roomTop(r)}mm` : '아직 배수구 위치가 없어요';
-  $('#propsTitle').textContent = `공간 · ${r.name}`;
-  body.innerHTML = `<label class="fld">이름<input type="text" data-r="name" value="${esc(r.name)}"></label>
+  $('#propsTitle').textContent = `공간 · ${r.name}`; const inIt = L.items.filter((q) => SL.pointInPoly(q.x, q.y, r.pts));
+  body.innerHTML = `<div class="sec">편집 대상</div><div class="seg" role="group" aria-label="편집 대상"><button data-rsc="all" aria-pressed="${(S.roomScope || 'all') === 'all'}">공간 + 안의 기물 ${inIt.length}개</button><button data-rsc="floor" aria-pressed="${S.roomScope === 'floor'}">바닥(공간)만</button></div>
+    <p class="hint">${S.roomScope === 'floor' ? '공간을 끌어 옮기거나 고쳐도 안의 기물은 그대로 있어요.' : '공간을 끌면 안의 기물도 같이 움직여요.'}${inIt.length && S.roomScope !== 'floor' ? ' <button class="lnk" data-ra="pickIn">안의 기물만 한꺼번에 고르기</button>' : ''}</p>
+    <label class="fld">이름<input type="text" data-r="name" value="${esc(r.name)}"></label>
     <div class="sec">태그 · ${area}㎡</div>
     <div class="chips">${Object.keys(KINDS).map((k) => `<button data-kind="${k}" aria-pressed="${r.kind === k}"><i class="dot" style="background:${KINDS[k]}"></i>${k}</button>`).join('')}</div>
     <div class="btns"><button class="btn ${S.focus === r.id ? 'pri' : ''}" data-ra="focus">${S.focus === r.id ? '전체 보기로' : '이 공간만 작업'}</button><button class="btn" data-ra="export">별도 프로젝트로 보관</button></div>
@@ -412,8 +419,10 @@ function renderRoom(body, r) {
   $$('[data-lyr]', body).forEach((b) => (b.onclick = () => { r.vis ||= {}; const k = b.dataset.lyr; r.vis[k] = r.vis[k] === false; if (Object.values(r.vis).every((v) => v !== false)) delete r.vis; engine.applyFocus(); plan.redraw(); commit(); renderProps(); }));
   $$('[data-dr]', body).forEach((b) => (b.onclick = () => { const it = L.items.find((q) => q.id === b.dataset.dr); if (it) setDrain(r, it, `"${it.name}" 쪽으로 구배를 잡았어요`); renderProps(); }));
   { const ts = $('[data-k=texSize]', body); if (ts) ts.onchange = () => { r.tex.size = clamp(+ts.value || 600, 50, 20000); engine.rebuildStructure(); commit(); }; }
+  $$('[data-rsc]', body).forEach((b) => (b.onclick = () => { S.roomScope = b.dataset.rsc; renderProps(); }));
+  const pin = $('[data-ra=pickIn]', body); if (pin) pin.onclick = (e) => { e.stopImmediatePropagation(); const ids = level().items.filter((q) => SL.pointInPoly(q.x, q.y, r.pts)).map((q) => q.id); setSel(null); plan.setMulti(ids); toast(`안의 기물 ${ids.length}개를 골랐어요 · 오른쪽에서 한꺼번에 정렬 · 색 · 삭제`, 3000); };
   $$('[data-ra=tex],[data-ra=texX]', body).forEach((b) => (b.onclick = async (e) => { e.stopImmediatePropagation(); if (b.dataset.ra === 'texX') delete r.tex; else { const img = await pickTexture(); if (!img) return; r.tex = { img, size: (r.tex && r.tex.size) || 600 }; } engine.rebuildStructure(); commit(); renderProps(); }));
-  $$('[data-ra]:not([data-ra=tex]):not([data-ra=texX])', body).forEach((b) => (b.onclick = () => {
+  $$('[data-ra]:not([data-ra=tex]):not([data-ra=texX]):not([data-ra=pickIn])', body).forEach((b) => (b.onclick = () => {
     const a = b.dataset.ra;
     if (a === 'pt' || a === 'line') { if (SW.pick === a) endPick(); else startPick(r, a); renderProps(); }
     if (a === 'fit') fitItems(bad.map((x) => x.id));
@@ -556,6 +565,35 @@ function renderXray(body) {
 /* ----- 5차: 설비 점검 · 전력 · 견적 · 자동 배치 · A안/B안 (기존 앱 v7~v10) ----- */
 const aisleOf = () => S.model.aisle || 900;
 function mkItem(type, x, y, rot, over = {}) { const L = S.lib[type], it = spItem(type, x, y, rot, {}); delete it.room; if (L.parts) { it.parts = JSON.parse(JSON.stringify(L.parts)); it.pb = { w: L.w, d: L.d, h: L.h }; } return Object.assign(it, over); }
+/** 페리카나 샘플 매장: 사각 매장 → 자동 배치(주방 규칙) → 매뉴얼 사인 · 시트 · 조형물 */
+async function makeSample(kind) {
+  const hall = kind === 'pel_hall', W = hall ? 8000 : 5000, D = hall ? 15000 : 8000; await lib2.flush();
+  await setModel(emptyProject(hall ? '페리카나 홀 매장 (샘플)' : '페리카나 배달 매장 (샘플)', W, D));
+  const L = level(), pr = SH.BIZ[kind], r = SH.autoLayout(L, S.lib, { kind, ratio: pr.ratio, front: 'S', aisle: 1200, clear: true, scope: { kitchen: 1, hall: 1, mep: 1, finish: 1 }, dish: hall }, mkItem, uid);
+  if (r.error) return toast(r.error);
+  const add = (type, x, y, rot, over = {}) => { if (!S.lib[type]) return null; const it = mkItem(type, Math.round(x), Math.round(y), rot, { pz: 'pel', ...over }); L.items.push(it); return it; };
+  const iy0 = 75, iy1 = D - 75, ix0 = 75, ix1 = W - 75, part = L.walls.find((w) => w.pz === 'part'), py = part ? (part.y1 + part.y2) / 2 : iy0 + D * 0.4, counter = L.items.find((q) => /counter/.test(q.type));
+  /* 옆벽(오른쪽): 우드 월 패널 + 가로 네온 로고 + 장식 띠장 + 원형 장식 (매뉴얼 04 내부 사인) */
+  const hy0 = py + 700, hy1 = iy1 - 1300, hl = hy1 - hy0, hc = (hy0 + hy1) / 2, rx = ix1 - 10;
+  if (hl > 2000) { add('pel_wood', rx, hc, 90, { w: Math.round(hl / 100) * 100, h: 2700, elev: 0 });
+    add('pel_neon_h', rx - 25, hc, 90, { w: Math.min(1700, hl * 0.5), elev: 1650 }); add('pel_band', rx - 22, hc, 90, { w: Math.round(hl * 0.85 / 100) * 100, elev: 1890 });
+    if (hall) for (let k = 0; k < 3; k++) add('pel_dome', rx - 75, hy1 - 500 - k * 650, 90, { elev: 1250 }); }
+  /* 칸막이(홀 쪽): 메뉴 시트커팅 주황 띠 · 카운터 위 */
+  if (part) { const cx = counter ? counter.x : W / 2, n = hall ? 3 : 2, pw = 1466, menus = ['Spicy Red Chicken|Soy Sauce Chicken', 'Spicy Red & Sweet Soy Chicken|Hot Devil Chicken', 'Sweet Soy Chicken|Seasoned Chicken'];
+    const mb = L.items.filter((q) => q.type === 'menuboard'), bx0 = mb.length ? Math.min(...mb.map((q) => q.x - q.w / 2)) : cx - 300, bx1 = mb.length ? Math.max(...mb.map((q) => q.x + q.w / 2)) : cx + 300; /* 디지털 메뉴보드와 안 겹치게 양옆으로 */
+    const xs = []; for (let k = 0; k < n; k++) { const left = k % 2 === 0, j = Math.floor(k / 2), x = left ? bx0 - 120 - pw / 2 - j * (pw + 20) : bx1 + 120 + pw / 2 + j * (pw + 20); if (x - pw / 2 > ix0 + 100 && x + pw / 2 < ix1 - 100) xs.push(x); }
+    xs.forEach((x, k) => add('pel_menu', x, py + 90, 0, { elev: 1700, signText: menus[k % 3] })); }
+  /* 앞벽: 윈도우 시트 · 유리 시트커팅 · 바깥 간판 · 입구 옆 세로 네온 */
+  add('pel_window', ix0 + 900, iy1 - 4, 180, { w: 1000, h: 1500, elev: 700 }); add('pel_glass', ix1 - 900, iy1 - 4, 180, { w: 1000, h: 2000, elev: 100 });
+  add('pel_sign', W / 2, D + 75 + 110, 0, { w: W - 200, elev: 2750 });
+  if (hall) add('pel_neon_v', ix0 + 260, iy1 - 450, 0, { elev: 300 });
+  /* 조명 무리: 홀 직부등 · 카운터 위 펜던트 · 후드등 · 진열 핀조명 */
+  if (counter) for (let k = -1; k <= 1; k++) add('l_globe', counter.x + k * 900, counter.y + 450, 0, { elev: 1950 });
+  const hood = L.items.find((q) => q.type === 'hood'); if (hood) add('l_hood', hood.x, hood.y, hood.rot || 0, { elev: 1950 });
+  if (hl > 2000) for (let k = 0; k < 3; k++) add('l_pin', ix1 - 600, hy0 + 600 + k * (hl - 1200) / 2, 0);
+  engine.setLevel(L); applyEnv(); plan.fit(); syncCeilBtn(); commit(); engine.view('iso');
+  toast(`${pr.name} 샘플 · ${r.placed}개 + 매뉴얼 사인 · 시트 · 조형물 · 주방 ${r.kitchenA.toFixed(1)}㎡${r.hallA ? ` / 홀 ${r.hallA.toFixed(1)}㎡` : ''}`, 5000);
+}
 function goItem(id) { const it = level().items.find((q) => q.id === id); if (!it) return; setSel({ kind: 'item', id }); engine.frame([[it.x - 1500, it.y - 1500], [it.x + 1500, it.y + 1500]]); }
 function renderCheck(body) {
   const L = level(), a = SH.analyze(L, S.lib, aisleOf()), cnt = (l) => a.checks.filter((c) => c.lvl === l).length, ic = { bad: '⛔', warn: '⚠', work: '🛠' };
@@ -811,6 +849,10 @@ function keyPan(k, on, fast) {
 const KEYS = [['마우스 · 2D', [['그냥 끌기', '화면 옮기기 (기물은 안 움직임)'], ['누르기', '고르기 (오른쪽에 속성)'], ['Ctrl+Shift+끌기', '기물 · 벽 · 문 옮기기'], ['Ctrl+끌기', '길이 늘이기 · 줄이기 (잡은 쪽 끝)'], ['Shift+누르기 / Shift+끌기', '여러 개 고르기'], ['기물 앞 파란 손잡이', '돌리기 (15° 씩 · Shift 자유)'], ['휠', '확대 · 축소']]],
   ['마우스 · 3D', [['왼쪽 끌기', '돌려 보기'], ['오른쪽 끌기 · Shift+끌기', '바닥 따라 밀기'], ['휠', '가까이 · 멀리'], ['Ctrl+Shift+끌기', '기물 옮기기'], ['Ctrl+끌기', '기물 길이 늘이기']]],
   ['키보드', [['W A S D · 방향키', '화면 옮기기 (Shift = 빠르게) · 기물을 고르면 방향키는 10mm 이동 (Shift 100mm)'], ['Ctrl+B → W', '벽 바로 그리기'], ['T', '줄자'], ['M', '이동 모드 켜고 끄기 (그냥 끌어도 옮김)'], ['R · Shift+R · Ctrl+R', '90° 돌리기'], ['Ctrl+] / Ctrl+[', '크기 5% 키우기 · 줄이기'], ['Ctrl+Shift+> / <', '크기 10%'], ['G', '걷기'], ['H', '작업 기록'], ['Delete', '지우기'], ['Esc', '도구 끝내기 · 고르기 풀기'], ['Enter', '그리던 선 끝내기']]],
+  ['공간', [['Alt+끌기 (2D)', '공간 사각형 바로 그리기 · 벽을 조금(5% 이내) 넘기면 벽까지만'], ['공간 누르기', '오른쪽에서 "공간 + 안의 기물" / "바닥만" 골라 편집']]],
+  ['디자인 수정 (기물 · 벽)', [['부품 누르기 · Tab · Shift+Tab', '부품 고르기 · 다음 · 이전'], ['P · F', '점 끌기 · 면 밀고 당기기 모드'], ['Ctrl+Shift+끌기', '누른 부품 통째로 옮기기'], ['Ctrl+끌기', '누른 면 밀고 당기기 (어느 모드에서나)'], ['Ctrl+C · X · V · D', '부품 복사 · 잘라내기 · 붙여넣기 · 복제'], ['Delete', '부품 지우기'], ['Ctrl+Z · Ctrl+Y', '디자인 되돌리기 · 다시'], ['Enter', '완료 · 저장'], ['Esc', '끝내기 (고친 게 있으면 저장할지 물어봄)']]],
+  ['발표 모드', [['1 · 2 · 3', '자유 보기 · 설치물 보기 · 조명 모드'], ['Esc', '발표 끝내기']]],
+  ['어디서나', [['Esc', '하던 작업 멈추기 (그리기 · 이동 · 걷기 · 디자인 수정 · 고르기)'], ['Ctrl+Z', '한글 자판이어도 되돌리기']]],
   ['편집', [['Ctrl+Z · Ctrl+Shift+Z · Ctrl+Y', '되돌리기 · 다시'], ['Ctrl+C · X · V', '복사 · 잘라내기 · 붙여넣기'], ['Ctrl+D', '복제'], ['Ctrl+A', '모두 고르기 (2D)'], ['Ctrl+S', '프로젝트 저장'], ['Ctrl+O · Ctrl+N', '내 프로젝트 · 새 프로젝트'], ['Ctrl+P', '이미지 · 단면 · 시점'], ['F1 · Ctrl+/', '이 안내']]],
   ['걷기', [['W A S D', '걷기 (Shift = 뛰기)'], ['← →', '고개 돌리기'], ['Q · E', '눈높이 낮추기 · 높이기'], ['Esc', '걷기 끝']]]];
 function showKeys() {
@@ -992,10 +1034,21 @@ function envBird() { // 길 건너(매장 정면 쪽) 하늘에서 비스듬히 
 
 /* ----- 디자인 수정 ----- */
 const DE = { it: null };
+/** Esc: 지금 하던 작업을 무엇이든 멈춘다 (디자인 수정 · 걷기 · 그리기 도구 · 줄자 · 이동 · 고르기 순). 멈춘 게 있으면 true */
+function escAll() {
+  if (engine.design.active) { const d = engine.design; if (d.dirty) { ask('디자인 수정을 끝낼까요?', '고친 내용을 저장하고 나갈지, 버리고 나갈지 골라요.', [{ label: '계속 수정', value: null }, { label: '버리고 나가기', value: false }, { label: '저장하고 나가기', value: true, kind: 'pri' }]).then((r) => { if (r != null) { endDesign(r); renderProps(); } }); } else { endDesign(false); renderProps(); } return true; }
+  if (engine.walker.active) { engine.walker.stop ? engine.walker.stop() : stopWalk?.(); return true; }
+  if (S.dragTmp || engine.dragging) { engine.cancelDrag?.(); plan.cancelDrag?.(); }
+  if (S.patrol || S.cutRoom || S.roomDrag) { S.patrol = null; S.cutRoom = false; S.roomDrag = null; plan.redraw(); }
+  if (plan.tool && plan.tool !== 'select') { plan.picker = null; plan.cancelTool?.(); setPlanTool('select'); if (S.tucked) untuck(); toast('그리기를 멈췄어요', 1200); return true; }
+  if (engine.mode && engine.mode !== 'select') { setMode('select'); return true; }
+  if (engine.sim.on && S.patrol) { S.patrol = null; return true; }
+  return false;
+}
 function startDesign(it) {
   if (S.pane === '2d') setPane('split'); setFocus(null);
   DE.it = it; const d = engine.design; d.onChange = () => renderProps(); d.onSelect = () => renderProps();
-  d.start(it, bakeParts(it, { lib: S.lib, shapes: S.shapes })); S.panel = 'design'; S.propsOpen = true; renderProps();
+  S.panel = 'design'; S.propsOpen = true; d.start(it, bakeParts(it, { lib: S.lib, shapes: S.shapes })); renderProps();
   toast('점 모드: 파란 점을 끌어요 · 면 모드: 부품을 고른 뒤 면을 밀고 당겨요 · 부품을 누르면 그 부품을 골라요', 7000);
 }
 function endDesign(save) {
@@ -1142,7 +1195,7 @@ function startWallDesign(w) {
   const part = { n: 4, v: [...ring(0), ...ring(1)].flat(), c: w.color || '#ece8e1', m: 'plain', own: true };
   const g = engine.structure.getObjectsByProperty('name', '벽').find((x) => x.userData.wallId === w.id); if (!g) return;
   if (S.pane === '2d') setPane('split'); DE.it = null; DE.wall = w; const d = engine.design; d.onChange = () => renderProps(); d.onSelect = () => renderProps();
-  d.start({ id: 'wall', name: '벽', w: L, d: w.t, h: H }, [part], g); d.weld = false; S.panel = 'design'; S.propsOpen = true; renderProps();
+  S.panel = 'design'; S.propsOpen = true; d.start({ id: 'wall', name: '벽', w: L, d: w.t, h: H }, [part], g); d.weld = false; renderProps();
   toast('파란 점(모서리)을 끌어 벽 모양을 바꿔요 · 위 끝을 내리면 경사 벽, 두께 쪽을 밀면 두꺼워져요', 6000);
 }
 function endWallDesign(save) {
@@ -1302,7 +1355,7 @@ function placeDetected(wall, objs) {
 }
 
 /* ---------- 왼쪽 서랍: 아코디언 기물 목록 ---------- */
-const CAT_ORDER = ['내 기물', '주방', '테이블', '의자', '가구', '가전', '욕실', '조명', '천장 설비', '벽 설비', '전기', '바닥·배관', '설비', '공장', '인테리어', '식물', '주거', '배경'];
+const CAT_ORDER = ['내 기물', '페리카나', '주방', '테이블', '의자', '가구', '가전', '욕실', '조명', '천장 설비', '벽 설비', '전기', '바닥·배관', '설비', '공장', '인테리어', '식물', '주거', '배경'];
 function renderCatalog(q = '') {
   const by = new Map(); q = q.trim().toLowerCase();
   for (const [id, L] of Object.entries(S.lib)) { if (['zone', 'mesh', 'decal', 'mark'].includes(L.shape)) continue; if (q && !(L.name + ' ' + (L.sub || '') + ' ' + L.cat).toLowerCase().includes(q)) continue; if (!by.has(L.cat)) by.set(L.cat, []); by.get(L.cat).push([id, L]); }
@@ -1311,7 +1364,7 @@ function renderCatalog(q = '') {
 }
 function openDrawer() { $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); $('#scrim').hidden = false; $('#btnDrawer')?.setAttribute('aria-expanded', 'true'); }
 function closeDrawer() { $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); $('#scrim').hidden = true; $('#btnDrawer')?.setAttribute('aria-expanded', 'false'); }
-function setMode(m) { engine.mode = m; $$('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m))); syncModeChip(); }
+function setMode(m) { if (engine.design.active) endDesign(true); engine.mode = m; $$('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m))); syncModeChip(); }
 /** 지금 무엇을 하는 중인지 (작업대 · 도구) 늘 보여 주는 작은 표시 */
 const TOOLN = { wall: '벽 그리기', door1: '문 놓기', window: '창 놓기', pass: '배식구 놓기', roomRect: '공간 사각형', roomPoly: '공간 점 찍기', measure: '줄자', soffitRect: '천장 가벽', line: '선 그리기', pick: '누를 곳 고르기', erase: '지우기', boxsel: '여러 개 고르기', sketch: '낙서' };
 function syncModeChip() { const c = $('#modeChip'); if (!c || !engine) return; const t = plan && plan.tool !== 'select' ? TOOLN[plan.tool] || plan.tool : null, m = { select: '선택', move: '이동', orbit: '둘러보기' }[engine.mode] || '';
@@ -1371,10 +1424,11 @@ function buildDock() {
     else if (d.run) b.onclick = () => { closeHome(); d.run(); }; });
 }
 function stopWalk() { engine.walker.stop(); }
-function setPlanTool(t) { if (S.pane === '3d') setPane('split'); if (t !== 'select' && t !== 'boxsel') tuck(); plan.setTool(t); setTimeout(syncModeChip); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q.dataset.tool === t))); if (t === 'measure') toast('2D 에서 잴 두 점 사이를 끌어요 · 벽 끝 · 모서리에 붙어요 · 3D 에도 보여요', 5000); }
+function setPlanTool(t) { if (engine.design.active && t !== 'select') { endDesign(true); renderProps(); } if (S.pane === '3d') setPane('split'); if (t !== 'select' && t !== 'boxsel') tuck(); plan.setTool(t); setTimeout(syncModeChip); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q.dataset.tool === t))); if (t === 'measure') toast('2D 에서 잴 두 점 사이를 끌어요 · 벽 끝 · 모서리에 붙어요 · 3D 에도 보여요', 5000); }
 /* ---------- 프레젠테이션 모드 (고객 · 파트너 시연) ----------
  * 편집 막대를 숨기고 3D 만 크게. 위: 자유 보기 · 설치물 보기 · 조명 모드 / 아래: 스타일 필터 막대 (언제든 바꿈)
  * 나가면 재질 · 투명도 · 천장 · 조명 밝기 · 스타일 · 화면 나눔을 모두 들어오기 전으로. 모델은 바꾸지 않는다. */
+const LGROUPS = [['down', '매입 · 직부등'], ['pendant', '펜던트'], ['flat', 'LED 평판 · 라인등'], ['hood', '후드등'], ['pin', '핀 · 레일 조명'], ['etc', '스탠드 · 벽등 · 기타']];
 const present = {
   on: false, mode: 'free', prev: null, op: 0.25, master: 0.2,
   enter() {
@@ -1392,11 +1446,15 @@ const present = {
     const side = $('.pr-side', b); side.hidden = m === 'free';
     if (m === 'mep') side.innerHTML = `<b>설치물 보기</b><p>벽 · 바닥 · 천장 속 배관 · 전선 · 후드 · 덕트 · 보강재를 진한 색으로, 마감과 가구는 반투명 회색으로 보여요. (조명 기구는 빼요)</p>
       <label>마감 투명도 <output>${Math.round(this.op * 100)}%</output><input type="range" id="prOp" min="0" max="100" value="${Math.round(this.op * 100)}"></label>`;
-    if (m === 'light') { const L = engine.lightItems(); side.innerHTML = `<b>조명 · 디밍</b><p>천장을 열고 모든 조명을 20% 에서 시작해요. 오른쪽으로 밀면 밝아져요.</p>
+    if (m === 'light') { const L = engine.lightItems(), G = {}; for (const l of L) (G[l.group] ||= []).push(l); this.gv ||= {};
+      side.innerHTML = `<b>조명 · 디밍</b><p>천장을 열고 모든 조명을 20% 에서 시작해요. 오른쪽으로 밀면 밝아지고, 모두 0% 면 거의 깜깜해져요.</p>
       <label class="pr-master">전체 <output>${Math.round(this.master * 100)}%</output><input type="range" id="prMa" min="0" max="150" value="${Math.round(this.master * 100)}"></label>
-      <div class="pr-dims">${L.length ? L.map((l) => `<label>${esc(l.name)} <output>${Math.round(this.master * 100)}%</output><input type="range" data-dim="${l.id}" min="0" max="150" value="${Math.round(this.master * 100)}"></label>`).join('') : '<p>놓인 조명이 없어요 · 기물 → 조명에서 매입등 · 펜던트를 놓아 보세요</p>'}</div>`; }
+      <div class="pr-dims">${L.length ? LGROUPS.filter(([g]) => G[g]).map(([g, n]) => { const v = Math.round((this.gv[g] ?? this.master) * 100); return `<details class="pr-g"><summary><label>${n} · ${G[g].length}개 <output>${v}%</output><input type="range" data-dg="${g}" min="0" max="150" value="${v}"></label></summary>${G[g].map((l) => `<label class="pr-i">${esc(l.name)} <output>${v}%</output><input type="range" data-dim="${l.id}" data-of="${g}" min="0" max="150" value="${v}"></label>`).join('')}</details>`; }).join('') : '<p>놓인 조명이 없어요 · 기물 → 조명에서 직부등 · 펜던트 · 평판등 · 핀조명을 놓아 보세요</p>'}</div>`; }
     const op = $('#prOp', b); if (op) op.oninput = (e) => { this.op = +e.target.value / 100; e.target.previousElementSibling.textContent = e.target.value + '%'; engine.setPresentOpacity(this.op); engine.invalidate(false); };
-    const ma = $('#prMa', b); if (ma) ma.oninput = (e) => { this.master = +e.target.value / 100; e.target.previousElementSibling.textContent = e.target.value + '%'; $$('[data-dim]', b).forEach((d) => { d.value = e.target.value; d.previousElementSibling.textContent = e.target.value + '%'; engine.setDim(d.dataset.dim, this.master); }); engine.invalidate(true); };
+    const setIn = (sel, v) => $$(sel, b).forEach((d) => { d.value = Math.round(v * 100); d.previousElementSibling.textContent = Math.round(v * 100) + '%'; if (d.dataset.dim) engine.setDim(d.dataset.dim, v, true); });
+    const done = () => { engine.setDim('__none__', 0); engine._limitLights(); engine._darkness(); engine.invalidate(true); };
+    const ma = $('#prMa', b); if (ma) ma.oninput = (e) => { this.master = +e.target.value / 100; e.target.previousElementSibling.textContent = e.target.value + '%'; this.gv = {}; setIn('[data-dg]', this.master); setIn('[data-dim]', this.master); done(); };
+    $$('[data-dg]', b).forEach((d) => { d.onclick = (e) => e.stopPropagation(); d.oninput = (e) => { const g = d.dataset.dg, v = +e.target.value / 100; this.gv[g] = v; e.target.previousElementSibling.textContent = e.target.value + '%'; setIn(`[data-of="${g}"]`, v); done(); }; });
     $$('[data-dim]', b).forEach((d) => (d.oninput = (e) => { e.target.previousElementSibling.textContent = e.target.value + '%'; engine.setDim(d.dataset.dim, +e.target.value / 100); engine.invalidate(true); }));
     engine.invalidate(true);
   },
@@ -1428,6 +1486,13 @@ function slopeTool() {
 }
 
 /* ---------- 확인 창 ---------- */
+/** 글자 한 줄 받기 (이름 수정 등) */
+function askText(title, value = '') {
+  const p = ask(title, '', [{ label: '취소', value: false }, { label: '확인', value: true, kind: 'pri' }]);
+  const m = $('#dlgM'); m.innerHTML = `<input id="dlgIn" type="text" value="${esc(value)}" style="width:100%;font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line, #ccc)">`; const i = $('#dlgIn'); setTimeout(() => { i.focus(); i.select(); }, 40);
+  i.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#dlgB').lastElementChild.click(); } };
+  return p.then((ok) => (ok ? (i.value || '').trim().slice(0, 60) : null));
+}
 function ask(title, msg, buttons = [{ label: '취소', value: false }, { label: '확인', value: true, kind: 'pri' }]) {
   return new Promise((ok) => {
     const d = $('#dlg'); $('#dlgT').textContent = title; $('#dlgM').textContent = msg || '';
@@ -1488,18 +1553,79 @@ const HI = {
 };
 function showHome() { $('#home').hidden = false; renderHome(); }
 function closeHome() { $('#home').hidden = true; }
+/* ---------- 자료로 매장 만들기 (도면 · 3D 렌더 · 전열도 · 치수) ----------
+ * 1) 오프라인: DXF 도면 → 벽 / 치수(가로 × 세로) → 사각 매장 · 고른 업종 프리셋으로 자동 배치
+ * 2) AI(키가 있으면): 도면 그림 · PDF → 벽 · 문, 렌더 · 사진 → 기물 · 마감 색, 전열도 → 콘센트 · 조명
+ * 오프라인으로 만들다 깨지면(벽이 없음 · 치수 없음) AI 로 넘어가고, 키가 없으면 무엇이 필요한지 알려 준다. */
+const IMP = { files: [], w: '', d: '', kind: 'pel_hall', auto: true, name: '' };
+const IMP_ROLE = { plan: '평면도', render: '3D 렌더 · 사진', elec: '전열 · 설비도' };
+const guessRole = (n) => (/\.dxf$/i.test(n) || /평면|도면|plan|layout/i.test(n) ? 'plan' : /전열|전기|설비|조명도|elec|mep/i.test(n) ? 'elec' : /\.pdf$/i.test(n) ? 'plan' : 'render');
+function renderImport(log) {
+  SH.setCustomBiz(bizList()); const key = !!cloud.aiKey(), B = $('#homeBody');
+  B.innerHTML = `<div class="row2"><button class="btn" data-im="back">‹ 홈</button><b class="htitle">자료로 매장 만들기</b></div>
+    <section class="hsec"><b>1. 자료 올리기</b><p class="hint">평면도(DXF · 그림 · PDF), 3D 렌더 · 현장 사진, 전열 · 설비 도면을 섞어 올려도 돼요. 직영점 도면과 렌더를 같이 올리면 벽은 도면에서, 기물 · 색은 렌더에서 가져와요.</p>
+      <div class="ifiles">${IMP.files.map((f, i) => `<div class="ifile"><span>${esc(f.name)}</span><select data-ir="${i}">${Object.entries(IMP_ROLE).map(([k, n]) => `<option value="${k}" ${f.role === k ? 'selected' : ''}>${n}</option>`).join('')}</select><button class="lnk" data-ix="${i}">빼기</button></div>`).join('') || '<p class="hint">아직 올린 자료가 없어요</p>'}</div>
+      <div class="btns"><button class="btn" data-im="add">+ 자료 추가</button></div></section>
+    <section class="hsec"><b>2. 치수 · 옵션</b><p class="hint">치수를 넣으면 인터넷 없이도 바로 만들어요. 도면에 치수선이 있으면 비워도 돼요(DXF · AI).</p>
+      <div class="row"><label class="fld">이름<input id="imN" value="${esc(IMP.name)}" placeholder="예: 페리카나 ○○ 직영점"></label></div>
+      <div class="row"><label class="fld">가로 (m)<input id="imW" type="number" step="0.1" min="2" value="${IMP.w}" placeholder="예: 8"></label><label class="fld">세로 · 깊이 (m)<input id="imD" type="number" step="0.1" min="2" value="${IMP.d}" placeholder="예: 15"></label></div>
+      <label class="fld">업종 · 프리셋<select id="imK"><option value="">자동 배치 안 함 (벽만)</option>${Object.entries(SH.BIZ).map(([k, b]) => `<option value="${k}" ${IMP.kind === k ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label></section>
+    <section class="hsec"><b>3. 만들기</b><div class="btns"><button class="btn" data-im="off">인터넷 없이 만들기</button><button class="btn pri" data-im="ai" ${key ? '' : 'disabled'}>AI 로 자료 읽어 만들기</button></div>
+      <p class="hint">${key ? `AI: ${esc(cloud.PROVIDERS[cloud.aiProvider()].name)} 키 연결됨 · 그림 · PDF 자료는 AI 가 읽어요 (자료마다 30초~1분).` : 'AI 키가 없어요 · 홈 → AI 설정에서 키를 넣으면 그림 · PDF 자료도 읽어요. 지금은 DXF · 치수로만 만들어요.'}</p>
+      <pre class="ilog" id="imLog">${esc(log || '')}</pre></section>`;
+  const sync = () => { IMP.name = $('#imN').value; IMP.w = $('#imW').value; IMP.d = $('#imD').value; IMP.kind = $('#imK').value; };
+  $$('[data-ir]', B).forEach((x) => (x.onchange = () => { IMP.files[+x.dataset.ir].role = x.value; }));
+  $$('[data-ix]', B).forEach((x) => (x.onclick = () => { sync(); IMP.files.splice(+x.dataset.ix, 1); renderImport(); }));
+  $$('[data-im]', B).forEach((x) => (x.onclick = async () => { const a = x.dataset.im; if (a === 'back') return renderHome(); sync();
+    if (a === 'add') { const fs = await openFiles({ title: '도면 · 렌더 · 전열도', extensions: ['dxf', 'pdf', 'png', 'jpg', 'jpeg', 'webp'], multi: true }); for (const f of fs) IMP.files.push({ ...f, role: guessRole(f.name) }); return renderImport(); }
+    $$('[data-im]', B).forEach((q) => (q.disabled = true)); try { await buildFromDocs(a === 'ai'); } catch (e) { console.error(e); imLog('⛔ ' + (e.message || e)); $$('[data-im]', B).forEach((q) => (q.disabled = false)); } }));
+}
+const imLog = (t) => { const el = $('#imLog'); if (el) { el.textContent += (el.textContent ? '\n' : '') + t; el.scrollTop = 1e9; } };
+async function buildFromDocs(useAI) {
+  const W = Math.round(+IMP.w * 1000) || 0, D = Math.round(+IMP.d * 1000) || 0, plans = IMP.files.filter((f) => f.role === 'plan'), dxf = plans.find((f) => /\.dxf$/i.test(f.name)), pics = plans.filter((f) => !/\.dxf$/i.test(f.name));
+  const key = !!cloud.aiKey(); let walls = null, openings = [], how = '';
+  /* 1) 벽 */
+  if (dxf) { try { const X = CAD.parseDxf(new TextDecoder().decode(dxf.data)), r = CAD.dxfWalls(X, { wallT: 150 }); if (r.walls.length >= 3) { walls = r.walls; how = `DXF "${dxf.name}" 에서 벽 ${walls.length}개`; } else imLog('DXF 에서 벽을 거의 못 찾았어요'); } catch (e) { imLog('DXF 읽기 실패: ' + (e.message || e)); } }
+  if (!walls && useAI && pics.length) { imLog(`AI 가 평면도 "${pics[0].name}" 를 읽는 중…`); try { const r = await cloud.readPlan(await cloud.prepFile(pics[0].name, pics[0].data), 0); if (r.walls.length >= 3) { walls = r.walls; openings = r.openings; how = `AI 평면도 읽기 · 벽 ${walls.length}개 · 문/창 ${openings.length}개`; } } catch (e) { imLog('AI 평면도 읽기 실패: ' + (e.message || e)); } }
+  if (!walls && W >= 2000 && D >= 2000) { how = `치수 ${W / 1000}×${D / 1000}m 사각 매장`; }
+  if (!walls && !(W >= 2000 && D >= 2000)) {
+    if (!useAI && key && pics.length) { imLog('인터넷 없이 만들 수 있는 자료(DXF · 치수)가 없어 AI 로 이어서 해요…'); return buildFromDocs(true); }
+    throw new Error(key ? '벽을 만들 수 없어요 · 가로 × 세로 치수를 넣어 주세요' : '벽을 만들 수 없어요 · 가로 × 세로 치수를 넣거나(인터넷 없이), DXF 도면을 올리거나, AI 키를 연결해 주세요');
+  }
+  imLog('벽: ' + how); await lib2.flush();
+  const M = emptyProject(IMP.name || (IMP.files[0] ? IMP.files[0].name.replace(/\.[^.]+$/, '') : '자료로 만든 매장'), W || 8000, D || 6000); await setModel(M); const L = level();
+  if (walls) { applyPlan({ walls, openings, height: null }, 'replace'); }
+  /* 2) 기물 · 마감: AI(렌더 · 전열 · 평면 그림) → 없으면 프리셋 자동 배치 */
+  const b = SH.bounds(L), T = (L.walls[0] && L.walls[0].t || 150) / 2, box = { x0: b[0] + T, y0: b[1] + T, x1: b[2] - T, y1: b[3] - T }, size = { w: box.x1 - box.x0, d: box.y1 - box.y0 };
+  let aiN = 0, fin = {};
+  if (useAI) for (const f of IMP.files.filter((q) => !/\.dxf$/i.test(q.name))) { const kind = f.role === 'elec' ? 'elec' : f.role === 'render' ? 'render' : 'plan'; imLog(`AI 가 ${IMP_ROLE[f.role]} "${f.name}" 를 읽는 중…`);
+    try { const r = await cloud.readLayout(await cloud.prepFile(f.name, f.data), kind, S.lib, size); if (kind !== 'elec') fin = { ...r.finishes, ...fin };
+      for (const q of r.items) { const it = mkItem(q.type, Math.round(box.x0 + q.x * size.w), Math.round(box.y0 + q.y * size.d), q.rot, { pz: 'ai' }); if (q.w && q.w > 100 && q.w < 12000) it.w = q.w; if (q.d && q.d > 50 && q.d < 6000) it.d = q.d; if (q.color && kind === 'render') it.color = q.color; L.items.push(it); aiN++; }
+      imLog(`  → 기물 ${r.items.length}개${r.notes.length ? ' · ' + r.notes.join(' / ') : ''}`); } catch (e) { imLog('  → 못 읽었어요: ' + (e.message || e)); } }
+  if (!aiN && IMP.kind && SH.BIZ[IMP.kind]) { const pr = SH.BIZ[IMP.kind], r = SH.autoLayout(L, S.lib, { kind: IMP.kind, ratio: pr.ratio, front: 'auto', aisle: aisleOf(), clear: true, scope: { kitchen: 1, hall: 1, mep: 1, finish: 1 }, dish: /hall/.test(IMP.kind) && !/deliv/.test(IMP.kind) }, mkItem, uid); imLog(r.error ? '자동 배치 못 함: ' + r.error : `프리셋 "${pr.name}" 자동 배치 · ${r.placed}개 (주방 규칙 적용)`); }
+  if (fin.wall) for (const w of L.walls) if (w.pz !== 'part') w.color = fin.wall;
+  if (fin.ceiling) L.ceiling = { ...(L.ceiling || {}), on: true, color: fin.ceiling };
+  if (fin.floor) { const fl = L.rooms.length ? L.rooms : null; if (fl) fl.filter((r) => r.kind !== '주방').forEach((r) => { r.color = fin.floor; if (fin.floor2 && fin.floor2 !== fin.floor) r.tex = { img: SH.checker(fin.floor, fin.floor2, 64), size: 1200 }; }); else L.floor = { ...(L.floor || {}), color: fin.floor }; }
+  if (fin.counter) for (const it of L.items) if (/counter/.test(it.type)) it.color = fin.counter;
+  engine.setLevel(L); applyEnv(); plan.fit(); syncCeilBtn(); commit(); engine.view('iso');
+  imLog(`✅ 만들었어요 · 벽 ${L.walls.length} · 기물 ${L.items.length}${aiN ? ` (AI ${aiN})` : ''} · 작업 화면에서 이어서 고치세요`); IMP.files = [];
+  setTimeout(() => closeHome(), 1200);
+}
 async function renderHome() {
   const s = cloud.session(), pv = cloud.aiProvider(), key = cloud.aiKey(), last = lib2.lastSync(), list = await lib2.listLocal().catch(() => []), cur = S.model;
   $('#homeVer').textContent = `BYR Next ${APP_VERSION} · ${IS_APP() ? (window.byr ? 'PC' : '모바일') : '웹'}`;
   $('#homeBody').innerHTML = `
     <button class="hcont" data-h="cont">${SV(HI.cont)}<div><b>이어서 작업</b><small>${esc(cur ? cur.name : '')} · ${cur ? `벽 ${cur.levels[cur.activeLevel].walls.length} · 기물 ${cur.levels[cur.activeLevel].items.length}` : ''}</small></div></button>
     <div class="hacts">
+      <button data-h="import" class="hbig">${SV(HI.ai)}<span><b>자료로 매장 만들기</b><small>도면 · 3D 렌더 · 전열도를 올리면 BYR 매장으로</small></span></button>
+      <button data-h="sample" class="hbig">${SV(HI.sample)}<span><b>샘플 매장</b><small>페리카나 홀 매장 · 배달 매장</small></span></button>
       <button data-h="new">${SV(HI.new)}새 프로젝트</button><button data-h="open">${SV(HI.open)}파일 열기</button>
       <button data-h="legacy">${SV(HI.legacy)}기존 앱 파일 (JSON)</button><button data-h="account">${SV(HI.cloud)}기존 앱 계정에서</button>
-      <button data-h="asset">${SV(HI.model)}3D 모델 가져오기</button><button data-h="sample">${SV(HI.sample)}샘플 매장</button>
+      <button data-h="asset">${SV(HI.model)}3D 모델 가져오기</button>
     </div>
     <section class="hsec"><div class="row2"><b>내 프로젝트 · ${list.length}개</b>${list.length > 6 ? '<button class="btn" data-h="library">전체 · 정리</button>' : ''}</div>
-      <div class="hgrid">${list.slice(0, 6).map((p) => `<button class="hp ${cur && p.id === cur.id ? 'on' : ''}" data-op="${p.id}"><b>${esc(p.name)}</b><small>${new Date(p.updated).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${s ? (p.dirty ? ' · 올릴 예정' : ' · 동기화됨') : ''}${cur && p.id === cur.id ? ' · 지금 열림' : ''}</small></button>`).join('') || '<p class="hint">아직 저장된 프로젝트가 없어요</p>'}</div></section>
+      <div class="hgrid">${list.slice(0, S.homeAll ? 200 : 8).map((p) => `<div class="hp ${cur && p.id === cur.id ? 'on' : ''}"><button class="hpm" data-op="${p.id}"><b>${esc(p.name)}</b><small>${new Date(p.updated).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${s ? (p.dirty ? ' · 올릴 예정' : ' · 동기화됨') : ''}${cur && p.id === cur.id ? ' · 지금 열림' : ''}</small></button>
+        <div class="hpa"><button class="go" data-op="${p.id}">작업하기</button><button data-ren="${p.id}">이름 수정</button><button class="del" data-del="${p.id}">삭제</button></div></div>`).join('') || '<p class="hint">아직 저장된 프로젝트가 없어요</p>'}</div>${list.length > 8 && !S.homeAll ? '<button class="btn" data-h="all">모두 보기</button>' : ''}</section>
     <section class="hsec"><div class="row2"><b>계정 · 동기화</b><span class="stat ${s ? 'ok' : ''}"><i></i>${s ? '로그인됨' : '로그인 안 함'}</span></div>
       <p class="hint">${s ? `${esc(s.email || '')} · PC · 폰에서 같은 계정으로 로그인하면 내 프로젝트가 자동으로 맞춰져요${last ? ` · 마지막 ${new Date(last).toLocaleString('ko-KR')}` : ''}` : '기존 BYR 앱과 같은 이메일 · 비밀번호로 로그인하면, PC 에서 하던 작업을 폰에서 이어 하고 기존 앱 프로젝트도 불러올 수 있어요.'}</p>
       <div class="btns">${s ? '<button class="btn pri" data-h="sync">지금 동기화</button><button class="btn" data-h="account">기존 앱 프로젝트</button><button class="btn" data-h="logout">로그아웃</button>' : '<button class="btn pri" data-h="login">로그인</button>'}</div><p class="hint" id="hMsg"></p></section>
@@ -1508,12 +1634,17 @@ async function renderHome() {
       <div class="btns"><button class="btn" data-h="ai">${SV(HI.ai)} AI 설정</button></div></section>`;
   const act = async (h) => {
     if (h === 'cont') return closeHome();
+    if (h === 'import') return renderImport();
+    if (h === 'all') { S.homeAll = true; return renderHome(); }
     if (h === 'new') { closeHome(); return ACT.new(); }
     if (h === 'sync') { $('#hMsg').textContent = '동기화 중…'; try { const r = await lib2.syncNow(); await reloadIfChanged(r); $('#hMsg').textContent = `올림 ${r.up} · 받음 ${r.down}${r.conflict ? ` · 충돌 사본 ${r.conflict}` : ''}`; setTimeout(renderHome, 1200); } catch (e) { $('#hMsg').textContent = '동기화 실패: ' + (e.message || e); } return; }
     if (h === 'logout') { if (await ask('로그아웃할까요?', '이 기기의 프로젝트는 그대로 남아요. 계정에서 받아 온 AI 키는 이 기기에서 지워져요.')) { cloud.logout(); renderHome(); } return; }
     closeHome(); const map = { open: 'open', legacy: 'legacy', account: 'account', login: 'account', asset: 'asset', sample: 'sample', library: 'library', ai: 'ai' }; await ACT[map[h]]();
   };
   $$('[data-h]', $('#homeBody')).forEach((b) => (b.onclick = () => act(b.dataset.h)));
+  $$('[data-ren]', $('#homeBody')).forEach((b) => (b.onclick = async () => { const id = b.dataset.ren, m = cur && cur.id === id ? cur : await lib2.loadLocal(id); if (!m) return; const nm = await askText('프로젝트 이름 수정', m.name); if (!nm || nm === m.name) return; m.name = nm; if (cur && cur.id === id) { commit(); $('#projName') && ($('#projName').textContent = nm); } else { await lib2.saveLocal(m); if (cur) await lib2.saveLocal(cur); if (s) lib2.scheduleSync(800); } renderHome(); }));
+  $$('[data-del]', $('#homeBody')).forEach((b) => (b.onclick = async () => { const id = b.dataset.del, it = list.find((q) => q.id === id); if (!(await ask('프로젝트를 삭제할까요?', `"${it ? it.name : ''}" 을 이 기기${s ? '와 계정' : ''}에서 지워요. 되돌릴 수 없어요.`, [{ label: '취소', value: false }, { label: '삭제', value: true, kind: 'danger' }]))) return;
+    await lib2.removeLocal(id); if (s) lib2.scheduleSync(500); if (cur && cur.id === id) { await setModel(emptyProject('새 프로젝트', 8000, 6000)); } toast('삭제했어요'); renderHome(); }));
   $$('[data-op]', $('#homeBody')).forEach((b) => (b.onclick = async () => { if (cur && b.dataset.op === cur.id) return closeHome(); const m = await lib2.loadLocal(b.dataset.op); if (m) { closeHome(); await setModel(m); toast(`"${m.name}" 을 열었어요`); } }));
 }
 
@@ -1528,6 +1659,7 @@ async function boot() {
   const drainMoved = (it) => { if (it && SL.isDrainItem(it, S.lib) && level().rooms.some((r) => r.slope && r.slope.item === it.id)) liveStructure(); else if (it && level().items.some((q) => q.onSlope)) engine.replaceItems(); };
   engine.onMove = (it) => { plan.redraw(); drainMoved(it); }; // 3D 에서 끌면 2D 도 같이 · 배수 기물을 옮기면 구배도 따라감
   plan = new Plan2D($('#plan'), {
+    roomScope: () => S.roomScope || 'all',
     level, lib: S.lib, style: () => engine.style, toast,
     onSelect: (sel) => setSel(sel),
     onLive: (kind, x) => { if (kind === 'structure') liveStructure(); else if (kind === 'item') { engine.moveItem(x); drainMoved(x); } else if (kind === 'item-removed') engine.removeItem(x); else if (kind === 'itemSize') { engine.rebuildItem(x); if (S.sel && S.sel.id === x.id) renderProps(); } },
@@ -1586,13 +1718,29 @@ async function boot() {
   window.addEventListener('keydown', (e) => {
     if (present.on) { if (e.key === 'Escape') { e.preventDefault(); present.exit(); } else if (/^[123]$/.test(e.key)) present.set(['free', 'mep', 'light'][+e.key - 1]); if (!/^[wasd]$/i.test(e.key) || e.ctrlKey || e.metaKey) return; } /* 발표 중엔 편집 단축키 끔 */
     if (e.key === 'Escape' && (S.dlgClose || !$('#home').hidden && !S.propsOpen)) { e.preventDefault(); if (S.dlgClose) S.dlgClose(); else closeHome(); return; }
-    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (engine.design.active) { e.shiftKey ? engine.design.redo() : engine.design.undo(); return; } e.shiftKey ? redo() : undo(); }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); ACT.save(); }
-    if (engine.design.active) return;
-    if (engine.walker.active) return;
-    const mod = e.ctrlKey || e.metaKey, k = e.code && e.code.startsWith('Key') ? e.code.slice(3).toLowerCase() : e.key.toLowerCase(), it = selItem(); /* 한글 자판이어도 같은 키 */
+    /* 글자를 치는 칸에서만 단축키를 양보 (슬라이더 · 체크 · 색 · 단추에 초점이 남아 있어도 단축키는 먹게) */
+    const ae = document.activeElement, typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || (ae.tagName === 'INPUT' && !/^(range|checkbox|radio|color|button|submit|file)$/.test(ae.type)) || ae.isContentEditable);
+    const mod = e.ctrlKey || e.metaKey, k = e.code && e.code.startsWith('Key') ? e.code.slice(3).toLowerCase() : e.key.toLowerCase(), it = selItem(); /* 한글 자판(ㅋ)이어도 Ctrl+Z 등 같은 키 */
+    if (typing) { if (e.key === 'Escape') ae.blur(); return; }
+    if (ae && ae !== document.body && /INPUT|BUTTON|SELECT/.test(ae.tagName) && (mod || e.key === 'Escape' || e.key === 'Delete')) ae.blur();
+    if (mod && k === 'z') { e.preventDefault(); if (engine.design.active) { (e.shiftKey ? engine.design.redo() : engine.design.undo()) || toast(e.shiftKey ? '다시 할 게 없어요' : '되돌릴 게 없어요', 1200); renderProps(); return; } e.shiftKey ? redo() : undo(); return; }
+    if (mod && k === 's') { e.preventDefault(); ACT.save(); return; }
     if (e.key === 'F1' || (mod && (e.key === '/' || e.code === 'Slash'))) { e.preventDefault(); showKeys(); return; }
+    if (e.key === 'Escape' && escAll()) { e.preventDefault(); return; }
+    if (engine.design.active) { /* 디자인 수정 중: 부품 단축키 */
+      const d = engine.design;
+      if (mod && k === 'y') { e.preventDefault(); d.redo(); renderProps(); return; }
+      if (mod && k === 'c') { e.preventDefault(); d.copyPart(); toast(`부품 ${d.sel + 1} 을 복사했어요 · Ctrl+V 로 붙여넣기`, 1800); return; }
+      if (mod && k === 'x') { e.preventDefault(); d.copyPart(); if (!d.removePart(d.sel)) toast('부품이 하나뿐이라 자를 수 없어요'); renderProps(); return; }
+      if (mod && k === 'v') { e.preventDefault(); if (!d.pastePart()) toast('복사한 부품이 없어요'); renderProps(); return; }
+      if (mod && k === 'd') { e.preventDefault(); d.duplicatePart(d.sel); renderProps(); return; }
+      if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); if (!d.removePart(d.sel)) toast('부품이 하나뿐이라 지울 수 없어요'); renderProps(); return; }
+      if (!mod && e.key === 'Tab') { e.preventDefault(); d.selectPart((d.sel + (e.shiftKey ? -1 : 1) + d.parts.length) % d.parts.length); return; }
+      if (!mod && (k === 'p' || k === 'f')) { d.setMode(k === 'p' ? 'point' : 'face'); renderProps(); return; }
+      if (e.key === 'Enter') { endDesign(true); return; }
+      return;
+    }
+    if (engine.walker.active) return;
     if (mod && k === 'b') { e.preventDefault(); S.chordB = Date.now(); toast('Ctrl+B · 이어서 W = 벽 그리기', 1800); return; }
     if (!mod && k === 'w' && Date.now() - (S.chordB || 0) < 1800) { e.preventDefault(); S.chordB = 0; setPlanTool('wall'); toast('벽 그리기 · 점을 차례로 찍어요 · Esc 로 끝', 4000); return; }
     if (mod && k === 'y') { e.preventDefault(); redo(); return; }

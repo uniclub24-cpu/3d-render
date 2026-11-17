@@ -86,6 +86,28 @@ export function makeCurtain(wmm, hmm, color = '#c4161c', n = 3) {
   const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, W + 0.06, 10), material('steel', '#b9bfc6')); rod.rotation.z = Math.PI / 2; rod.position.y = 0.012; g.add(rod);
   return g;
 }
+/* ---------- 페리카나 매뉴얼 사인 · 시트 (캔버스로 그린 면) ----------
+ * L.sign = { kind: 'neon' | 'vneon' | 'menu' | 'glass' | 'wood' | 'window' | 'panel', text?, glow? } */
+const signCache = new Map();
+function signTex(S, w, h, text) {
+  const key = S.kind + ':' + (text || S.text || '') + ':' + Math.round(w / h * 100); if (signCache.has(key)) return signCache.get(key);
+  const k = 512 / Math.max(w, h), W = Math.max(64, Math.round(w * k * 2)), H = Math.max(64, Math.round(h * k * 2)), c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'), T = text || S.text || '';
+  const font = (px, wt = 900) => `${wt} ${px}px "Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif`, rr = (x, y, ww, hh, r) => { g.beginPath(); g.roundRect ? g.roundRect(x, y, ww, hh, r) : g.rect(x, y, ww, hh); };
+  if (S.kind === 'neon') { g.clearRect(0, 0, W, H); rr(W * 0.03, H * 0.12, W * 0.94, H * 0.76, H * 0.38); g.fillStyle = '#c99a62'; g.fill(); g.lineWidth = H * 0.06; g.strokeStyle = '#7a1418'; g.stroke(); rr(W * 0.07, H * 0.24, W * 0.86, H * 0.52, H * 0.26); g.fillStyle = '#f6ecd8'; g.fill();
+    g.font = font(H * 0.42); g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = '#ff2a1a'; g.shadowBlur = H * 0.08; g.fillStyle = '#d4141c'; g.fillText(T || '페리카나', W / 2, H * 0.52); }
+  else if (S.kind === 'vneon') { g.fillStyle = '#9aa0a6'; g.fillRect(0, 0, W, H); for (const y of [0.18, 0.5, 0.82]) { g.fillStyle = '#d4141c'; g.fillRect(0, H * y, W, H * 0.012); } g.save(); g.translate(W / 2, H / 2); g.rotate(Math.PI / 2); g.font = font(W * 0.42); g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = '#3cf0b0'; g.shadowBlur = W * 0.08; g.fillStyle = '#7ff5c8'; g.fillText(T || '페리카나', 0, 0); g.restore(); }
+  else if (S.kind === 'menu') { const rows = (T || 'Spicy Red Chicken|Soy Sauce Chicken').split('|'); g.fillStyle = '#d9dcdf'; g.fillRect(0, 0, W, H); const rh = H / rows.length; rows.forEach((t, i) => { g.fillStyle = '#ee8a1f'; g.fillRect(W * 0.01, i * rh + rh * 0.08, W * 0.98, rh * 0.84); g.font = font(rh * 0.42, 800); g.fillStyle = '#4a1a08'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, W / 2, i * rh + rh / 2); }); }
+  else if (S.kind === 'glass') { g.fillStyle = 'rgba(232,238,242,0.78)'; g.fillRect(0, 0, W, H); g.fillStyle = 'rgba(255,255,255,0.9)'; g.font = font(Math.min(W, H) * 0.12, 800); g.textAlign = 'center'; g.fillText(T || '페리카나', W / 2, H * 0.62); g.strokeStyle = 'rgba(150,160,168,.8)'; g.lineWidth = 4; g.strokeRect(2, 2, W - 4, H - 4); }
+  else if (S.kind === 'wood') { const n = Math.max(3, Math.round(w / 300)); for (let i = 0; i < n; i++) { g.fillStyle = ['#7a4a2b', '#6f4226', '#83512f'][i % 3]; g.fillRect((i * W) / n, 0, W / n, H); g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect((i * W) / n, 0, 2, H); for (let k2 = 0; k2 < 18; k2++) { g.fillStyle = 'rgba(0,0,0,.08)'; g.fillRect((i * W) / n + Math.random() * W / n, 0, 1.5, H); } } }
+  else if (S.kind === 'window') { g.fillStyle = 'rgba(255,255,255,0.0)'; g.clearRect(0, 0, W, H); g.fillStyle = '#d4141c'; g.font = font(Math.min(W / 6.2, H / 9)); g.textAlign = 'left'; g.textBaseline = 'top'; (T || 'DO YOU|REMEMBER|THE TASTE|OF THE|ORIGINAL|SEASONED|CHICKEN?').split('|').forEach((t, i) => g.fillText(t, W * 0.06, H * 0.08 + i * Math.min(W / 6.2, H / 9) * 1.08)); }
+  else { g.fillStyle = S.color || '#ac0610'; g.fillRect(0, 0, W, H); if (T) { g.fillStyle = S.fg || '#ffffff'; g.font = font(H * 0.35); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(T, W / 2, H / 2); } }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; signCache.set(key, t); return t;
+}
+function signFace(S, w, h, text) {
+  const map = signTex(S, w, h, text), glow = !!S.glow, transparent = ['neon', 'window', 'glass'].includes(S.kind);
+  const m = new THREE.MeshStandardMaterial({ map, transparent, alphaTest: S.kind === 'window' ? 0.05 : 0, roughness: 0.5, emissive: glow ? new THREE.Color('#ffffff') : new THREE.Color('#000000'), emissiveMap: glow ? map : null, emissiveIntensity: glow ? 0.9 : 0, depthWrite: !transparent || S.kind === 'neon' });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w * MM, h * MM), m); mesh.renderOrder = 2; return mesh;
+}
 export function buildItem(it, ctx) {
   const g = new THREE.Group(); g.name = it.name || it.type; g.userData.itemId = it.id;
   const L = ctx.lib[it.type], parts = it.parts || ctx.shapes[it.type];
@@ -102,11 +124,12 @@ export function buildItem(it, ctx) {
       return { color: main && it.color ? it.color : p.c || '#b8bcc2', tex: main && newTex ? newTex : p.m === baseTex && newTex && main ? newTex : p.m || 'plain' };
     };
     for (const m of partsToMeshes(parts, [it.w / (pb.w || it.w), it.h / (pb.h || it.h), it.d / (pb.d || it.d)], recolor)) g.add(m);
-  } else { // 모양 정보가 없으면 크기만 맞춘 상자
+  } else if (!(L && L.sign && L.sign.only)) { // 모양 정보가 없으면 크기만 맞춘 상자 (그림 면만 있는 시트 · 네온은 빼고)
     const m = new THREE.Mesh(new THREE.BoxGeometry(it.w * MM, it.h * MM, it.d * MM), material(MAT_TEX[it.mat] || 'plain', it.color || '#b8bcc2'));
     m.position.y = (it.h * MM) / 2; m.castShadow = m.receiveShadow = true; g.add(m);
   }
   if (it.tex && it.tex.img) { const tm = texMaterial(it.tex, it.tex.rep || 1); g.traverse((o) => { if (o.isMesh && (!it.tex.main || !o.userData.own)) o.material = tm; }); } /* 텍스처 입히기 */
+  if (L && L.sign) { const sg = signFace(L.sign, it.w, it.h, it.signText); sg.position.set(0, (it.h * MM) / 2, (it.d * MM) / 2 + 0.002); g.add(sg); if (L.sign.both) { const b = sg.clone(); b.rotation.y = Math.PI; b.position.z = -b.position.z; g.add(b); } } /* 그림 · 글자 면 (간판 · 네온 · 시트) */
   if (it.light && it.light.on) g.add(...makeLight(it));
   placeItem(g, it, ctx.zOf ? ctx.zOf(it) : it.elev);
   return g;

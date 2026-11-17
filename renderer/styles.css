@@ -262,3 +262,56 @@ body.presenting #stage { inset: 0 !important; }
 .pr-styles { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 4px; padding: 5px; border-radius: 16px; background: rgba(12,13,16,.6); pointer-events: auto; max-width: calc(100vw - 24px); overflow-x: auto; scrollbar-width: none; }
 .pr-styles button { white-space: nowrap; }
 @media (max-width: 640px) { .pr-side { top: auto; bottom: calc(70px + env(safe-area-inset-bottom, 0px)); max-height: 38vh; } .pr-ui button { padding: 7px 9px; } }
+#propsBody .seg button { flex: 1; min-height: 38px; border: 0; border-radius: 11px; background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+#propsBody .seg button[aria-pressed="true"] { background: var(--acc, #3d6bff); color: #fff; }
+.lnk { border: 0; background: none; color: var(--acc, #3d6bff); text-decoration: underline; font: inherit; cursor: pointer; padding: 0; }
+.pr-g { border-top: 1px solid rgba(255,255,255,.1); padding-top: 4px; }
+.pr-g summary { list-style: none; cursor: pointer; }
+.pr-g summary::-webkit-details-marker { display: none; }
+.pr-g summary label { font-weight: 600; }
+.pr-g .pr-i { padding-left: 10px; opacity: .85; }
+
+/* ---------- 홈(프로젝트 고르기): 밝은 화이트 톤 (애플 앱 느낌) ---------- */
+#home { --fg: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.08); --panel-solid: #ffffff; --accent: #0071e3; background: #f5f5f7; backdrop-filter: none; color: #1d1d1f; font-family: -apple-system, "SF Pro Text", "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif; }
+#home .hin { width: min(860px, 100%); gap: 18px; }
+#home .hhead b { color: #1d1d1f; font-weight: 700; letter-spacing: -.01em; font-size: 26px; }
+#home .hhead .ib { background: #e8e8ed; color: #1d1d1f; border-radius: 50%; }
+#home .hhead .ib svg { stroke: #1d1d1f; }
+#home .hint { color: #6e6e73; }
+#home .hcont { background: #1d1d1f; box-shadow: 0 10px 30px rgba(0,0,0,.12); border-radius: 20px; padding: 18px 20px; }
+#home .hacts { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+#home .hacts button { background: #fff; border: 0; border-radius: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 14px rgba(0,0,0,.04); color: #1d1d1f; font-weight: 500; transition: transform .12s, box-shadow .12s; cursor: pointer; }
+#home .hacts button:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,.06), 0 10px 24px rgba(0,0,0,.07); }
+#home .hacts button.hbig { grid-column: span 2; min-height: 78px; padding: 14px 16px; }
+#home .hacts button.hbig b { display: block; font-size: 15.5px; font-weight: 650; }
+#home .hacts button.hbig small { display: block; color: #6e6e73; font-size: 12.5px; margin-top: 2px; }
+#home .hacts button.hbig svg { width: 30px; height: 30px; }
+@media (max-width: 420px) { #home .hacts button.hbig { grid-column: 1 / -1; } }
+#home .hsec { background: #fff; border: 0; border-radius: 20px; padding: 18px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.035); }
+#home .hsec > b, #home .hsec .row2 b { font-size: 15px; font-weight: 650; color: #1d1d1f; }
+#home .btn { background: #e8e8ed; color: #1d1d1f; border: 0; border-radius: 980px; padding: 9px 16px; font-weight: 500; }
+#home .btn.pri { background: #0071e3; color: #fff; }
+#home .btn[disabled] { opacity: .45; }
+#home .hgrid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+#home .hp { background: #f5f5f7; border: 1px solid transparent; border-radius: 16px; padding: 12px; gap: 8px; color: #1d1d1f; }
+#home .hp.on { border-color: #0071e3; background: #f0f6ff; }
+#home .hp .hpm { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+#home .hp .hpm b { font-size: 14.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#home .hp small { color: #6e6e73; }
+#home .hpa { display: flex; gap: 6px; }
+#home .hpa button { flex: 1; border: 0; border-radius: 980px; padding: 6px 8px; font: inherit; font-size: 12.5px; background: #e8e8ed; color: #1d1d1f; cursor: pointer; }
+#home .hpa button.go { background: #0071e3; color: #fff; }
+#home .hpa button.del { color: #d70015; }
+#home .stat { color: #1d1d1f; }
+#home .credit { color: #a1a1a6; }
+#home .fld input, #home .fld select { background: #f5f5f7; color: #1d1d1f; border: 1px solid rgba(0,0,0,.08); border-radius: 12px; }
+#home .htitle { font-size: 18px; font-weight: 650; }
+#home .ifiles { display: flex; flex-direction: column; gap: 6px; }
+#home .ifile { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #f5f5f7; border-radius: 12px; font-size: 13px; }
+#home .ifile span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#home .ifile select { border-radius: 8px; border: 1px solid rgba(0,0,0,.1); padding: 4px 6px; background: #fff; color: #1d1d1f; }
+#home .ilog { white-space: pre-wrap; font: 12px/1.5 ui-monospace, Menlo, monospace; color: #1d1d1f; background: #f5f5f7; border-radius: 12px; padding: 10px; margin: 0; max-height: 220px; overflow: auto; }
+#home .ilog:empty { display: none; }
+#home .lnk { color: #0071e3; }
+#home .row2 { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+#home .row2 > .btn { flex: none; }

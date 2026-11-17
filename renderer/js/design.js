@@ -86,6 +86,10 @@ export class DesignEditor {
     const w = 200, d = 200, h = 100, v = [[cx - w / 2, maxY, cz - d / 2], [cx + w / 2, maxY, cz - d / 2], [cx + w / 2, maxY, cz + d / 2], [cx - w / 2, maxY, cz + d / 2]]; const p = { n: 4, v: [...v, ...v.map((q) => [q[0], q[1] + h, q[2]])].flat(), c: '#b8bcc2', m: 'plain', own: true };
     this.parts.push(p); this.T.push(topo(p)); this.selectPart(this.parts.length - 1); this.onChange();
   }
+  /** 부품 복사 · 붙여넣기 (Ctrl+C · Ctrl+V) — 붙일 때마다 50mm 씩 비켜 놓음 */
+  copyPart(i = this.sel) { this.T.forEach((T, k) => writeBack(this.parts[k], T)); this.clip = clone(this.parts[i]); this.clipN = 0; return !!this.clip; }
+  pastePart() { if (!this.clip) return false; this.snapshot(); const p = clone(this.clip), T = topo(p), off = 50 * (++this.clipN); T.P.forEach((q) => { q[0] += off; q[2] += off; }); this.parts.push(p); this.T.push(T); this.selectPart(this.parts.length - 1); this.onChange(); return true; }
+  get dirty() { return (this.undoStack || []).length > 0; }
   setMode(m) { this.mode = m; this.vSel = null; this.fSel = null; this.rebuild(); }
 
   /* ---------- 끌기 ---------- */
@@ -133,8 +137,17 @@ export class DesignEditor {
               pts.forEach((p, i) => { p[0] = start[i][0] + d[0]; p[1] = start[i][1] + d[1]; p[2] = start[i][2] + d[2]; }); this.rebuild(); } };
           e.stopImmediatePropagation(); cv.setPointerCapture(e.pointerId); this.rebuild(); return; }
       }
-      // (면 모드) 고른 부품의 면을 먼저 찾고, 없으면 누른 부품을 고른다
-      const fh = this.mode === 'face' ? this._pickFace(ray) : null;
+      // Ctrl+Shift+끌기: 누른 부품 통째로 옮기기 (화면과 나란한 면 위에서 · 5mm 단위)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+        const hit = ray.intersectObjects(this.root.children.filter((o) => o.userData.part != null), false)[0]; if (!hit) return;
+        const part = hit.object.userData.part; if (part !== this.sel) this.selectPart(part); this.snapshot();
+        const pts = this.T[part].P, start = pts.map((p) => [...p]), plane = new THREE.Plane().setFromNormalAndCoplanarPoint(this.e.camera.getWorldDirection(new THREE.Vector3()), hit.point), p0 = hit.point.clone();
+        drag = { move: (r) => { const p = new THREE.Vector3(); if (!r.ray.intersectPlane(plane, p)) return; const a = this._toLocal(p0), b = this._toLocal(p), d = [b.x - a.x, b.y - a.y, b.z - a.z].map((v) => Math.round(v / SNAP) * SNAP); pts.forEach((q, i) => { q[0] = start[i][0] + d[0]; q[1] = start[i][1] + d[1]; q[2] = start[i][2] + d[2]; }); this.rebuild(); } };
+        e.stopImmediatePropagation(); cv.setPointerCapture(e.pointerId); return;
+      }
+      // (면 모드 · 또는 Ctrl+끌기) 고른 부품의 면을 먼저 찾고, 없으면 누른 부품을 고른다
+      if ((e.ctrlKey || e.metaKey) && this.mode !== 'face') { const hit = ray.intersectObjects(this.root.children.filter((o) => o.userData.part != null), false)[0]; if (hit && hit.object.userData.part !== this.sel) this.selectPart(hit.object.userData.part); }
+      const fh = this.mode === 'face' || e.ctrlKey || e.metaKey ? this._pickFace(ray) : null;
       if (!fh) {
         const hit = ray.intersectObjects(this.root.children.filter((o) => o.userData.part != null), false)[0];
         if (hit && hit.object.userData.part !== this.sel) { this.selectPart(hit.object.userData.part); e.stopImmediatePropagation(); }

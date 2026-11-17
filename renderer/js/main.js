@@ -269,10 +269,21 @@ export class Engine {
   }
   /* ---------- 프레젠테이션 모드: free · mep(설치물 투시) · light(조명 · 디밍) ----------
    * 모델은 건드리지 않고 보이는 재질 · 천장 · 광원 세기만 바꾼다. 나가면 setPresent(null) 로 모두 원래대로. */
-  _isLightItem(g) { const it = this.level && this.level.items.find((q) => q.id === g.userData.itemId), L = it && this.ctx.lib[it.type]; return !!(L && (L.cat === '조명' || /^l_/.test(it.type))); }
+  /** 조명 기물인가 (튀김기 · 레인지의 불빛은 빼고) · 무리: 매입·직부등 / 펜던트 / LED 평판·라인 / 후드등 / 핀·레일 / 스탠드·벽등 */
+  lightGroup(it) { const L = it && this.ctx.lib[it.type]; if (!L) return null; const t = it.type, sh = L.shape || '';
+    if (/fryer|range|griddle|wok|oven|steam|soup/.test(t) || ['fryer', 'range'].includes(sh)) return null;
+    const lit = L.cat === '조명' || /^l_/.test(t) || ((L.light || it.light) && /light|pendant|track|lamp/.test(sh)); if (!lit) return null;
+    if (/hood/.test(t) || /후드등/.test(L.name || '')) return 'hood';
+    if (/pin|spot|track/.test(t) || sh === 'track') return 'pin';
+    if (sh === 'pendant' || /pendant|lantern|globe|ring|bar$|fact/.test(t)) return 'pendant';
+    if (/flat|line|strip|panel/.test(t)) return 'flat';
+    if (sh === 'light' || /down|surface|direct/.test(t)) return 'down';
+    return 'etc'; }
+  _isLightItem(g) { const it = this.level && this.level.items.find((q) => q.id === g.userData.itemId); return !!this.lightGroup(it); }
   _presentClear() {
     for (const e of this._pEdges || []) { e.parent && e.parent.remove(e); e.geometry.dispose(); } this._pEdges = [];
     if (this.presentLights) { this.presentLights = false; }
+    if (this._envOff) { setEnvMap(this.scene.environment); this._envOff = false; }
     this.setStyle(this.style); /* 재질 · 빛 · 노출 · 후처리를 스타일 기본으로 */
   }
   setPresent(mode, o = {}) {
@@ -286,21 +297,29 @@ export class Engine {
       for (const m of list) { m.userData.baseMat ||= m.material; if (isMep(m)) { m.material = bur; const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 25), edge); e.raycast = () => {}; m.add(e); this._pEdges.push(e); } else m.material = gray; }
       if (this.envGroup) this.envGroup.visible = false;
     } else if (mode === 'light') {
-      this.showCeiling(false); this.presentLights = true; this.ambient.intensity = Math.min(0.04, st.ambient * 0.15); this.sun.intensity = this.opt.sunPower * st.sun * 0.05; this.scene.environmentIntensity *= 0.08; this.renderer.toneMappingExposure *= 1.1;
+      this.showCeiling(false); this.presentLights = true; this._envI0 = this.scene.environmentIntensity; setEnvMap(null); this._envOff = true; /* 스테인리스 반사도 같이 어둡게 */ this.renderer.toneMappingExposure *= 1.1;
       const u = this.stylePass.mat.uniforms; u.uGlow.value = Math.max(u.uGlow.value, 0.55); u.uVig.value = Math.max(u.uVig.value, 0.35); this.stylePass.enabled = true; /* 어두운 데서 빛 번짐이 보이게 */
-      for (const g of this.items.children) if (this._isLightItem(g)) this.setDim(g.userData.itemId, o.dim ?? 0.2);
+      for (const g of this.items.children) if (this._isLightItem(g)) this.setDim(g.userData.itemId, o.dim ?? 0.2, true); this._darkness();
     } else if (this.envGroup) this.envGroup.visible = !this.focusPts;
     this._limitLights(); this.renderer.shadowMap.needsUpdate = true;
   }
   setPresentOpacity(a) { if (this._pGray) { this._pGray.opacity = a; this._pGray.depthWrite = a > 0.95; this._pGray.transparent = a < 1; this._pGray.needsUpdate = true; } }
   /** 조명 기물 목록 (프레젠테이션 디머용) */
-  lightItems() { return this.items.children.filter((g) => this._isLightItem(g)).map((g) => { const it = this.level.items.find((q) => q.id === g.userData.itemId); return { id: it.id, name: it.name || (this.ctx.lib[it.type] || {}).name || '조명', dim: g.userData.dim ?? 1 }; }); }
+  lightItems() { return this.items.children.filter((g) => this._isLightItem(g)).map((g) => { const it = this.level.items.find((q) => q.id === g.userData.itemId); return { id: it.id, name: it.name || (this.ctx.lib[it.type] || {}).name || '조명', group: this.lightGroup(it), dim: g.userData.dim ?? 1 }; }); }
+  /** 조명 모드의 어둠: 켜진 조명 중 가장 밝은 값에 따라 주변광 · 환경광 · 해를 낮춤 → 다 끄면 거의 암전 */
+  _darkness() { if (this.present !== 'light') return; const st = STYLES[this.style], m = Math.max(0, ...this.items.children.filter((g) => this._isLightItem(g)).map((g) => Math.min(1, g.userData.dim ?? 0)));
+    this.ambient.intensity = 0.006 + 0.045 * m * Math.min(1, st.ambient * 3); this.sun.intensity = this.opt.sunPower * st.sun * 0.04 * m; this.scene.environmentIntensity = (this._envI0 || 0.3) * (0.015 + 0.09 * m); this.renderer.shadowMap.needsUpdate = true; }
   /** 한 조명의 밝기 (0 ~ 1.5). 광원 세기 + 전등 몸체 발광 같이 */
-  setDim(id, v) {
+  setDim(id, v, quiet) {
     const g = this.itemGroup(id); if (!g) return; g.userData.dim = v;
-    g.traverse((o) => { if (o.userData.itemLight) o.userData.dim = v; if (o.isMesh && o.material && o.material.emissive) { const u = o.userData; if (!u.dimMat || o.material !== u.dimMat) { u.dimBase = o.material; u.dimMat = o.material.clone(); o.material = u.dimMat; } u.dimMat.emissiveIntensity = (u.dimBase.emissiveIntensity || 1) * v; if (lumC(u.dimBase.emissive) < 0.05 && v > 0) { u.dimMat.emissive.set('#ffe2bd'); u.dimMat.emissiveIntensity = 0.9 * v; } } });
-    this._limitLights();
+    g.traverse((o) => { if (o.userData.itemLight) o.userData.dim = v; if (!o.isMesh || !o.material || Array.isArray(o.material)) return; const u = o.userData;
+      if (!u.dimMat || o.material !== u.dimMat) { u.dimBase = o.material; u.dimMat = o.material.clone(); o.material = u.dimMat; }
+      const b = u.dimBase, m = u.dimMat;
+      if (m.emissive) { const glow = b.emissive && lumC(b.emissive) > 0.05; if (glow) { m.emissive.copy(b.emissive); m.emissiveIntensity = (b.emissiveIntensity || 1) * v; } else if (lumC(b.color || m.color) > 0.6) { m.emissive.set('#ffe7c4'); m.emissiveIntensity = 0.85 * v; } else m.emissiveIntensity = 0; }
+      else if (m.color && b.color) m.color.copy(b.color).multiplyScalar(0.06 + 0.94 * Math.min(1, v)); /* 빛나는 기본 재질(전구면)도 어둡게 */ });
+    if (!quiet) { this._limitLights(); this._darkness(); }
   }
+
   /** 천장 보이기 · 끄기 (모델의 level.ceiling.on 과 함께) */
   showCeiling(on) { if (this.structure) for (const g of this.structure.getObjectsByProperty('name', '천장')) g.visible = on; }
   /** 배경(상권) 다시 세우기. E = model.env */
@@ -368,8 +387,10 @@ export class Engine {
     const L = []; this.items.traverse((o) => { if (o.userData.itemLight) L.push(o); });
     const t = this.controls.target, p = new THREE.Vector3();
     L.sort((a, b) => a.getWorldPosition(p).distanceToSquared(t) - b.getWorldPosition(p).distanceToSquared(t));
-    const pl = this.presentLights, on = pl || (this.opt.itemLights && STYLES[this.style].lights), N = pl ? Math.max(24, QUALITY[this.qual].lights) : QUALITY[this.qual].lights, boost = STYLES[this.style].lightBoost || 1;
-    L.forEach((o, i) => { o.visible = on && i < N; o.intensity = (o.userData.bi ??= o.intensity) * boost * (pl ? (o.userData.dim ?? 1) * 3 : 1); }); /* 스타일 밝기 · 프레젠테이션 디밍 */
+    const pl = this.presentLights, on = pl || (this.opt.itemLights && STYLES[this.style].lights), N = pl ? Math.max(32, QUALITY[this.qual].lights) : QUALITY[this.qual].lights, boost = STYLES[this.style].lightBoost || 1;
+    let mx = 0; if (pl) for (const g of this.items.children) if (this._isLightItem(g)) mx = Math.max(mx, Math.min(1, g.userData.dim ?? 0));
+    const ownLight = (o) => { let p = o; while (p && !p.userData.itemId) p = p.parent; return p && this._isLightItem(p); };
+    L.forEach((o, i) => { o.visible = on && i < N; o.intensity = (o.userData.bi ??= o.intensity) * boost * (pl ? (ownLight(o) ? (o.userData.dim ?? 1) * 3 : 0.5 * mx) : 1); }); /* 조명 모드: 조명 기물만 디머대로 · 튀김기 불빛 등은 전체 밝기에 맞춰 약하게 */ /* 스타일 밝기 · 프레젠테이션 디밍 */
     this.lightInfo = { total: L.length, on: on ? Math.min(L.length, N) : 0 };
   }
 

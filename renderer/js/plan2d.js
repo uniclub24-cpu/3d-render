@@ -24,6 +24,18 @@ export class Plan2D {
   get L() { return this.api.level(); }
   redraw() { this.dirty = true; }
   resize() { const pr = Math.min(2, devicePixelRatio || 1), w = this.cv.clientWidth, h = this.cv.clientHeight; if (!w) return; this.cv.width = w * pr; this.cv.height = h * pr; this.pr = pr; if ((!this._fitted || this._needFit) && this.L) { this._fitted = true; this.fit(); } this.redraw(); }
+  /** 끌어 그린 사각형이 벽을 조금(가로 · 세로의 5% 이내) 넘었으면 그 벽 안쪽 면까지만 (넘어간 부분은 버림) */
+  clipRectToWalls(x0, y0, x1, y1) {
+    const W = x1 - x0, H = y1 - y0, tx = Math.max(150, W * 0.05), ty = Math.max(150, H * 0.05), ov = (a0, a1, b0, b1) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+    let L0 = x0, L1 = x1, T0 = y0, T1 = y1;
+    for (const w of this.L.walls || []) { const t = (w.t || 150) / 2, vx = Math.abs(w.x2 - w.x1) < 30, hz = Math.abs(w.y2 - w.y1) < 30;
+      if (vx) { const c = (w.x1 + w.x2) / 2, o = ov(Math.min(w.y1, w.y2), Math.max(w.y1, w.y2), y0, y1) / H; if (o < 0.3) continue;
+        if (c > x0 - t && c < x0 + tx) L0 = Math.max(L0, c + t); if (c < x1 + t && c > x1 - tx) L1 = Math.min(L1, c - t); }
+      if (hz) { const c = (w.y1 + w.y2) / 2, o = ov(Math.min(w.x1, w.x2), Math.max(w.x1, w.x2), x0, x1) / W; if (o < 0.3) continue;
+        if (c > y0 - t && c < y0 + ty) T0 = Math.max(T0, c + t); if (c < y1 + t && c > y1 - ty) T1 = Math.min(T1, c - t); } }
+    if (L1 - L0 < 300 || T1 - T0 < 300) { L0 = x0; L1 = x1; T0 = y0; T1 = y1; }
+    return [[L0, T0], [L1, T0], [L1, T1], [L0, T1]].map((q) => q.map(Math.round));
+  }
   setTool(t) { this.tool = t; this.chain = null; this.rpts = null; this.rrect = null; this.lpts = null; this.cv.style.cursor = t === 'select' ? 'default' : 'crosshair'; this.redraw(); }
   select(sel, quiet) { this.sel = sel; this.redraw(); if (!quiet) this.api.onSelect(sel); }
 
@@ -113,6 +125,7 @@ export class Plan2D {
       if (pts.size > 2) return;
       const p = this.evMm(e), start = { x: e.clientX, y: e.clientY };
       if (e.button === 1 || e.button === 2) { if (this.chain && e.button === 2) { this.chain = null; this.redraw(); return; } act = { pan: true, start, last: start }; return; }
+      if (e.altKey && e.button === 0 && e.pointerType === 'mouse' && this.tool !== 'wall') { const a0 = this.snapPoint(p); this.rrect = [a0, a0]; act = { rect: true, quick: true, start }; return; } /* Alt+끌기: 어떤 도구에서든 공간 사각형 바로 그리기 */
       if (this.tool === 'wall') { act = { wall: true, start, a: this.snapPoint(p) }; return; }
       if (this.tool === 'roomRect' || this.tool === 'soffitRect') { const a0 = this.snapPoint(p); this.rrect = [a0, a0]; act = { rect: true, start }; return; }
       if (this.tool === 'measure') { const a0 = this.snapPoint(p); this.mtmp = [a0, a0]; act = { meas: true, start }; return; }
@@ -164,7 +177,7 @@ export class Plan2D {
         else { this.addWall(this.chain.last, b); const closed = Math.hypot(b.x - this.chain.first.x, b.y - this.chain.first.y) < 1; this.chain = closed ? null : { ...this.chain, last: b }; this.api.onChange(closed ? '벽을 닫았어요' : '벽을 그렸어요'); }
         this.redraw(); return;
       }
-      if (a.rect) { const [q0, q1] = this.rrect; this.rrect = null; this.redraw(); if (Math.abs(q1.x - q0.x) < 300 || Math.abs(q1.y - q0.y) < 300) { this.api.toast('끌어서 사각형을 그려 주세요 (30cm 이상)'); return; } const x0 = Math.min(q0.x, q1.x), x1 = Math.max(q0.x, q1.x), y0 = Math.min(q0.y, q1.y), y1 = Math.max(q0.y, q1.y), pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map((q) => q.map(Math.round)); if (this.tool === 'soffitRect') this.api.onSoffit(pts); else this.api.onRoom(pts); return; }
+      if (a.rect) { const [q0, q1] = this.rrect; this.rrect = null; this.redraw(); if (Math.abs(q1.x - q0.x) < 300 || Math.abs(q1.y - q0.y) < 300) { this.api.toast('끌어서 사각형을 그려 주세요 (30cm 이상)'); return; } const x0 = Math.min(q0.x, q1.x), x1 = Math.max(q0.x, q1.x), y0 = Math.min(q0.y, q1.y), y1 = Math.max(q0.y, q1.y); let pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map((q) => q.map(Math.round)); if (a.quick) pts = this.clipRectToWalls(x0, y0, x1, y1); if (this.tool === 'soffitRect' && !a.quick) this.api.onSoffit(pts); else this.api.onRoom(pts); return; }
       if (a.sk) { const P = this.skp; this.skp = null; this.redraw(); if (P.length > 1 && this.api.onSketch) this.api.onSketch(P.map((q) => [Math.round(q.x), Math.round(q.y)])); return; }
       if (a.box) { const [q0, q1] = this.brect; this.brect = null; const x0 = Math.min(q0.x, q1.x), x1 = Math.max(q0.x, q1.x), y0 = Math.min(q0.y, q1.y), y1 = Math.max(q0.y, q1.y);
         const ids = this.L.items.filter((it) => !it.hidden && it.x >= x0 && it.x <= x1 && it.y >= y0 && it.y <= y1 && (!this.focus || this._inFocus(it))).map((it) => it.id); this.setMulti(a.add ? [...new Set([...(this.multi || []), ...ids])] : ids); return; }
@@ -186,7 +199,7 @@ export class Plan2D {
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (this.chain || this.rpts || this.lpts)) { this.chain = null; this.rpts = null; this.lpts = null; this.redraw(); } if (e.key === 'Enter' && this.lpts && this.lpts.length >= 2) { this.api.onLine(this.lpts.map((v) => [Math.round(v.x), Math.round(v.y)])); this.lpts = null; this.redraw(); } });
   }
   _dragRoom(r, p0, start) {
-    const pts0 = r.pts.map((q) => [...q]), its = this.L.items.filter((it) => pointInPoly(it.x, it.y, r.pts)).map((it) => ({ it, x: it.x, y: it.y })), sl = r.slope ? JSON.parse(JSON.stringify(r.slope)) : null;
+    const pts0 = r.pts.map((q) => [...q]), its = (this.api.roomScope && this.api.roomScope() === 'floor' ? [] : this.L.items).filter((it) => pointInPoly(it.x, it.y, r.pts)).map((it) => ({ it, x: it.x, y: it.y })), sl = r.slope ? JSON.parse(JSON.stringify(r.slope)) : null;
     const apply = (dx, dy) => { r.pts = pts0.map((q) => [q[0] + dx, q[1] + dy]); for (const q of its) { q.it.x = q.x + dx; q.it.y = q.y + dy; } if (sl) { r.slope.drain = [sl.drain[0] + dx, sl.drain[1] + dy]; if (sl.drain2) r.slope.drain2 = [sl.drain2[0] + dx, sl.drain2[1] + dy]; } };
     return { start, move: (p) => { apply(Math.round((p.x - p0.x) / GRID) * GRID, Math.round((p.y - p0.y) / GRID) * GRID); this.api.onLive('structure'); for (const q of its) this.api.onLive('item', q.it); },
       done: (m) => m && this.api.onChange(its.length ? `공간과 안의 기물 ${its.length}개를 옮겼어요` : ''), cancel: () => { apply(0, 0); this.api.onLive('structure'); for (const q of its) this.api.onLive('item', q.it); } };
