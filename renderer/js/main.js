@@ -24,9 +24,9 @@ import { pointInPoly, syncDrain } from './slope.js';
 /* 화질 단계: 편집할 때는 빠르게, 보여 줄 때는 곱게.
  * pr = 화면 배율 상한 · ssao = 그림자 짙게(rest = 멈췄을 때만) · shadow = 해 그림자 지도 크기 · lights = 동시에 켜는 기물 광원 수(바뀌면 셰이더를 다시 만들어 버벅이므로 고정) */
 export const QUALITY = {
-  fast: { name: '빠름 (편집)', pr: 1, ssao: false, shadow: 1024, soft: false, lights: 4 },
-  normal: { name: '보통', pr: 1.5, ssao: 'rest', shadow: 2048, soft: true, lights: 10 },
-  high: { name: '고급 (보여 주기)', pr: 2, ssao: true, shadow: 4096, soft: true, lights: 24 },
+  fast: { name: '빠름 (편집)', pr: 1, ssao: false, shadow: 1024, soft: false, lights: 8 },
+  normal: { name: '보통', pr: 1.5, ssao: 'rest', shadow: 2048, soft: true, lights: 20 },
+  high: { name: '고급 (보여 주기)', pr: 2, ssao: true, shadow: 4096, soft: true, lights: 40 },
 };
 
 export class Engine {
@@ -109,7 +109,7 @@ export class Engine {
     this._need = 2; this._moveT = 0; this._lastR = 0;
     const skip = new Set(['constructor', '_frame', 'getView', 'centerOnFloor', 'snapshot', 'snapshotAt', 'invalidate', 'pick', '_pickAt']);
     for (const k of Object.getOwnPropertyNames(Engine.prototype)) { const d = Object.getOwnPropertyDescriptor(Engine.prototype, k); if (skip.has(k) || !d || typeof d.value !== 'function') continue; const f = d.value; this[k] = (...a) => { const out = f.apply(this, a); this.invalidate(true); return out; }; }
-    this.controls.addEventListener('change', () => { this._need = Math.max(this._need, 1); this._moveT = performance.now(); });
+    this.controls.addEventListener('change', () => { this._need = Math.max(this._need, 1); this._moveT = performance.now(); this._lightsFollow(); });
     for (const ev of ['pointerdown', 'pointermove', 'wheel', 'pointerup']) canvas.addEventListener(ev, () => (this._need = Math.max(this._need, 1)), { passive: true });
     THREE.DefaultLoadingManager.onLoad = () => this.invalidate(true); THREE.DefaultLoadingManager.onProgress = () => this.invalidate(false);
     r.setAnimationLoop(() => this._frame());
@@ -272,8 +272,11 @@ export class Engine {
   /** 조명 기물인가 (튀김기 · 레인지의 불빛은 빼고) · 무리: 매입·직부등 / 펜던트 / LED 평판·라인 / 후드등 / 핀·레일 / 스탠드·벽등 */
   lightGroup(it) { if (!it) return null; const L = this.ctx.lib[it.type] || {}, t = it.type || '', sh = L.shape || '', nm = `${it.name || ''} ${L.name || ''} ${t}`;
     if (/fryer|range|griddle|wok|oven|steam|soup|튀김|레인지|화구|그리들|오븐|국솥/i.test(t + ' ' + (L.name || '')) && !/등\b|조명/.test(it.name || '')) return null; /* 조리 기구 불빛은 조명 아님 */
-    const byName = /조명|직부|다운라이트|펜던트|매입등|평판|라인등|핀조명|스포트|레일등|후드등|벽등|스탠드|램프|lamp|light|LT-\d/i.test(nm);
+    const byName = /조명|직부|다운라이트|펜던트|매입등|평판|라인등|핀조명|스포트|레일등|후드등|벽등|스탠드|램프|네온|무드등|외부등|lamp|light|LT-\d/i.test(nm);
     const lit = (it.light && it.light.on) || L.cat === '조명' || /^l_/.test(t) || (L.light && /light|pendant|track|lamp/.test(sh)) || byName; if (!lit) return null;
+    if (/네온|neon|무드|strip/i.test(nm)) return 'neon';
+    if (/외부등|l_post|정원등|기둥등/i.test(nm)) return 'out';
+    if (/3구|triple/i.test(nm)) return 'triple';
     if (/후드등|hood/i.test(nm)) return 'hood';
     if (/핀|스포트|레일|spot|track|pin/i.test(nm) || sh === 'track') return 'pin';
     if (/펜던트|pendant|lantern|globe|초롱|등롱/i.test(nm) || sh === 'pendant') return 'pendant';
@@ -384,11 +387,13 @@ export class Engine {
   /** 바닥 높이(단 · 구배)가 바뀌었을 때 모든 기물 높이 다시 */
   replaceItems() { if (this.level) for (const it of this.level.items) this.moveItem(it); }
   // 기물 광원은 화면 중심에서 가까운 순서로 MAX_ITEM_LIGHTS 개까지만 켠다
+  /** 화면을 옮기면 가까운 조명부터 다시 켠다 (예전엔 디머를 건드려야 바뀜) · 0.15초에 한 번 */
+  _lightsFollow() { const now = performance.now(); if (now - (this._lfT || 0) < 150) { clearTimeout(this._lfH); this._lfH = setTimeout(() => this._lightsFollow(), 160); return; } this._lfT = now; const info = this.lightInfo; if (info && info.total > info.on) { this._limitLights(); this.invalidate(true); } }
   _limitLights() {
     const L = []; this.items.traverse((o) => { if (o.userData.itemLight) L.push(o); });
     const t = this.controls.target, p = new THREE.Vector3();
     L.sort((a, b) => a.getWorldPosition(p).distanceToSquared(t) - b.getWorldPosition(p).distanceToSquared(t));
-    const pl = this.presentLights, on = pl || (this.opt.itemLights && STYLES[this.style].lights), N = pl ? Math.max(32, QUALITY[this.qual].lights) : QUALITY[this.qual].lights, boost = STYLES[this.style].lightBoost || 1;
+    const pl = this.presentLights, on = pl || (this.opt.itemLights && STYLES[this.style].lights), N = pl ? Math.max(40, QUALITY[this.qual].lights) : QUALITY[this.qual].lights, boost = STYLES[this.style].lightBoost || 1;
     let mx = 0; if (pl) for (const g of this.items.children) if (this._isLightItem(g)) mx = Math.max(mx, Math.min(1, g.userData.dim ?? 0));
     const ownLight = (o) => { let p = o; while (p && !p.userData.itemId) p = p.parent; return p && this._isLightItem(p); };
     L.forEach((o, i) => { o.visible = on && i < N; o.intensity = (o.userData.bi ??= o.intensity) * boost * (pl ? (ownLight(o) ? (o.userData.dim ?? 1) * 3 : 0.5 * mx) : 1); }); /* 조명 모드: 조명 기물만 디머대로 · 튀김기 불빛 등은 전체 밝기에 맞춰 약하게 */ /* 스타일 밝기 · 프레젠테이션 디밍 */

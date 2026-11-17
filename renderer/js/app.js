@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.22';
+export const APP_VERSION = '2.1.23';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -293,7 +293,8 @@ function renderProps() {
     <div class="sec">조명</div>
     <label class="tog">이 기물에 불 켜기<input type="checkbox" data-l="on" ${lt && lt.on ? 'checked' : ''}></label>
     ${lt && lt.on ? `<div class="row"><label class="fld">밝기<input type="range" data-l="power" min="0.1" max="3" step="0.1" value="${lt.power ?? 1}"></label><label class="fld">빛 색<input type="color" data-l="color" value="${lt.color || '#ffe2bd'}"></label></div>
-      <label class="fld">종류<select data-l="kind"><option value="spot" ${lt.kind === 'spot' ? 'selected' : ''}>아래로 비추기 (전등)</option><option value="point" ${lt.kind !== 'spot' ? 'selected' : ''}>사방으로 (스탠드 · 불빛)</option></select></label>` : ''}
+      <label class="fld">비추는 방향<select data-l="kind"><option value="spot" ${lt.kind === 'spot' ? 'selected' : ''}>아래로 비추기 (전등)</option><option value="point" ${lt.kind !== 'spot' ? 'selected' : ''}>사방으로 (스탠드 · 불빛)</option></select></label>${lightUi(lt)}` : ''}
+    ${it.type === 'fence' ? '<div class="btns"><button class="btn pri" data-a="fenceL">펜스에 등 달기 (기둥마다)</button></div>' : ''}
     ${SL.isDrainItem(it, S.lib) ? '<div class="btns"><button class="btn pri" data-a="drain">이 배수 기물로 구배 잡기</button></div>' : ''}
     ${it.onSlope ? '<div class="row2"><span class="hint">구배 · 단 위에 올려져 있어요</span><button class="btn" data-a="unfit">원래 높이로</button></div>' : SL.needFit(level(), it, S.lib) ? `<div class="row2"><span class="hint warn">바닥(구배 · 단)에 ${SL.needFit(level(), it, S.lib)}mm 묻혀요</span><button class="btn pri" data-a="fit">바닥 위로</button></div>` : ''}
     <div class="btns"><button class="btn pri" data-a="design" ${it.asset ? 'disabled title="가져온 3D 파일은 디자인 수정이 안 돼요"' : ''}>디자인 수정 (점 · 면 · 부품 색)</button></div>
@@ -314,8 +315,9 @@ function renderProps() {
     const t = selItem(), k = i.dataset.l; t.light = t.light || { on: false, kind: (S.lib[t.type] || {}).layer === 'floor' || !S.lib[t.type] ? 'point' : 'spot', color: '#ffe2bd', power: 1 };
     t.light[k] = i.type === 'checkbox' ? i.checked : i.type === 'range' ? +i.value : i.value; engine.rebuildItem(t); commit(); renderProps();
   }));
+  bindLightUi(body, () => [selItem()]);
   $$('[data-a]', body).forEach((b) => (b.onclick = () => {
-    const t = selItem(); if (!t) return;
+    const t = selItem(); if (!t) return; if (b.dataset.a === 'fenceL') return fenceLights(t);
     if (b.dataset.a === 'rot90') { patchSel({ rot: (t.rot + 90) % 360 }, false); renderProps(); }
     if (b.dataset.a === 'dup') { const c = { ...JSON.parse(JSON.stringify(t)), id: uid('i'), x: t.x + 300, y: t.y + 300 }; level().items.push(c); engine.rebuildItem(c); engine.select(c.id); commit(); }
     if (b.dataset.a === 'del') { plan.erase({ kind: 'item', id: t.id }); }
@@ -799,6 +801,23 @@ function renderCmt(body) {
 /* ----- 여러 개 고르기 · 정렬 · 간격 (기존 앱 v9) ----- */
 const multiItems = () => level().items.filter((q) => (S.multi || []).includes(q.id));
 const ext = (q) => { const r = ((q.rot || 0) % 180) === 90; return { hw: (r ? q.d : q.w) / 2, hd: (r ? q.w : q.d) / 2 }; };
+/* ---------- 빛 종류 · 색온도 (3000K 부터 1000K 단위) ---------- */
+const KCOL = { 2700: '#ffa757', 3000: '#ffb46b', 4000: '#ffd1a3', 5000: '#ffe4ce', 6000: '#fff3ef', 7000: '#f3f2ff' };
+const LTYPE = [['bulb', '알전구', 2700, 'point', 0.8], ['warm', '황색등', 3000, 'spot', 1], ['led', 'LED', 4000, 'spot', 1.2], ['white', '백색등', 6000, 'spot', 1.2]];
+function lightUi(lt, many) { const k = lt && lt.k ? lt.k : 0;
+  return `<div class="sec">빛 종류 · 색온도${many ? ` <small class="hint">(고른 조명 ${many}개 한꺼번에)</small>` : ''}</div><div class="chips">${LTYPE.map(([id, n, K]) => `<button data-lt="${id}" aria-pressed="${lt && lt.type === id}">${n} ${K}K</button>`).join('')}</div>
+    <div class="row"><label class="fld">색온도<select data-lk>${[3000, 4000, 5000, 6000, 7000].map((K) => `<option value="${K}" ${k === K ? 'selected' : ''}>${K}K${K === 3000 ? ' (따뜻함)' : K === 6000 ? ' (하얀)' : ''}</option>`).join('')}${k && !KCOL[k] ? '' : ''}<option value="" ${!k ? 'selected' : ''}>직접 고른 색</option></select></label>
+    <label class="fld">밝기 <b>${Math.round((lt && lt.power != null ? lt.power : 1) * 100)}%</b><input type="range" data-lp min="0.1" max="3" step="0.1" value="${lt && lt.power != null ? lt.power : 1}"></label></div>`; }
+function bindLightUi(body, targets) {
+  const apply = (fn, label) => { const ts = targets().filter(Boolean); for (const t of ts) { t.light = t.light || { on: true, kind: (S.lib[t.type] || {}).layer === 'floor' ? 'point' : 'spot', color: '#ffe2bd', power: 1 }; t.light.on = true; fn(t.light); engine.rebuildItem(t); } commit(); renderProps(); if (label && ts.length > 1) toast(`조명 ${ts.length}개 · ${label}`, 1500); };
+  $$('[data-lt]', body).forEach((b) => (b.onclick = () => { const [id, n, K, kind, pw] = LTYPE.find((q) => q[0] === b.dataset.lt); apply((l) => Object.assign(l, { type: id, k: K, color: KCOL[K], kind: l.fixed ? l.kind : kind, power: Math.max(l.power ?? 1, pw) }), `${n} ${K}K`); }));
+  const ks = $('[data-lk]', body); if (ks) ks.onchange = () => { const K = +ks.value; if (K) apply((l) => Object.assign(l, { k: K, color: KCOL[K] }), `${K}K`); };
+  const lp = $('[data-lp]', body); if (lp) { lp.oninput = () => { lp.previousElementSibling.textContent = Math.round(lp.value * 100) + '%'; }; lp.onchange = () => apply((l) => (l.power = +lp.value), `밝기 ${Math.round(lp.value * 100)}%`); }
+}
+/** 펜스 기둥마다 외부등 달기 (펜스를 누르고 "등 달기") */
+function fenceLights(f) { const n = Math.max(1, Math.round(f.w / 1200)), a = (-f.rot * Math.PI) / 180, c = Math.cos(a), s2 = Math.sin(a), L = level(); let made = 0;
+  for (let i = 0; i <= n; i++) { const lx = -f.w / 2 + (f.w * i) / n, x = Math.round(f.x + lx * c), y = Math.round(f.y - lx * s2); if (L.items.some((q) => q.type === 'l_post' && Math.hypot(q.x - x, q.y - y) < 80)) continue; L.items.push(mkItem('l_post', x, y, f.rot || 0, { elev: (f.elev || 0) + f.h, of: f.id })); made++; }
+  for (const q of L.items.filter((q) => q.of === f.id)) engine.addItem ? engine.addItem(q) : null; engine.setLevel(L); commit(); plan.redraw(); toast(made ? `외부등 ${made}개를 달았어요 · 조명 모드에서 디밍돼요` : '이미 모든 기둥에 등이 있어요'); }
 function renderMulti(body) {
   const its = multiItems(), kw = its.reduce((a, q) => a + SH.itemKw(q, S.lib), 0);
   $('#propsTitle').textContent = `여러 개 · ${its.length}개`;
@@ -806,8 +825,10 @@ function renderMulti(body) {
     <div class="sec">정렬</div><div class="chips">${[['l', '왼쪽'], ['cx', '가로 가운데'], ['r', '오른쪽'], ['t', '위'], ['cy', '세로 가운데'], ['b', '아래']].map(([k, n]) => `<button data-al="${k}">${n}</button>`).join('')}</div>
     <div class="sec">간격 같게</div><div class="chips"><button data-ds="x">가로로</button><button data-ds="y">세로로</button><button data-ds="xt">가로로 딱 붙이기</button><button data-ds="yt">세로로 딱 붙이기</button></div>
     <div class="sec">한꺼번에</div><div class="row"><label class="fld">색<input type="color" id="muC" value="#b8bcc2"></label><label class="fld">재질<select id="muM"><option value="">그대로</option>${Object.entries(MAT_LABEL).map(([k, n]) => `<option value="${k}">${n}</option>`).join('')}</select></label></div>
+    ${its.some((q) => q.light || (S.lib[q.type] || {}).light) ? lightUi((its.find((q) => q.light) || {}).light, its.filter((q) => q.light || (S.lib[q.type] || {}).light).length) : ''}
     <div class="btns"><button class="btn" data-mu="rot">묶어서 90° 돌리기</button><button class="btn" data-mu="dup">복제</button><button class="btn danger" data-mu="del">삭제</button><button class="btn" data-mu="none">고르기 풀기</button></div>`;
   const done = (msg) => { for (const q of its) engine.moveItem(q); commit(); plan.redraw(); if (msg) toast(msg, 2000); };
+  bindLightUi(body, () => multiItems().filter((q) => q.light || (S.lib[q.type] || {}).light));
   $$('[data-al]', body).forEach((b) => (b.onclick = () => { const k = b.dataset.al, E = its.map((q) => ({ q, ...ext(q) }));
     const v = { l: Math.min(...E.map((e) => e.q.x - e.hw)), r: Math.max(...E.map((e) => e.q.x + e.hw)), t: Math.min(...E.map((e) => e.q.y - e.hd)), b: Math.max(...E.map((e) => e.q.y + e.hd)), cx: E.reduce((a, e) => a + e.q.x, 0) / E.length, cy: E.reduce((a, e) => a + e.q.y, 0) / E.length }[k];
     for (const e of E) { if (k === 'l') e.q.x = Math.round(v + e.hw); if (k === 'r') e.q.x = Math.round(v - e.hw); if (k === 't') e.q.y = Math.round(v + e.hd); if (k === 'b') e.q.y = Math.round(v - e.hd); if (k === 'cx') e.q.x = Math.round(v); if (k === 'cy') e.q.y = Math.round(v); } done('맞췄어요'); }));
@@ -1367,7 +1388,7 @@ function placeDetected(wall, objs) {
 }
 
 /* ---------- 왼쪽 서랍: 아코디언 기물 목록 ---------- */
-const CAT_ORDER = ['내 기물', '페리카나', '주방', '테이블', '의자', '가구', '가전', '욕실', '조명', '천장 설비', '벽 설비', '전기', '바닥·배관', '설비', '공장', '인테리어', '식물', '주거', '배경'];
+const CAT_ORDER = ['내 기물', '페리카나', '놀이방', '테라스 · 외부', '주방', '테이블', '의자', '가구', '가전', '욕실', '조명', '천장 설비', '벽 설비', '전기', '바닥·배관', '설비', '공장', '인테리어', '식물', '주거', '배경'];
 function renderCatalog(q = '') {
   const by = new Map(); q = q.trim().toLowerCase();
   for (const [id, L] of Object.entries(S.lib)) { if (['zone', 'mesh', 'decal', 'mark'].includes(L.shape)) continue; if (q && !(L.name + ' ' + (L.sub || '') + ' ' + L.cat).toLowerCase().includes(q)) continue; if (!by.has(L.cat)) by.set(L.cat, []); by.get(L.cat).push([id, L]); }
@@ -1440,7 +1461,7 @@ function setPlanTool(t) { if (engine.design.active && t !== 'select') { endDesig
 /* ---------- 프레젠테이션 모드 (고객 · 파트너 시연) ----------
  * 편집 막대를 숨기고 3D 만 크게. 위: 자유 보기 · 설치물 보기 · 조명 모드 / 아래: 스타일 필터 막대 (언제든 바꿈)
  * 나가면 재질 · 투명도 · 천장 · 조명 밝기 · 스타일 · 화면 나눔을 모두 들어오기 전으로. 모델은 바꾸지 않는다. */
-const LGROUPS = [['down', '매입 · 직부등'], ['pendant', '펜던트'], ['flat', 'LED 평판 · 라인등'], ['hood', '후드등'], ['pin', '핀 · 레일 조명'], ['etc', '스탠드 · 벽등 · 기타']];
+const LGROUPS = [['triple', '3구 매입등'], ['neon', '네온 · 무드등'], ['out', '외부등 (테라스)'], ['down', '매입 · 직부등'], ['pendant', '펜던트'], ['flat', 'LED 평판 · 라인등'], ['hood', '후드등'], ['pin', '핀 · 레일 조명'], ['etc', '스탠드 · 벽등 · 기타']];
 const present = {
   on: false, mode: 'free', prev: null, op: 0.25, master: 0.2,
   enter() {
