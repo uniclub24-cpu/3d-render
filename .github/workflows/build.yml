@@ -1,4 +1,4 @@
-# BYR Next: 올릴 때마다 (1) 리눅스에서 실제 Electron 으로 켜 보는 확인 (2) 윈도우 포터블 exe 만들기
+# BYR Next: 올릴 때마다 (1) 리눅스에서 실제 Electron 으로 켜 보는 확인 (2) 윈도우 설치판 + 포터블 (3) 안드로이드 APK · AAB · 새 버전이면 GitHub 릴리스(자동 업데이트용)
 name: build
 on:
   push:
@@ -16,20 +16,39 @@ jobs:
   windows:
     needs: smoke
     runs-on: windows-latest
+    permissions: { contents: write }
+    outputs:
+      created: ${{ steps.rel.outputs.created }}
+      tag: ${{ steps.rel.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm install
-      - run: npx electron-builder --win portable --publish never
+      - name: 설치판(BYR2-Setup.exe · 자동 업데이트) + 포터블(BYR2-portable.exe)
+        run: npx electron-builder --win nsis portable --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: BYR-Next-windows
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/latest.yml
           if-no-files-found: error
+      # BYR2.1 브랜치에서 버전(package.json)이 새로 올라갔을 때만 GitHub 릴리스 v버전 을 만든다 → 설치판이 이걸 보고 스스로 업데이트
+      - name: 릴리스 만들기 (새 버전일 때만)
+        id: rel
+        if: github.ref == 'refs/heads/BYR2.1'
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          V=$(node -p "require('./package.json').version"); T="v$V"; echo "tag=$T" >> "$GITHUB_OUTPUT"
+          if gh release view "$T" >/dev/null 2>&1; then echo "created=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          gh release create "$T" dist/BYR2-Setup.exe dist/BYR2-Setup.exe.blockmap dist/latest.yml dist/BYR2-portable.exe --target "$GITHUB_SHA" --title "BYR2 $V" --notes "BYR2 $V · PC: BYR2-Setup.exe (설치 · 자동 업데이트) / BYR2-portable.exe · 안드로이드: BYR2.apk"
+          echo "created=true" >> "$GITHUB_OUTPUT"
   android:
-    needs: smoke
+    needs: [smoke, windows]
     runs-on: ubuntu-latest
+    permissions: { contents: write }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,9 +62,25 @@ jobs:
           npx @capacitor/assets generate --android --assetPath assets --iconBackgroundColor '#3d6bff' --splashBackgroundColor '#1b1d21' --splashBackgroundColorDark '#1b1d21'
           npx cap sync android
           node scripts/android-version.js
-      - name: 테스트용 APK (바로 설치) · 스토어용 AAB
-        run: cd android && chmod +x gradlew && ./gradlew assembleDebug bundleRelease
-      - run: cp android/app/build/outputs/apk/debug/app-debug.apk BYR-Next.apk
+      - name: APK · 스토어용 AAB
+        run: cd android && chmod +x gradlew && ./gradlew assembleDebug assembleRelease bundleRelease
+      # 매번 같은 키로 서명해야 새 APK 가 덮어쓰기 설치된다 (업로드 키가 Secrets 에 있으면 그 키 · 없으면 임시 디버그 키)
+      - name: APK 서명 (같은 키 → 덮어쓰기 설치 · 작업 유지)
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -n "$KS" ]; then
+            BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+            echo "$KS" | base64 -d > apk.jks
+            "$BT/zipalign" -f -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+            "$BT/apksigner" sign --ks apk.jks --ks-pass env:KS_PW --ks-key-alias "${KS_ALIAS:-byr2upload}" --out BYR2.apk aligned.apk
+            rm apk.jks aligned.apk; echo "signed with upload key"
+          else
+            cp android/app/build/outputs/apk/debug/app-debug.apk BYR2.apk; echo "::warning::ANDROID_KEYSTORE_B64 가 없어 임시 키로 서명 (덮어쓰기 설치 안 됨)"
+          fi
+          cp BYR2.apk BYR-Next.apk
       - name: AAB 서명 (저장소 Secrets 에 업로드 키가 있으면)
         env:
           KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -66,3 +101,7 @@ jobs:
             BYR-Next.apk
             BYR2-*.aab
           if-no-files-found: error
+      - name: 릴리스에 APK 올리기 (새 버전일 때만)
+        if: needs.windows.outputs.created == 'true'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: gh release upload "${{ needs.windows.outputs.tag }}" BYR2.apk --clobber -R "$GITHUB_REPOSITORY"

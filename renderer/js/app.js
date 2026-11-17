@@ -17,7 +17,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.14';
+export const APP_VERSION = '2.1.15';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -108,8 +108,10 @@ function setStyle(name, fromModel) {
   if (S.propsOpen && !S.sel) renderProps();
 }
 /** 스타일 목록 + 맨 위에 화질(빠름 · 보통 · 고급) */
+const SPEEDS = [[0.6, '이동 느리게'], [1, '이동 보통'], [1.5, '이동 빠르게']];
+function setMoveSpeed(k) { engine.setMoveSpeed(k); plan.moveK = k; try { localStorage.setItem('byr.speed', String(k)); } catch {} }
 function renderStyleMenu(name = engine.style) {
-  $('#styleMenu').innerHTML = `<div class="qrow" role="group" aria-label="화질">${Object.entries(QUALITY).map(([k, q]) => `<button data-qual="${k}" aria-pressed="${engine.qual === k}">${q.name}</button>`).join('')}</div>`
+  $('#styleMenu').innerHTML = `<div class="qrow" role="group" aria-label="화질">${Object.entries(QUALITY).map(([k, q]) => `<button data-qual="${k}" aria-pressed="${engine.qual === k}">${q.name}</button>`).join('')}</div><div class="qrow" role="group" aria-label="이동 속도">${SPEEDS.map(([v, n]) => `<button data-spd="${v}" aria-pressed="${Math.abs((engine.moveK || 1) - v) < 0.01}">${n}</button>`).join('')}</div>`
     + Object.entries(STYLES).map(([k, st]) => `<button role="menuitemradio" aria-checked="${k === name}" data-style="${k}"><b>${st.name}</b><small>${st.hint}</small></button>`).join('');
 }
 
@@ -802,7 +804,7 @@ const panHeld = new Set(); let panRaf = 0;
 function keyPan(k, on, fast) {
   if (k == null) panHeld.clear(); else if (on) panHeld.add(k); else panHeld.delete(k);
   const to3d = S.pane === '3d' || (S.pane === 'split' && S.hoverPane === '3d'); engine.panKeys = to3d ? panHeld : null; engine.panFast = !!fast; if (to3d) { engine.invalidate(false); return; }
-  if (!panRaf && panHeld.size) { let t0 = performance.now(); const step = (t) => { const dt = Math.min(0.05, (t - t0) / 1000); t0 = t; const h = (x) => panHeld.has(x), ax = (h('d') || h('arrowright') ? 1 : 0) - (h('a') || h('arrowleft') ? 1 : 0), ay = (h('s') || h('arrowdown') ? 1 : 0) - (h('w') || h('arrowup') ? 1 : 0), sp = (engine.panFast ? 1800 : 700) * dt / plan.view.sc;
+  if (!panRaf && panHeld.size) { let t0 = performance.now(); const step = (t) => { const dt = Math.min(0.05, (t - t0) / 1000); t0 = t; const h = (x) => panHeld.has(x), ax = (h('d') || h('arrowright') ? 1 : 0) - (h('a') || h('arrowleft') ? 1 : 0), ay = (h('s') || h('arrowdown') ? 1 : 0) - (h('w') || h('arrowup') ? 1 : 0), sp = (engine.panFast ? 1000 : 420) * (engine.moveK || 1) * dt / plan.view.sc;
     plan.view.ox += ax * sp; plan.view.oy += ay * sp; plan.redraw(); panRaf = panHeld.size ? requestAnimationFrame(step) : 0; }; panRaf = requestAnimationFrame(step); }
 }
 /* ----- 단축키 안내 (F1 · Ctrl+/) ----- */
@@ -1352,7 +1354,7 @@ const DOCK = [
 ];
 /* 작업군 5개 (선택 중심): 아래 줄 = 작업군 탭, 위 줄 = 그 작업군 도구. 고른 작업군은 기억 */
 const DGROUPS = [['edit', '편집', '<path d="M6 3l13 8-6 1.8L10.5 19z"/>'], ['plan', '설계', '<path d="M4 4h16v16H4z"/><path d="M4 10h9v10"/>'], ['view', '보기', '<path d="M2.5 12c2.4-4.4 5.6-6.6 9.5-6.6s7.1 2.2 9.5 6.6c-2.4 4.4-5.6 6.6-9.5 6.6S4.9 16.4 2.5 12z"/><circle cx="12" cy="12" r="3"/>'], ['check', '검토', '<path d="M9 11l2.5 2.5L16 9"/><rect x="4" y="3.5" width="16" height="17" rx="2"/>'], ['more', '더보기', '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>']];
-const MORE = [{ g: 'more', run: () => showKeys(), label: '단축키', icon: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h1M9 10h1M12 10h1M15 10h1M18 10h0M7 14h10"/>' }, { g: 'more', act: 'hist', label: '작업 기록', icon: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3h3"/><path d="M12 8v4l3 2"/>' }, { g: 'more', act: 'lang', label: 'English', icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/>' }, { g: 'more', run: () => $('#btnFile').click(), label: '파일', icon: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>' }];
+const MORE = [{ g: 'more', run: () => checkUpdate(true), label: '업데이트 확인', icon: '<path d="M12 4v10M8 10l4 4 4-4M5 18h14"/>' }, { g: 'more', run: () => showKeys(), label: '단축키', icon: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h1M9 10h1M12 10h1M15 10h1M18 10h0M7 14h10"/>' }, { g: 'more', act: 'hist', label: '작업 기록', icon: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3h3"/><path d="M12 8v4l3 2"/>' }, { g: 'more', act: 'lang', label: 'English', icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/>' }, { g: 'more', run: () => $('#btnFile').click(), label: '파일', icon: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>' }];
 let dockG = store.get('byr.dockG', 'edit');
 function buildDock() {
   const ALL = [...DOCK.filter((d) => d !== '|'), ...MORE], list = ALL.filter((d) => d.g === dockG);
@@ -1435,6 +1437,22 @@ function ask(title, msg, buttons = [{ label: '취소', value: false }, { label: 
     d.onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) done(buttons[+b.dataset.i].value); else if (e.target === d) done(buttons[0].value); };
     d.hidden = false; setTimeout(() => { const last = $('#dlgB').lastElementChild; if (last) last.focus(); }, 30);
   });
+}
+/* ---------- 새 버전 알림 ----------
+ * PC 설치판은 메인 프로세스가 알아서 받고 다시 시작을 묻는다 (여기선 진행 알림만).
+ * PC 포터블 · 안드로이드: GitHub 릴리스의 최신 버전과 비교해 "새 버전 받기" 를 띄운다 (하루에 한 번까지 · 끄기 가능). */
+const REL = 'https://github.com/uniclub24-cpu/3d-render/releases/latest', newer = (a, b) => { const x = String(a).replace(/^v/, '').split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+async function checkUpdate(force) {
+  const E = window.byr, cap = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'android';
+  let kind = cap ? 'apk' : null;
+  if (E && E.info) { const i = await E.info().catch(() => null); kind = i && i.update; if (kind === 'setup' && E.onUpdate) { if (force) return toast(`설치판은 켤 때 자동으로 확인 · 설치해요 (지금 ${APP_VERSION})`); E.onUpdate((m) => { if (m.state === 'downloading') toast(`새 버전 ${m.version} 을 받는 중… (작업은 계속해도 돼요)`, 4000); if (m.state === 'ready') toast(`새 버전 ${m.version} 준비 완료 · 다시 시작하면 바뀌어요`, 6000); }); return; } if (kind !== 'portable') return; }
+  if (!kind) return; const last = store.get('byr.updChk', 0); if (!force && Date.now() - last < 20 * 3600 * 1000) return; store.set('byr.updChk', Date.now());
+  try { const j = await (await fetch('https://api.github.com/repos/uniclub24-cpu/3d-render/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })).json(); const v = String(j.tag_name || '').replace(/^v/, '');
+    if (!v || !newer(v, APP_VERSION) || store.get('byr.updSkip', '') === v) { if (force) toast(`지금이 최신이에요 (${APP_VERSION})`); return; }
+    const url = kind === 'apk' ? REL + '/download/BYR2.apk' : REL;
+    const r = await ask(`새 버전 ${v} 이 나왔어요`, kind === 'apk' ? '받은 APK 를 열면 덮어쓰기로 설치돼요 (작업은 그대로). 처음 한 번은 "출처를 알 수 없는 앱" 허용이 필요할 수 있어요.' : '설치판(BYR2-Setup)을 한 번 설치하면 다음부터는 자동으로 업데이트돼요. 작업은 그대로 이어져요.', [{ label: '이 버전 건너뛰기', value: 'skip' }, { label: '나중에', value: false }, { label: kind === 'apk' ? '새 버전 받기' : '받는 곳 열기', value: true, kind: 'pri' }]);
+    if (r === 'skip') store.set('byr.updSkip', v); else if (r) { if (E && E.openUrl) E.openUrl(kind === 'portable' ? REL : url); else location.href = url; } }
+  catch (e) { console.warn('update check', e); if (force) toast('새 버전을 확인하지 못했어요 (인터넷 연결 확인)'); }
 }
 const IS_APP = () => !!(window.byr || (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()));
 async function quitApp() {
@@ -1522,6 +1540,7 @@ async function boot() {
     onSoffit: (pts) => { const L = level(); (L.soffits ||= []).push({ id: uid('s'), pts, h: L.soffitH || 2400 }); engine.rebuildStructure(); commit(); toast(`천장 가벽을 넣었어요 · 아래면 ${L.soffitH || 2400}mm (층 · 천장 카드에서 높이 바꾸기)`, 3500); },
     onChange: (msg) => { commit(); renderProps(); if (msg) toast(msg, 2200); },
   });
+  plan.moveK = engine.moveK || 1; /* 이동 속도 (스타일 메뉴) */
   { const st = plan.setTool.bind(plan); plan.setTool = (t) => { st(t); setTimeout(syncModeChip); }; } syncModeChip();
   $$('[data-tool]').forEach((b) => (b.onclick = () => { setTimeout(syncModeChip); if (b.dataset.tool !== 'select' && b.dataset.tool !== 'boxsel') tuck(); else untuck(); plan.setTool(b.dataset.tool); $$('[data-tool]').forEach((q) => q.setAttribute('aria-pressed', String(q === b))); }));
   $('#btnFit').onclick = () => plan.fit();
@@ -1532,7 +1551,7 @@ async function boot() {
   /* 도구 막대 단추는 작업군을 바꿀 때마다 새로 그려지므로 이벤트는 문서에서 받는다 */
   const sm = $('#styleMenu'), sbA = (v) => { const sb = $('#btnStyle'); if (sb) sb.setAttribute('aria-expanded', v); };
   document.addEventListener('click', (e) => { if (e.target.closest('#btnStyle')) { sm.hidden = !sm.hidden; sbA(String(!sm.hidden)); } else if (e.target.closest('#btnDrawer')) openDrawer(); });
-  sm.onclick = (e) => { const q = e.target.closest('[data-qual]'); if (q) { engine.setQuality(q.dataset.qual); renderStyleMenu(); toast(`화질: ${QUALITY[q.dataset.qual].name}`); return; } const b = e.target.closest('[data-style]'); if (!b) return; setStyle(b.dataset.style); sm.hidden = true; sbA('false'); };
+  sm.onclick = (e) => { const sp = e.target.closest('[data-spd]'); if (sp) { setMoveSpeed(+sp.dataset.spd); renderStyleMenu(); toast(sp.textContent); return; } const q = e.target.closest('[data-qual]'); if (q) { engine.setQuality(q.dataset.qual); renderStyleMenu(); toast(`화질: ${QUALITY[q.dataset.qual].name}`); return; } const b = e.target.closest('[data-style]'); if (!b) return; setStyle(b.dataset.style); sm.hidden = true; sbA('false'); };
   document.addEventListener('pointerdown', (e) => { if (!sm.hidden && !e.target.closest('#styleMenu, #btnStyle')) { sm.hidden = true; sbA('false'); } });
   setPane(store.get('byr.pane', innerWidth < 700 ? '3d' : 'split')); setStyle(STYLES[store.get('byr.style', 'real')] ? store.get('byr.style', 'real') : 'real');
   renderCatalog();
@@ -1616,7 +1635,7 @@ async function boot() {
   let first = null; try { const id = lib2.lastId(); first = id && (await lib2.loadLocal(id)); } catch (e) { console.warn(e); }
   await setModel(first || emptyProject());
   window.__goBack = goBack; window.BYR = { S, engine, plan, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
-  initLang(); showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
+  initLang(); checkUpdate(); showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
   const intro = $('#intro'), wait = Math.max(0, 1400 - performance.now()); setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
   // 계정 동기화: 켤 때 · 1분마다 · 앱으로 돌아올 때
   const sync = () => { if (!cloud.session() || document.visibilityState === 'hidden') return; lib2.syncNow().then(reloadIfChanged).catch(() => {}); };

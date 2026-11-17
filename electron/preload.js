@@ -5,4 +5,7 @@ contextBridge.exposeInMainWorld('byr', {
   openFiles: (opt) => ipcRenderer.invoke('file:open', opt),
   saveFile: (opt) => ipcRenderer.invoke('file:save', opt),
   quit: () => ipcRenderer.invoke('app:quit'), // 앱 안에서 종료를 확인한 뒤
+  info: () => ipcRenderer.invoke('app:info'), // { version, update: 'setup' | 'portable' | 'dev' }
+  openUrl: (u) => ipcRenderer.invoke('open:url', u),
+  onUpdate: (fn) => ipcRenderer.on('update', (e, m) => fn(m)),
 });

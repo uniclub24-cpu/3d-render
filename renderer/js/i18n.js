@@ -26,6 +26,8 @@ const D = {
   '주방 기물': 'Kitchen equipment', '홀 (카운터 · 테이블)': 'Hall (counter · tables)', '설비 (후드 · 배수 · 가스 · 3상)': 'MEP (hood · drain · gas · 3-phase)', '마감 색': 'Finish colors', '+ 지금 안 복사해서 새 안': '+ Copy as new plan',
   '왼쪽': 'Left', '오른쪽': 'Right', '위': 'Top', '아래': 'Bottom', '가로 가운데': 'Center X', '세로 가운데': 'Center Y', '가로로': 'Horizontal', '세로로': 'Vertical', '가로로 딱 붙이기': 'Pack horizontally', '세로로 딱 붙이기': 'Pack vertically', '묶어서 90° 돌리기': 'Rotate group 90°', '고르기 풀기': 'Deselect',
   '색': 'Color', '재질': 'Material', '그대로': 'Keep', '종류': 'Type', '폭': 'Width', '높이': 'Height', '바닥에서': 'Sill', '이름 바꾸기': 'Rename', '이미지 고르기': 'Choose image', '이미지 바꾸기': 'Change image', '텍스처 지우기': 'Remove texture',
+  '발표': 'Present', '자유 보기': 'Free view', '설치물 보기': 'MEP X-ray', '조명 모드': 'Lighting', '✕ 끝내기': '✕ Exit', '로우폴리': 'Low-poly', '북유럽': 'Nordic', '이자카야': 'Izakaya', '인더스트리얼': 'Industrial', '동양풍': 'Oriental', '초안 스케치': 'Draft sketch', '팝아트': 'Pop art',
+  '조명 · 디밍': 'Lighting · dimming', '전체': 'Master', '마감 투명도': 'Finish opacity', '+ 시방서 · 계획서로 프리셋': '+ Preset from spec document', '내 프리셋 고치기': 'Edit my preset', '프리셋 저장': 'Save preset', '프리셋 지우기': 'Delete preset', '천 가림막': 'Cloth curtain',
   '이어서 작업': 'Continue', '계정': 'Account', '로그인': 'Sign in', '로그아웃': 'Sign out', '동기화': 'Sync', '열기': 'Open', '저장': 'Save', '닫기': 'Close', '뒤로': 'Back',
 };
 const SEG = ' · ';

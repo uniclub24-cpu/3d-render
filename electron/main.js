@@ -1,5 +1,5 @@
 // Electron 메인 프로세스: 창 띄우기 · 로컬 파일 서빙(app://) · 파일 열기/저장
-const { app, BrowserWindow, ipcMain, dialog, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
 const { pathToFileURL } = require('url');
@@ -27,6 +27,24 @@ function smoke(win) {
   win.webContents.once('did-finish-load', tick);
 }
 
+/* ---------- 자동 업데이트 ----------
+ * 설치판(Setup): GitHub 릴리스(latest.yml)에서 새 버전을 뒤에서 받아 두고, 다 받으면 "지금 다시 시작 / 나중에(끌 때 설치)" 를 묻는다.
+ * 포터블 exe: 스스로 바꿀 수 없으므로 화면(렌더러)에서 새 버전 알림 + 받기 링크만 보여 준다. 작업 파일은 사용자 폴더에 있어 버전이 바뀌어도 그대로. */
+const PORTABLE = !!process.env.PORTABLE_EXECUTABLE_DIR;
+const UPD = app.isPackaged ? (PORTABLE ? 'portable' : 'setup') : 'dev';
+function autoUpdate(win) {
+  if (UPD !== 'setup' || SMOKE) return; let au; try { au = require('electron-updater').autoUpdater; } catch (e) { console.warn('updater', e.message); return; }
+  au.autoDownload = true; au.autoInstallOnAppQuit = true;
+  const send = (m) => { try { win.webContents.send('update', m); } catch {} };
+  au.on('update-available', (i) => send({ state: 'downloading', version: i.version }));
+  au.on('download-progress', (p) => send({ state: 'progress', pct: Math.round(p.percent) }));
+  au.on('error', (e) => send({ state: 'error', msg: String(e && e.message || e).slice(0, 200) }));
+  au.on('update-downloaded', (i) => { send({ state: 'ready', version: i.version });
+    dialog.showMessageBox(win, { type: 'info', buttons: ['지금 다시 시작', '나중에 (끌 때 설치)'], defaultId: 0, cancelId: 1, title: 'BYR2 업데이트', message: `새 버전 ${i.version} 을 받았어요`, detail: '다시 시작하면 바로 바뀌어요. 작업은 자동 저장돼 있어요.' })
+      .then((r) => { if (r.response === 0) { win.__quit = true; setImmediate(() => au.quitAndInstall(true, true)); } }); });
+  const check = () => au.checkForUpdates().catch(() => {}); setTimeout(check, 8000); setInterval(check, 6 * 3600 * 1000);
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 900, minHeight: 600, backgroundColor: '#1b1d21', autoHideMenuBar: true,
@@ -38,7 +56,7 @@ function createWindow() {
     dialog.showMessageBox(win, { type: 'question', buttons: ['종료', '취소'], defaultId: 1, cancelId: 1, title: 'BYR2', message: 'BYR2 를 종료할까요?', detail: '작업은 이 PC 에 자동 저장돼 있어요. 다시 켜면 이어서 할 수 있어요.' })
       .then((r) => { if (r.response === 0) { win.__quit = true; win.close(); } });
   });
-  win.loadURL('app://byr/index.html');
+  win.loadURL('app://byr/index.html'); autoUpdate(win);
   if (SMOKE) smoke(win);
   // 외부 링크로 창이 넘어가지 않게
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -54,6 +72,8 @@ app.whenReady().then(() => {
   });
 
   // 파일 열기: [{ name, path, data(Uint8Array) }]
+  ipcMain.handle('app:info', () => ({ version: app.getVersion(), update: UPD }));
+  ipcMain.handle('open:url', (e, url) => { if (/^https:\/\/github\.com\/uniclub24-cpu\/3d-render\//.test(String(url))) shell.openExternal(url); }); /* 업데이트 받기 링크만 */
   ipcMain.handle('app:quit', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { w.__quit = true; w.close(); } });
   ipcMain.handle('file:open', async (e, opt = {}) => {
     const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {

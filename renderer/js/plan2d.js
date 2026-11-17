@@ -103,7 +103,9 @@ export class Plan2D {
   /* ---------- 입력 ---------- */
   _bind() {
     const cv = this.cv, pts = new Map(); let act = null, pinch = null;
-    cv.addEventListener('wheel', (e) => { e.preventDefault(); const r = cv.getBoundingClientRect(); this.zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+    /* 휠 확대: 바로 튀지 않고 몇 프레임에 걸쳐 부드럽게 (속도는 moveK) */
+    const zs = { left: 0, x: 0, y: 0, raf: 0 }; const zstep = () => { const f = zs.left * 0.22; zs.left -= f; this.zoomAt(zs.x, zs.y, Math.exp(f)); zs.raf = Math.abs(zs.left) > 0.002 ? requestAnimationFrame(zstep) : (this.zoomAt(zs.x, zs.y, Math.exp(zs.left)), (zs.left = 0), 0); };
+    cv.addEventListener('wheel', (e) => { e.preventDefault(); const r = cv.getBoundingClientRect(), d = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY; zs.x = e.clientX - r.left; zs.y = e.clientY - r.top; zs.left = Math.max(-1.2, Math.min(1.2, zs.left - Math.max(-120, Math.min(120, d)) * 0.0011 * (this.moveK || 1))); if (!zs.raf) zs.raf = requestAnimationFrame(zstep); }, { passive: false });
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY });

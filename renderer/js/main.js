@@ -56,7 +56,7 @@ export class Engine {
     this.controls = new OrbitControls(this.camera, canvas);
     Object.assign(this.controls, { enableDamping: true, dampingFactor: 0.09, maxPolarAngle: Math.PI / 2 - 0.03, minDistance: 0.8, maxDistance: 70, zoomToCursor: true });
     this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }; this.controls.screenSpacePanning = false; /* 기존 앱처럼 바닥을 따라 밀기 */
-    if (matchMedia('(pointer: coarse)').matches) Object.assign(this.controls, { rotateSpeed: 0.55, panSpeed: 0.45, zoomSpeed: 0.7, dampingFactor: 0.12 }); /* 터치: 천천히 · 부드럽게 미끄러지듯 */
+    this.touch = matchMedia('(pointer: coarse)').matches; this.setMoveSpeed(+localStorage.getItem('byr.speed') || 1); /* 이동 속도 (느리게 0.6 · 보통 1 · 빠르게 1.5) */
     { /* 두 손가락을 비틀면 구도 돌리기 (지도 앱처럼) */
       const T = new Map(); let a0 = null;
       const ang = () => { const [p, q] = [...T.values()]; return Math.atan2(q.y - p.y, q.x - p.x); };
@@ -115,10 +115,12 @@ export class Engine {
     r.setAnimationLoop(() => this._frame());
   }
   /** WASD · 방향키로 화면 옮기기 (보는 각도는 그대로, 바닥을 따라) */
+  /** 화면 돌리기 · 밀기 · 확대 빠르기. 감속(damping)은 길게 둬서 멈출 때 부드럽게 */
+  setMoveSpeed(k = 1) { this.moveK = k; const b = this.touch ? { r: 0.42, p: 0.35, z: 0.5, d: 0.07 } : { r: 0.6, p: 0.55, z: 0.55, d: 0.065 }; Object.assign(this.controls, { rotateSpeed: b.r * k, panSpeed: b.p * k, zoomSpeed: b.z * k, dampingFactor: b.d }); }
   _keyPan(dt) {
     const k = (x) => this.panKeys.has(x), ax = (k('d') || k('arrowright') ? 1 : 0) - (k('a') || k('arrowleft') ? 1 : 0), ay = (k('s') || k('arrowdown') ? 1 : 0) - (k('w') || k('arrowup') ? 1 : 0); if (!ax && !ay) return;
     const c = this.camera, t = this.controls.target, f = new THREE.Vector3().subVectors(t, c.position); f.y = 0; if (f.lengthSq() < 1e-6) f.set(0, 0, -1); f.normalize(); const r = new THREE.Vector3(-f.z, 0, f.x);
-    const sp = (c.isOrthographicCamera ? this.orthoSize / (c.zoom || 1) : c.position.distanceTo(t)) * 0.8 * dt * (this.panFast ? 2.5 : 1), m = r.multiplyScalar(ax * sp).addScaledVector(f, -ay * sp);
+    const sp = (c.isOrthographicCamera ? this.orthoSize / (c.zoom || 1) : c.position.distanceTo(t)) * 0.45 * (this.moveK || 1) * dt * (this.panFast ? 2 : 1), m = r.multiplyScalar(ax * sp).addScaledVector(f, -ay * sp);
     c.position.add(m); t.add(m); this._moveT = performance.now(); this._need = Math.max(this._need, 1);
   }
   /** 다음 틀에 다시 그리기 (scene = 장면이 바뀜 → 그림자도 다시) */
