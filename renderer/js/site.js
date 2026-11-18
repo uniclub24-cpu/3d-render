@@ -5,11 +5,12 @@
 // 좌표: 중심(경위도)에서 m 단위 평면 (x = 동쪽 +, y = 남쪽 + — 도면과 같은 방향)
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { secretsChanged } from './cloud.js';
 
 /* ---------- 키 · 네트워크 ---------- */
 const LS = 'byr.vworld';
 export const vworld = () => { try { return JSON.parse(localStorage.getItem(LS) || 'null') || {}; } catch { return {}; } };
-export const setVworld = (v) => { try { localStorage.setItem(LS, JSON.stringify(v || {})); } catch {} };
+export const setVworld = (v) => { try { localStorage.setItem(LS, JSON.stringify(v || {})); } catch {} secretsChanged(); };
 export class NetError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
 /** PC 앱 = 메인 프로세스 · 안드로이드 = 네이티브 HTTP · 그 밖 = fetch */
 export async function netGet(url) {

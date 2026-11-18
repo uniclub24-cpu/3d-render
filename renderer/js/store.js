@@ -5,7 +5,7 @@
 // · 계정 쪽 저장 위치: Storage 버킷 models / <내 사용자 ID>/byr2/  (본인만 읽고 쓰는 규칙이 이미 걸린 곳)
 //   기존 앱의 projects 표에는 쓰지 않는다 → 기존 앱이 새 형식을 열다 깨지는 일이 없다
 // · 양쪽에서 같은 프로젝트를 동시에 고친 경우: 둘 다 남긴다 ("충돌 사본")
-import { SB, session, sbFetch } from './cloud.js';
+import { SB, session, sbFetch, SECRET_RE } from './cloud.js';
 
 const DB = 'byr2', ST = 'projects';
 let dbp = null;
@@ -75,10 +75,22 @@ async function sdel(name) { await sbFetch('/storage/v1/object/models', { method:
 let syncT = 0, syncing = null;
 export function scheduleSync(ms = 3000) { clearTimeout(syncT); syncT = setTimeout(() => syncNow().catch(() => {}), ms); }
 /** 양방향 동기화. 결과: { up, down, del, conflict } */
+/* ---------- 키 따라다니기: 한 번 넣은 API 키를 로그인한 계정에 (나중에 고친 쪽이 이김) ---------- */
+async function syncSecrets() {
+  const localAt = +(localStorage.getItem('byr.secretsAt') || 0); let remote = null;
+  try { const t = await sget('_secrets.json'); remote = t ? JSON.parse(t) : null; } catch { remote = null; }
+  const rAt = (remote && remote.at) || 0, rv = (remote && remote.v) || {}, mine = () => { const v = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (SECRET_RE.test(k)) v[k] = localStorage.getItem(k); } return v; };
+  if (remote && rAt > localAt) { /* 계정 쪽이 최신 → 이 기기에 */ for (const [k, x] of Object.entries(rv)) if (SECRET_RE.test(k) && typeof x === 'string') localStorage.setItem(k, x); for (const k of remote.del || []) if (SECRET_RE.test(k)) localStorage.removeItem(k); localStorage.setItem('byr.secretsAt', String(rAt)); localStorage.removeItem('byr.secretsDel'); try { window.dispatchEvent(new Event('byr-secrets-in')); } catch {} return 'down'; }
+  if (localAt > rAt) { /* 이 기기가 최신 → 계정에 (키마다 합치고, 지운 키는 지움) */ const del = JSON.parse(localStorage.getItem('byr.secretsDel') || '[]'), v = { ...rv, ...mine() }; for (const k of del) if (!(k in mine())) delete v[k];
+    await sput('_secrets.json', JSON.stringify({ at: localAt, v, del })); localStorage.removeItem('byr.secretsDel'); const add = Object.keys(rv).filter((k) => !localStorage.getItem(k) && !del.includes(k)); for (const k of add) localStorage.setItem(k, rv[k]); if (add.length) try { window.dispatchEvent(new Event('byr-secrets-in')); } catch {} return 'up'; }
+  return null;
+}
+if (typeof window !== 'undefined') window.addEventListener('byr-secrets', () => { if (session()) scheduleSync(1500); });
 export function syncNow() { return (syncing ||= doSync().finally(() => (syncing = null))); }
 async function doSync() {
   if (!session()) return { skipped: true }; const uid = session().user;
   status('동기화 중…'); await flush();
+  try { await syncSecrets(); } catch (e) { console.warn('[secrets]', e); }
   const res = { up: 0, down: 0, del: 0, conflict: 0, changed: [], err: [] };
   try {
     const txt = await sget('_index.json'); const idx = txt ? JSON.parse(txt) : {}; let idxDirty = false;

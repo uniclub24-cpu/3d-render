@@ -6,8 +6,11 @@ export const SB = { url: 'https://zxehyxjjiruxgqkthotn.supabase.co', key: 'sb_pu
 export const AI_MODEL = 'claude-sonnet-5-5';
 const store = {
   get: (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} if (SECRET_RE.test(k)) secretsChanged(v == null ? k : null); },
 };
+/** 계정을 따라다니는 키 (AI 키 · 모델 · 워크스페이스 · 브이월드 · 공공데이터포털) — 로그인한 계정의 비공개 저장소(models/<내 ID>/byr2/_secrets.json)에 */
+export const SECRET_RE = /^byr\.(aiKey(\.[a-z]+)?|aiWs|aiProvider|aiModel\.[a-z]+|vworld)$/;
+export function secretsChanged(removed) { try { localStorage.setItem('byr.secretsAt', String(Date.now())); if (removed) { const d = JSON.parse(localStorage.getItem('byr.secretsDel') || '[]'); if (!d.includes(removed)) d.push(removed); localStorage.setItem('byr.secretsDel', JSON.stringify(d)); } } catch {} try { window.dispatchEvent(new Event('byr-secrets')); } catch {} }
 
 /* ---------- 계정 (기존 앱 계정 그대로) ---------- */
 export const session = () => store.get('byr.session', null);
@@ -18,7 +21,7 @@ async function sbAuth(path, body) {
 function take(j) { if (!j.access_token) throw new Error('이메일 확인 후 다시 로그인하세요'); const s = { access: j.access_token, refresh: j.refresh_token, exp: Date.now() + (j.expires_in || 3600) * 1000 - 60000, user: j.user && j.user.id, email: j.user && j.user.email }; store.set('byr.session', s); return s; }
 export async function login(email, password) { const s = take(await sbAuth('token?grant_type=password', { email, password })); await loadAccountKey().catch(() => {}); return s; }
 /** 로그아웃: 계정에서 받아 온 AI 키도 이 기기에서 지운다 (직접 넣은 키는 남김) */
-export function logout() { store.set('byr.session', null); if (store.get('byr.aiKeyAcct', false)) { store.set('byr.aiKey', null); store.set('byr.aiKeyAcct', null); } }
+export function logout() { store.set('byr.session', null); store.set('byr.aiKeyAcct', null); /* 계정 키는 이 기기에서 지운다 (다시 로그인하면 따라옴) */ try { for (const k of Object.keys(localStorage)) if (SECRET_RE.test(k)) localStorage.removeItem(k); localStorage.removeItem('byr.secretsAt'); localStorage.removeItem('byr.secretsDel'); } catch {} }
 export async function sbFetch(path, opt = {}) {
   let s = session(); if (!s) throw new Error('먼저 로그인하세요');
   if (s.exp && Date.now() > s.exp) s = take(await sbAuth('token?grant_type=refresh_token', { refresh_token: s.refresh }));
