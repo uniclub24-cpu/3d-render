@@ -409,3 +409,11 @@ body.catdrag #drawer { opacity: .25; pointer-events: none; transition: opacity .
 .sfr small { color: var(--muted); font-size: 12px; } .sfr:hover { border-color: var(--accent); }
 .sitesel { padding: 10px; border: 1px solid var(--accent); border-radius: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; } .sitesel small { color: var(--muted); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 12px; } .legend span { display: inline-flex; align-items: center; gap: 5px; } .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+/* 녹화 */
+.recpop { position: fixed; z-index: 90; left: 50%; bottom: calc(110px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(380px, calc(100vw - 24px)); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; backdrop-filter: blur(16px); display: flex; flex-direction: column; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.35); color: var(--fg); }
+.recpop small { color: var(--muted); }
+.recbar { position: fixed; z-index: 91; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 14px; border-radius: 999px; background: rgba(20,20,22,.88); color: #fff; font-variant-numeric: tabular-nums; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.recbar .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff3b30; animation: recblink 1s infinite; }
+.recbar span { opacity: .7; }
+@keyframes recblink { 50% { opacity: .25; } }
+.pr-recb { color: #ff5a4f !important; }

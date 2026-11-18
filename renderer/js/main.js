@@ -145,6 +145,7 @@ export class Engine {
 
   /** 해상도 배율 — moving 이면 가볍게 */
   _pr(moving) {
+    if (this.recPr) return this.recPr; /* 녹화 중: 크기가 바뀌지 않게 고정 */
     const R = RES[this.res] || RES.normal, d = window.devicePixelRatio || 1;
     const idle = R.sup ? Math.min(3, Math.max(d * 1.5, 2)) : Math.min(d, R.idle); return Math.round((moving ? Math.min(idle, R.move * Math.max(1, d / 1.5)) : idle) * 100) / 100;
   }
@@ -166,8 +167,9 @@ export class Engine {
     this.air.update(dt); this.sim.update(dt); if (this.onTick) this.onTick(dt); // 2D 만 볼 때도 시뮬레이션은 돈다
     if (!this.canvas.clientWidth) return; // 2D 만 볼 때는 3D 를 그리지 않는다
     if (this._fly) { const f = this._fly; f.t += dt * 1000; const k = Math.min(1, f.t / f.ms); f.step(k); if (k >= 1) { this._fly = null; f.done(true); } }
+    if (this.orbitT && !this.walker.active) { const t = this.controls.target, p = this.camera.position, a = (-2 * Math.PI * dt) / this.orbitT, x = p.x - t.x, z = p.z - t.z; p.x = t.x + x * Math.cos(a) - z * Math.sin(a); p.z = t.z + x * Math.sin(a) + z * Math.cos(a); this.camera.lookAt(t); } /* 360° 한 바퀴 = orbitT 초 */
     if (this.walker.active) this.walker.update(dt); else { if (this.panKeys && this.panKeys.size) this._keyPan(dt); if (this.controls.update()) this._moveT = now; }
-    const anim = this.air.on || (this.sim.on && this.sim.run) || this.walker.active || this._fly || this.controls.autoRotate || this.design.active || this.dragging;
+    const anim = this.recording || this.orbitT || this.air.on || (this.sim.on && this.sim.run) || this.walker.active || this._fly || this.controls.autoRotate || this.design.active || this.dragging;
     const moving = anim || now - this._moveT < 220;
     if (!anim && !this._need && !(this._wasMoving && !moving) && now - this._lastR < 2000) return; /* 아무것도 안 바뀌면 그리지 않음 (멈춘 화면은 GPU 를 쉬게) */
     if (this._need > 0) this._need--; this._wasMoving = moving; this._lastR = now;

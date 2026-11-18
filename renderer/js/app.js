@@ -8,6 +8,7 @@ import { Plan2D, KINDS, fitOpening } from './plan2d.js';
 import * as cloud from './cloud.js';
 import { airKind } from './air.js';
 import * as SITE from './site.js';
+import { CanvasRec, recType } from './rec.js';
 import * as lib2 from './store.js';
 import * as SL from './slope.js';
 import { ENVTYPES, ENVCOL, ENVLV, envOf, envFront } from './env.js';
@@ -19,7 +20,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.28';
+export const APP_VERSION = '2.1.29';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -577,6 +578,39 @@ function renderXray(body) {
   $$('[data-lk]', body).forEach((b) => (b.onclick = () => { plan.lineKind = b.dataset.lk; setPlanTool('line'); const c = lineCat(LINEKINDS[b.dataset.lk]); if (engine.xray && c && engine.xray !== c) setXray(c); renderProps(); toast(`${LINEKINDS[b.dataset.lk].name} · 2D 에서 점을 차례로 누르세요`); }));
   $$('[data-k]', body).forEach((i) => (i.onchange = () => { LOPT[i.dataset.k] = Math.max(0, Math.round(+i.value || 0)); }));
 }
+
+/* ---------- 녹화: 3D 화면(캔버스)만 MP4 로 · 도구 · 막대는 안 찍힘 ---------- */
+const REC = { len: store.get('byr.recLen', 30), spin: false, r: null };
+function recPop() {
+  let p = $('#recPop'); if (p) { p.remove(); return; } if (REC.r && REC.r.on) return;
+  p = document.createElement('div'); p.id = 'recPop'; p.className = 'recpop'; document.body.appendChild(p);
+  const draw = () => { const t = recType(); p.innerHTML = `<b>3D 화면 녹화</b><small>도구 · 막대는 빼고 3D 화면만 ${t && /mp4/.test(t) ? 'MP4' : 'WebM'} 으로 저장</small>
+    <div class="seg2">${[10, 20, 30, 60].map((n) => `<button data-rl="${n}" aria-pressed="${REC.len === n}">${n < 60 ? n + '초' : '1분'}</button>`).join('')}</div>
+    <label class="tog">360° 한 바퀴 돌리며 녹화 (녹화 길이 = 한 바퀴)<input type="checkbox" id="recSpin" ${REC.spin ? 'checked' : ''}></label>
+    <p class="hint">${REC.spin ? '화면 가운데를 축으로 천천히 한 바퀴 돌아요.' : '녹화하는 동안 마우스 · 손가락으로 움직이는 그대로 찍혀요. 언제든 ■ 정지 · Esc 로 끝낼 수 있어요.'}</p>
+    <div class="btns"><button class="btn" data-rc="x">닫기</button><button class="btn pri" data-rc="go" ${t ? '' : 'disabled'}>● 녹화 시작</button></div>${t ? '' : '<p class="hint warn">이 기기(브라우저)는 화면 녹화를 지원하지 않아요</p>'}`;
+    $$('[data-rl]', p).forEach((b) => (b.onclick = () => { REC.len = +b.dataset.rl; store.set('byr.recLen', REC.len); draw(); }));
+    $('#recSpin', p).onchange = (e) => { REC.spin = e.target.checked; draw(); };
+    $$('[data-rc]', p).forEach((b) => (b.onclick = () => { p.remove(); if (b.dataset.rc === 'go') recStart(); })); };
+  draw();
+}
+async function recStart() {
+  if (S.pane === '2d') setPane('3d'); engine.select(null); engine.siteMark && engine.siteMark(null); if (engine.controls.autoRotate) engine.setSpin(false);
+  const cv = engine.canvas; engine.recPr = Math.round(Math.min(2, Math.max(1, 1080 / Math.max(1, cv.clientHeight))) * 100) / 100; engine.recording = true; engine.resize(); engine.invalidate(true);
+  if (REC.spin) engine.orbitT = REC.len;
+  let bar = $('#recBar'); if (!bar) { bar = document.createElement('div'); bar.id = 'recBar'; bar.className = 'recbar'; document.body.appendChild(bar); }
+  const fmt = (x) => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, '0')}`; bar.hidden = false;
+  bar.innerHTML = `<i class="dot"></i><b id="recT">0:00</b><span>/ ${fmt(REC.len)}</span><button class="btn sm" id="recStop">■ 정지</button>`; $('#recStop').onclick = () => REC.r && REC.r.stop();
+  REC.r = new CanvasRec(cv);
+  try {
+    await new Promise((r) => setTimeout(r, 120)); const out = await REC.r.start({ max: REC.len, fps: 30, kbps: 14000, onTick: (t) => { const e = $('#recT'); if (e) e.textContent = fmt(t); } });
+    recEnd(); toast(`녹화 ${Math.round(out.sec)}초 · 저장할 곳을 고르세요`, 2500);
+    const name = `${(S.model.name || 'BYR').replace(/[\\/:*?"<>|]/g, '_')}_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}.${out.ext}`;
+    const saved = await saveFile({ title: '녹화 영상', defaultName: name, extensions: [out.ext], data: new Uint8Array(await out.blob.arrayBuffer()) });
+    if (saved) toast(out.ext === 'mp4' ? `저장했어요 · ${saved}` : `저장했어요 (이 기기는 MP4 대신 WebM) · ${saved}`, 4000);
+  } catch (e) { console.error(e); recEnd(); toast('녹화 실패 · ' + (e.message || e), 4000); }
+}
+function recEnd() { engine.recording = false; engine.orbitT = 0; engine.recPr = 0; engine.resize(); engine.invalidate(true); const bar = $('#recBar'); if (bar) bar.hidden = true; }
 
 /* ---------- 간판: 글자 · 불 · 색 · 글자별로 나누기 ---------- */
 function signUi(it, L) {
@@ -1173,6 +1207,7 @@ function envBird() { // 길 건너(매장 정면 쪽) 하늘에서 비스듬히 
 const DE = { it: null };
 /** Esc: 지금 하던 작업을 무엇이든 멈춘다 (디자인 수정 · 걷기 · 그리기 도구 · 줄자 · 이동 · 고르기 순). 멈춘 게 있으면 true */
 function escAll() {
+  if (REC.r && REC.r.on) { REC.r.stop(); return true; } if ($('#recPop')) { $('#recPop').remove(); return true; }
   if (engine.design.active) { const d = engine.design; if (d.dirty) { ask('디자인 수정을 끝낼까요?', '고친 내용을 저장하고 나갈지, 버리고 나갈지 골라요.', [{ label: '계속 수정', value: null }, { label: '버리고 나가기', value: false }, { label: '저장하고 나가기', value: true, kind: 'pri' }]).then((r) => { if (r != null) { endDesign(r); renderProps(); } }); } else { endDesign(false); renderProps(); } return true; }
   if (engine.walker.active) { engine.walker.stop ? engine.walker.stop() : stopWalk?.(); return true; }
   if (engine.controls.autoRotate || tourOn) { engine.setSpin(false); if (tourOn) { tourOn = false; engine.stopFly(); } $$('[data-pv="spin"]').forEach((x) => x.setAttribute('aria-pressed', 'false')); if (S.panel === 'view') renderProps(); toast('360° 보기를 멈췄어요', 1200); return true; }
@@ -1545,6 +1580,7 @@ const DOCK = [
   '|',
   { id: 'dkCeil', run: () => toggleCeiling(), g: 'plan', label: '천장', icon: '<path d="M3 6h18M6 6v3M12 6v3M18 6v3"/><circle cx="12" cy="13" r="2.5"/>' },
   { run: () => present.enter(), g: 'view', label: '발표', icon: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8M10 8l4 2-4 2z"/>' },
+  { run: () => recPop(), g: 'view', label: '녹화', icon: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/>' },
   { run: () => startWalk(), g: 'view', label: '걷기', icon: '<circle cx="13" cy="4.5" r="1.8"/><path d="M10 21l2-6-2.5-2.5L11 8l3 2 3 1M12 15l3 6M9.5 12.5L7 14"/>' },
   { id: 'dkXr', act: 'xray', g: 'view', label: '설치물', icon: '<path d="M3 18h18M5 18v-4h14v4"/><path d="M8 14V9h8v5" stroke-dasharray="2 2"/>' },
   { id: 'dkAir', run: () => toggleAir(), g: 'check', label: '공기', icon: '<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h8"/>' },
@@ -1674,12 +1710,12 @@ const present = {
   build() {
     const b = (this.box = document.createElement('div')); b.className = 'pr-ui';
     b.innerHTML = `<div class="pr-top"><div class="pr-modes" role="group" aria-label="보기 모드"><button data-pm="free">자유 보기</button><button data-pm="mep">설치물 보기</button><button data-pm="light">조명 모드</button></div>
-      <div class="pr-views"><button data-pv="iso" title="비스듬히">◇</button><button data-pv="top" title="위에서">□</button><button data-pv="spin" title="360° 돌려 보기">⟳</button></div><button class="pr-x" title="발표 끝내기 (Esc)">✕ 끝내기</button></div>
+      <div class="pr-views"><button data-pv="iso" title="비스듬히">◇</button><button data-pv="top" title="위에서">□</button><button data-pv="spin" title="360° 돌려 보기">⟳ 360°</button><button data-pv="rec" title="녹화 (MP4)" class="pr-recb">● 녹화</button></div><button class="pr-x" title="발표 끝내기 (Esc)">✕ 끝내기</button></div>
       <div class="pr-side" hidden></div>
       <div class="pr-styles" role="group" aria-label="스타일 필터">${Object.entries(STYLES).map(([k, st]) => `<button data-ps="${k}" title="${esc(st.hint)}" aria-pressed="${engine.style === k}">${esc(st.name)}</button>`).join('')}</div>`;
     document.body.appendChild(b);
     $$('[data-pm]', b).forEach((x) => (x.onclick = () => this.set(x.dataset.pm)));
-    $$('[data-pv]', b).forEach((x) => (x.onclick = () => { if (x.dataset.pv === 'spin') { engine.setSpin(!engine.controls.autoRotate); x.setAttribute('aria-pressed', String(engine.controls.autoRotate)); } else engine.view(x.dataset.pv); }));
+    $$('[data-pv]', b).forEach((x) => (x.onclick = () => { if (x.dataset.pv === 'rec') return recPop(); if (x.dataset.pv === 'spin') { engine.setSpin(!engine.controls.autoRotate); x.setAttribute('aria-pressed', String(engine.controls.autoRotate)); } else engine.view(x.dataset.pv); }));
     $$('[data-ps]', b).forEach((x) => (x.onclick = () => { engine.setStyle(x.dataset.ps); $$('[data-ps]', b).forEach((y) => y.setAttribute('aria-pressed', String(y === x))); this.set(this.mode); })); /* 발표 중 스타일은 프로젝트에 저장하지 않음 */
     $('.pr-x', b).onclick = () => this.exit();
   },
@@ -2057,7 +2093,7 @@ async function boot() {
   // 안드로이드 뒤로 단추 (Capacitor App 플러그인)
   try { const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App; if (A) A.addListener('backButton', () => { goBack(); }); } catch (e) { console.warn(e); }
   window.addEventListener('keydown', (e) => {
-    if (present.on) { if (e.key === 'Escape') { e.preventDefault(); if (engine.controls.autoRotate) { engine.setSpin(false); $$('[data-pv="spin"]').forEach((x) => x.setAttribute('aria-pressed', 'false')); toast('360° 보기를 멈췄어요 · Esc 한 번 더 = 발표 끝', 1500); } else present.exit(); } else if (/^[123]$/.test(e.key)) present.set(['free', 'mep', 'light'][+e.key - 1]); if (!/^[wasd]$/i.test(e.key) || e.ctrlKey || e.metaKey) return; } /* 발표 중엔 편집 단축키 끔 */
+    if (present.on) { if (e.key === 'Escape') { e.preventDefault(); if (REC.r && REC.r.on) REC.r.stop(); else if ($('#recPop')) $('#recPop').remove(); else if (engine.controls.autoRotate) { engine.setSpin(false); $$('[data-pv="spin"]').forEach((x) => x.setAttribute('aria-pressed', 'false')); toast('360° 보기를 멈췄어요 · Esc 한 번 더 = 발표 끝', 1500); } else present.exit(); } else if (/^[123]$/.test(e.key)) present.set(['free', 'mep', 'light'][+e.key - 1]); if (!/^[wasd]$/i.test(e.key) || e.ctrlKey || e.metaKey) return; } /* 발표 중엔 편집 단축키 끔 */
     if (e.key === 'Escape' && (S.dlgClose || !$('#home').hidden && !S.propsOpen)) { e.preventDefault(); if (S.dlgClose) S.dlgClose(); else closeHome(); return; }
     /* 글자를 치는 칸에서만 단축키를 양보 (슬라이더 · 체크 · 색 · 단추에 초점이 남아 있어도 단축키는 먹게) */
     const ae = document.activeElement, typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || (ae.tagName === 'INPUT' && !/^(range|checkbox|radio|color|button|submit|file)$/.test(ae.type)) || ae.isContentEditable);
