@@ -118,7 +118,7 @@ function convertLevel(meta, D, base, lib, report) {
 /** 조명 · 열 기물의 기본 광원 */
 export function defaultLight(L) {
   const hot = /fryer|range/.test(L.shape);
-  if (L.lightColor || L.lightKind) return { on: true, kind: L.lightKind || 'spot', color: L.lightColor || '#ffe2bd', power: L.lightPower ?? 1, k: L.lightK };
+  if (L.lightColor || L.lightKind) return { on: true, kind: L.lightKind || 'spot', color: L.lightColor || '#ffe2bd', power: L.lightPower ?? 1, k: L.lightK, type: L.lightType };
   return hot ? { on: true, kind: 'point', color: '#ffb46b', power: 0.6 } : { on: true, kind: L.layer === 'floor' ? 'point' : 'spot', color: '#ffe2bd', power: 1 };
 }
 
