@@ -10,14 +10,14 @@ import * as lib2 from './store.js';
 import * as SL from './slope.js';
 import { ENVTYPES, ENVCOL, ENVLV, envOf, envFront } from './env.js';
 import { bakeParts, applyParts } from './design.js';
-import { LINEKINDS, lineCat, XRN } from './lines.js';
+import { LINEKINDS, lineCat, XRN, lineZ, lineRound } from './lines.js';
 import { ROLES, FAMN, SIMCOL } from './sim.js';
 import { findFaces, splitPoly } from './rooms.js';
 import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.25';
+export const APP_VERSION = '2.1.26';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -69,6 +69,7 @@ function setSel(sel) {
   S.sel = sel || null; plan.select(S.sel, true);
   if (S.sel && S.sel.kind === 'item') { if (engine.selId !== S.sel.id) engine.select(S.sel.id); }
   else { if (engine.selId) engine.select(null); const L = level(), w = S.sel && (S.sel.kind === 'wall' ? S.sel.id : S.sel.kind === 'opening' ? (L.openings.find((o) => o.id === S.sel.id) || {}).wall : null); engine.highlight(w || null); }
+  engine.selectLine(S.sel && S.sel.kind === 'line' ? S.sel.id : null);
   if (S.sel) { S.propsOpen = true; S.panel = 'props'; } renderProps();
 }
 let liveT = 0;
@@ -254,6 +255,7 @@ function renderProps() {
   if (S.panel === 'dxf') return renderDxf(body);
   if (selRoom()) return renderRoom(body, selRoom());
   if (S.panel === 'account') return renderAccount(body);
+  if (S.sel && S.sel.kind === 'line') { const ln = (level().lines || []).find((l) => l.id === S.sel.id); if (ln) return renderLine(body, ln); }
   if (selWall()) return renderWall(body, selWall());
   if (selOpening()) return renderOpening(body, selOpening());
   const it = selItem();
@@ -556,14 +558,37 @@ function renderXray(body) {
   const L = level(), cat = engine.xray, cnt = (c) => (L.lines || []).filter((l) => LINEKINDS[l.kind] && lineCat(LINEKINDS[l.kind]) === c).length;
   $('#propsTitle').textContent = '설치물 · 배관 · 전선';
   body.innerHTML = `<div class="sec">투시해서 보기 · 나머지는 흑백 반투명</div>
-    <div class="chips"><button data-xr="" aria-pressed="${!cat}">끄기</button>${Object.entries(XRN).map(([k, n]) => `<button data-xr="${k}" aria-pressed="${cat === k}">${n} (${cnt(k)})</button>`).join('')}</div>
+    <div class="chips"><button data-mh="1" aria-pressed="${!cat && !!engine.mepHide}">끄기 (숨기기)</button><button data-mh="0" aria-pressed="${!cat && !engine.mepHide}">보이기</button>${Object.entries(XRN).map(([k, n]) => `<button data-xr="${k}" aria-pressed="${cat === k}">${n} (${cnt(k)})</button>`).join('')}</div>
     <div class="sec">그리기 · 2D 에서 점을 차례로 · 마지막 점을 한 번 더 누르면 끝 (Enter)</div>
     <div class="chips">${Object.entries(LINEKINDS).map(([k, v]) => `<button data-lk="${k}" aria-pressed="${plan.tool === 'line' && plan.lineKind === k}"><i class="dot" style="background:${v.color}"></i>${v.name}</button>`).join('')}</div>
     <div class="row">${num('매립 깊이 (바닥 아래)', 'depth', LOPT.depth)}${num('천장(슬래브)에서 내려온 거리', 'off', LOPT.off)}</div>
+    <p class="hint">그린 선을 2D · 3D 에서 누르면 높이 · 굵기 · 모양(원형/사각)을 바꿀 수 있어요.</p>
     <p class="hint">바닥 매립 · 바닥 배관은 바닥, 콘센트 · 가스는 벽, 천장 속 배선 · 덕트 · 급기/배기관은 천장 분류로 보여요. 지우기 도구로 선을 누르면 지워져요.</p>`;
   $$('[data-xr]', body).forEach((b) => (b.onclick = () => { setXray(b.dataset.xr || null); renderProps(); }));
+  $$('[data-mh]', body).forEach((b) => (b.onclick = () => { const h = b.dataset.mh === '1'; setXray(null); engine.setMepHide(h); store.set('byr.mepHide', h); renderProps(); toast(h ? '설치물(배관 · 전선 · 콘센트 · 수전 위치 등)을 숨겼어요 · 발표에서도 안 보여요' : '설치물을 보여요'); }));
   $$('[data-lk]', body).forEach((b) => (b.onclick = () => { plan.lineKind = b.dataset.lk; setPlanTool('line'); const c = lineCat(LINEKINDS[b.dataset.lk]); if (engine.xray && c && engine.xray !== c) setXray(c); renderProps(); toast(`${LINEKINDS[b.dataset.lk].name} · 2D 에서 점을 차례로 누르세요`); }));
   $$('[data-k]', body).forEach((i) => (i.onchange = () => { LOPT[i.dataset.k] = Math.max(0, Math.round(+i.value || 0)); }));
+}
+
+/** 배관 · 전선 하나: 높이(바닥에서 중심까지) · 굵기(지름) · 모양 · 색 · 지우기 */
+function renderLine(body, ln) {
+  const k = LINEKINDS[ln.kind] || {}, z = Math.round(lineZ(k, ln, level())), w = ln.w || k.w, round = lineRound(ln), len = Math.round(ln.pts.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - ln.pts[i][0], q[1] - ln.pts[i][1]), 0));
+  $('#propsTitle').textContent = k.name || '배관 · 전선';
+  body.innerHTML = `<p class="hint">길이 ${(len / 1000).toFixed(2)}m · 꺾임 ${Math.max(0, ln.pts.length - 2)}곳</p>
+    <div class="row"><label class="fld">높이 (바닥에서 중심까지, mm)<input type="number" id="lnZ" step="10" value="${z}"></label><label class="fld">${round ? '지름' : '폭'} (mm)<input type="number" id="lnW" min="5" max="1200" step="5" value="${w}"></label></div>
+    <div class="chips"><button data-lz="${-(ln.depth ?? 80)}">바닥 매립</button><button data-lz="20">바닥 위</button><button data-lz="500">벽 속 (500)</button><button data-lz="${(level().ceilingH || 2700) + Math.round(((level().slabH || 3300) - (level().ceilingH || 2700)) / 2)}">천장 속</button><button data-lz="${(level().ceilingH || 2700) - Math.round(w / 2) - 30}">천장 아래 노출</button></div>
+    ${ln.z != null ? '<button class="btn sm" id="lnZr">기본 높이로 (종류대로)</button>' : ''}
+    <div class="fld">모양<div class="seg2"><button data-ls="round" aria-pressed="${round}">원형 (부드러운 꺾임)</button><button data-ls="rect" aria-pressed="${!round}">사각 덕트</button></div></div>
+    <label class="fld">색<input type="color" id="lnC" value="${ln.color || k.color || '#999999'}"></label>
+    <div class="btns"><button class="btn danger" id="lnDel">이 선 지우기</button></div>`;
+  const up = () => { engine.rebuildLines(); commit(); plan.redraw(); };
+  $('#lnZ', body).onchange = (e) => { ln.z = Math.round(+e.target.value || 0); up(); renderProps(); };
+  $('#lnW', body).onchange = (e) => { ln.w = clamp(Math.round(+e.target.value || w), 5, 1200); up(); renderProps(); };
+  $$('[data-lz]', body).forEach((b) => (b.onclick = () => { ln.z = +b.dataset.lz; up(); renderProps(); }));
+  const zr = $('#lnZr', body); if (zr) zr.onclick = () => { delete ln.z; up(); renderProps(); };
+  $$('[data-ls]', body).forEach((b) => (b.onclick = () => { ln.shape = b.dataset.ls; up(); renderProps(); }));
+  $('#lnC', body).onchange = (e) => { ln.color = e.target.value; up(); };
+  $('#lnDel', body).onclick = () => { const L = level(); L.lines = (L.lines || []).filter((l) => l !== ln); setSel(null); engine.rebuildLines(); commit(); plan.redraw(); toast('선을 지웠어요'); };
 }
 
 /* ----- 5차: 설비 점검 · 전력 · 견적 · 자동 배치 · A안/B안 (기존 앱 v7~v10) ----- */
@@ -1858,6 +1883,7 @@ async function boot() {
   S.lib = lib.items; S.shapes = shapes; loadMyLib();
   engine = new Engine($('#view'), { lib: S.lib, shapes: S.shapes, assets: S.assets, zOf: (it) => SL.itemZ(level(), it, S.lib) });
   try { bindUi(); } catch (e) { console.warn(e); }
+  engine.mepHide = !!store.get('byr.mepHide', false); engine.onLine = (id) => setSel({ kind: 'line', id });
   lib2.onStatus(setSaveState);
   engine.onSelect = (id) => { if (id) { S.sel = { kind: 'item', id }; S.propsOpen = true; S.panel = 'props'; } else if (S.sel && S.sel.kind === 'item') S.sel = null; plan && plan.select(S.sel, true); renderProps(); };
   engine.onChange = () => { commit(); renderProps(); };
@@ -1872,7 +1898,7 @@ async function boot() {
     onMulti: (ids) => { S.multi = ids; setTimeout(syncModeChip); if (ids.length && plan.tool === 'boxsel') setPlanTool('select'); if (ids.length) { engine.select(null); S.sel = null; S.panel = 'multi'; S.propsOpen = true; } else if (S.panel === 'multi') S.panel = 'props'; renderProps(); },
     onSketch: (pts) => { const L = level(); (L.sketches ||= []).push({ id: uid('k'), pts, color: plan.skColor || '#e8467c', w: plan.skW || 3 }); commit(); },
     onRoom: (pts) => newRoom(pts),
-    onLine: (pts) => { if (S.patrol) return patrolDone(pts); if (S.cutRoom) return cutRooms(pts); const L = level(), k = LINEKINDS[plan.lineKind] || LINEKINDS.wire; (L.lines ||= []).push({ id: uid('l'), kind: plan.lineKind || 'wire', pts, ...(k.z === 'below' ? { depth: LOPT.depth } : {}), ...(k.z === 'hang' ? { off: LOPT.off } : {}) }); engine.rebuildStructure(); commit(); toast(`${k.name} ${Math.round(pts.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]), 0) / 100) / 10}m 를 그렸어요 · 이어서 다음 선을 그려도 돼요`, 3000); },
+    onLine: (pts) => { if (S.patrol) return patrolDone(pts); if (S.cutRoom) return cutRooms(pts); const L = level(), k = LINEKINDS[plan.lineKind] || LINEKINDS.wire; (L.lines ||= []).push({ id: uid('l'), kind: plan.lineKind || 'wire', pts, ...(k.z === 'below' ? { depth: LOPT.depth } : {}), ...(k.z === 'hang' ? { off: LOPT.off } : {}) }); if (engine.mepHide) { engine.setMepHide(false); store.set('byr.mepHide', false); } engine.rebuildStructure(); commit(); toast(`${k.name} ${Math.round(pts.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]), 0) / 100) / 10}m 를 그렸어요 · 이어서 다음 선을 그려도 돼요`, 3000); },
     onDim: (d) => { const L = level(); (L.dims ||= []).push({ id: uid('d'), ...d }); engine.rebuildStructure(); commit(); toast(`${Math.round(Math.hypot(d.x2 - d.x1, d.y2 - d.y1)).toLocaleString()} mm · 지우기 도구로 누르면 지워져요`, 2500); },
     onSoffit: (pts) => { const L = level(); (L.soffits ||= []).push({ id: uid('s'), pts, h: L.soffitH || 2400 }); engine.rebuildStructure(); commit(); toast(`천장 가벽을 넣었어요 · 아래면 ${L.soffitH || 2400}mm (층 · 천장 카드에서 높이 바꾸기)`, 3500); },
     onChange: (msg) => { commit(); renderProps(); if (msg) toast(msg, 2200); },

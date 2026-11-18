@@ -11,7 +11,7 @@ import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { buildItem, buildWalls, buildFloors, placeItem, levelBounds, MM , buildCeiling } from './builder.js';
 import { Walker } from './walk.js';
 import { buildDims } from './dims.js';
-import { buildLines, itemCat } from './lines.js';
+import { buildLines, itemCat, isMepItem } from './lines.js';
 import { figKind } from './figures.js';
 const lumC = (c) => c.r * 0.3 + c.g * 0.59 + c.b * 0.11;
 import { AirSim } from './air.js';
@@ -116,7 +116,7 @@ export class Engine {
     new ResizeObserver(() => this.resize()).observe(canvas);
     /* 필요할 때만 그리기: 엔진 함수가 불리거나(장면 바뀜) 시점이 움직이거나 움직이는 것(공기 · 동선 · 걷기 …)이 있을 때만 */
     this._need = 2; this._moveT = 0; this._lastR = 0;
-    const skip = new Set(['constructor', '_frame', 'getView', 'centerOnFloor', 'snapshot', 'snapshotAt', 'invalidate', 'pick', '_pickAt', '_pr', 'floorAt']);
+    const skip = new Set(['constructor', '_frame', 'getView', 'centerOnFloor', 'snapshot', 'snapshotAt', 'invalidate', 'pick', '_pickAt', '_pr', 'floorAt', '_applyMep', 'pickLine']);
     for (const k of Object.getOwnPropertyNames(Engine.prototype)) { const d = Object.getOwnPropertyDescriptor(Engine.prototype, k); if (skip.has(k) || !d || typeof d.value !== 'function') continue; const f = d.value; this[k] = (...a) => { const out = f.apply(this, a); this.invalidate(true); return out; }; }
     this.controls.addEventListener('change', () => { this._need = Math.max(this._need, 1); this._moveT = performance.now(); this._lightsFollow(); });
     for (const ev of ['pointerdown', 'pointermove', 'wheel', 'pointerup']) canvas.addEventListener(ev, () => (this._need = Math.max(this._need, 1)), { passive: true });
@@ -232,7 +232,7 @@ export class Engine {
     this.items = new THREE.Group(); this.items.name = '기물';
     for (const r of level.rooms || []) syncDrain(level, r);
     this.structure = new THREE.Group(); this.structure.name = '구조';
-    this.structure.add(buildFloors(level), buildWalls(level), buildCeiling(level), buildDims(level), buildLines(level));
+    this.structure.add(buildFloors(level), buildWalls(level), buildCeiling(level), buildDims(level), buildLines(level, { sel: this.selLine }));
     this.world.add(this.structure, this.items);
     for (const it of level.items) this.items.add(buildItem(it, this.ctx));
     applyStyleMaterials(this.world, this.style);
@@ -243,14 +243,28 @@ export class Engine {
   /** 기물 하나를 다시 만든다 (색 · 크기 · 조명 변경 뒤) */
   rebuildItem(it) {
     const old = this.itemGroup(it.id), g = buildItem(it, this.ctx);
-    if (old) { this.items.remove(old); disposeTree(old); } this.items.add(g); applyStyleMaterials(g, this.style); if (this.focusPts) this.applyFocus(); if (this.xray) this._applyXray();
+    if (old) { this.items.remove(old); disposeTree(old); } this.items.add(g); applyStyleMaterials(g, this.style); if (this.focusPts) this.applyFocus(); if (this.xray) this._applyXray(); else this._applyMep();
     if (this.selId === it.id) this.selBox.setFromObject(g);
     this._limitLights(); return g;
+  }
+  /** 배관 · 전선만 다시 (높이 · 굵기 · 모양 · 고르기 바뀔 때) */
+  rebuildLines() {
+    if (!this.structure || !this.level) return; const old = this.structure.children.find((c) => c.userData.mep), g = buildLines(this.level, { sel: this.selLine });
+    if (old) { this.structure.remove(old); disposeTree(old); } applyStyleMaterials(g, this.style); this.structure.add(g); this._applyXray(); this.invalidate(true);
+  }
+  selectLine(id) { if (this.selLine === (id || null)) return; this.selLine = id || null; this.rebuildLines(); }
+  /** 설치물 숨기기: 끄면 배관 · 전선 · 콘센트 · 수전 위치 등이 일반 화면 · 발표(설치물 보기 빼고)에서 사라진다 */
+  setMepHide(on) { this.mepHide = !!on; this._applyMep(); this.invalidate(true); }
+  _applyMep() {
+    const hide = this.present ? this.present !== 'mep' : !!this.mepHide && !this.xray;
+    if (this.structure) for (const c of this.structure.children) if (c.userData.mep) c.visible = !hide;
+    if (this.items && this.level) for (const g of this.items.children) { const it = this.level.items.find((q) => q.id === g.userData.itemId); if (it && isMepItem(this.ctx.lib[it.type], it.type)) g.visible = !hide; }
+    if (this.renderer) this.renderer.shadowMap.needsUpdate = true;
   }
   /** 벽 · 문/창 · 바닥만 다시 만든다 (2D 도면에서 벽을 그리거나 끌 때 바로 3D 에 반영) */
   rebuildStructure() {
     if (!this.level) return; const old = this.structure; for (const r of this.level.rooms || []) syncDrain(this.level, r);
-    this.structure = new THREE.Group(); this.structure.name = '구조'; this.structure.add(buildFloors(this.level), buildWalls(this.level), buildCeiling(this.level), buildDims(this.level), buildLines(this.level));
+    this.structure = new THREE.Group(); this.structure.name = '구조'; this.structure.add(buildFloors(this.level), buildWalls(this.level), buildCeiling(this.level), buildDims(this.level), buildLines(this.level, { sel: this.selLine }));
     applyStyleMaterials(this.structure, this.style);
     if (old) { this.world.remove(old); disposeTree(old); } this.world.add(this.structure);
     const b = levelBounds(this.level); this.bounds = { cx: ((b[0] + b[2]) / 2) * MM, cz: ((b[1] + b[3]) / 2) * MM, r: Math.max(3, (Math.hypot(b[2] - b[0], b[3] - b[1]) / 2) * MM) };
@@ -278,7 +292,7 @@ export class Engine {
         u.opBase = base; u.opMat = m; o.material = m; }); }
   }
   _applyXray() {
-    this._applyCut(); this._applyLayers();
+    this._applyCut(); this._applyLayers(); this._applyMep();
     const cat = this.xray; if (!cat) return; const gray = (this._xrMat ||= new THREE.MeshStandardMaterial({ color: '#c9ccd1', transparent: true, opacity: 0.16, depthWrite: false, roughness: 1 }));
     const keep = (o) => { for (let p = o; p; p = p.parent) { if (p.userData.xr) return p.userData.xr === cat; if (p.userData.itemId) { const it = this.level.items.find((q) => q.id === p.userData.itemId); return it ? itemCat(this.ctx.lib[it.type]) === cat : false; } } return false; };
     this.world.traverse((o) => { if (!o.isMesh) return; o.userData.baseMat ||= o.material; if (!keep(o)) o.material = gray; });
@@ -308,7 +322,7 @@ export class Engine {
     this.setStyle(this.style); /* 재질 · 빛 · 노출 · 후처리를 스타일 기본으로 */
   }
   setPresent(mode, o = {}) {
-    this._presentClear(); this.present = mode || null; const st = STYLES[this.style];
+    this._presentClear(); this.present = mode || null; this._applyMep(); const st = STYLES[this.style];
     this.showCeiling(!this.level || !this.level.ceiling || this.level.ceiling.on !== false);
     if (mode === 'mep') {
       const gray = (this._pGray ||= new THREE.MeshStandardMaterial({ color: '#d0d4d9', transparent: true, opacity: 0.25, depthWrite: false, roughness: 1 })), bur = (this._pBur ||= new THREE.MeshStandardMaterial({ color: '#6e1423', roughness: 0.55, metalness: 0.1 })), edge = (this._pEdge ||= new THREE.LineBasicMaterial({ color: '#000000' }));
@@ -447,6 +461,7 @@ export class Engine {
     const r = this.canvas.getBoundingClientRect(), ray = (this._rc ||= new THREE.Raycaster());
     ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera); return ray;
   }
+  pickLine(e) { const g = this.structure && this.structure.children.find((c) => c.userData.mep); if (!g || !g.visible) return null; const h = this._ray(e).intersectObject(g, true)[0]; return h ? h.object.userData.lineId : null; }
   pick(e) {
     for (const hit of this._ray(e).intersectObjects(this.items.children.filter((g) => g.visible), true)) { // 숨긴(공간만 보기) 기물은 건너뜀
       let o = hit.object; while (o && !o.userData.itemId) o = o.parent; if (o) return o.userData.itemId;
@@ -484,7 +499,7 @@ export class Engine {
     const up = (e) => {
       active.delete(e.pointerId); this._touches = active.size; if ((this.design && this.design.active) || this.walker.active) { down = null; return; }
       if (drag) { e.stopImmediatePropagation(); const moved = drag.moved; drag = null; if (moved) { this.onChange(); return; } }
-      if (down && e.pointerId === down.id && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 7 && e.type === 'pointerup' && this.mode !== 'orbit') this.select(this.pick(e)); // 톡 누르면 선택
+      if (down && e.pointerId === down.id && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 7 && e.type === 'pointerup' && this.mode !== 'orbit') { const id = this.pick(e), ln = !id && this.pickLine(e); if (ln && this.onLine) { this.select(null); this.onLine(ln); } else this.select(id); } // 톡 누르면 선택 (기물 없으면 배관 · 전선)
       down = null;
     };
     cv.addEventListener('pointerup', up, true); cv.addEventListener('pointercancel', up, true);

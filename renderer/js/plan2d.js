@@ -85,6 +85,7 @@ export class Plan2D {
     if (!this.inFocus(p.x, p.y)) return null;
     const o = this.hitOpening(p); if (o) return { kind: 'opening', id: o.id };
     const it = this.hitItem(p); if (it) return { kind: 'item', id: it.id };
+    const ln = this.hitLine(p); if (ln) { ln.id ||= 'l' + Math.random().toString(36).slice(2, 9); return { kind: 'line', id: ln.id }; }
     const w = this.hitWall(p); if (w) return { kind: 'wall', id: w.w.id };
     const r = this.hitRoom(p); if (r) return { kind: 'room', id: r.id };
     return null;
@@ -108,6 +109,7 @@ export class Plan2D {
     if (sel.kind === 'item') { L.items = L.items.filter((i) => i.id !== sel.id); this.api.onLive('item-removed', sel.id); }
     if (sel.kind === 'opening') { L.openings = L.openings.filter((o) => o.id !== sel.id); this.api.onLive('structure'); }
     if (sel.kind === 'room') { L.rooms = L.rooms.filter((r) => r.id !== sel.id); this.api.onLive('structure'); }
+    if (sel.kind === 'line') { L.lines = (L.lines || []).filter((l) => l.id !== sel.id); this.api.onLive('structure'); }
     if (sel.kind === 'wall') { L.walls = L.walls.filter((w) => w.id !== sel.id); L.openings = L.openings.filter((o) => o.wall !== sel.id); this.api.onLive('structure'); }
     if (this.sel && this.sel.id === sel.id) this.select(null); this.api.onChange('지웠어요'); this.redraw();
   }
@@ -148,6 +150,7 @@ export class Plan2D {
       if (!free && !(mod && e.shiftKey) && hit.kind !== 'room') { act = { pan: true, start, last: start }; return; } /* 잠금: 눌러서 고르기만, 끌면 화면 이동 */
       if (hit.kind === 'item') act = this._dragItem(this.L.items.find((i) => i.id === hit.id), p, start);
       else if (hit.kind === 'opening') act = this._dragOpening(this.L.openings.find((o) => o.id === hit.id), start);
+      else if (hit.kind === 'line') act = { pan: true, start, last: start };
       else if (hit.kind === 'room') act = was ? this._dragRoom(this.L.rooms.find((r) => r.id === hit.id), p, start) : { pan: true, start, last: start }; // 고른 공간을 다시 끌면 공간째 옮기기, 아니면 화면 이동
       else act = this._dragWall(this.L.walls.find((w) => w.id === hit.id), p, start);
     });
@@ -331,7 +334,7 @@ export class Plan2D {
     for (const sf of L.soffits || []) { poly(sf.pts); g.setLineDash([4 * px1, 4 * px1]); g.strokeStyle = '#8a5cf6'; g.lineWidth = 2 * px1; g.stroke(); g.setLineDash([]); g.fillStyle = 'rgba(138,92,246,0.08)'; g.fill(); const c = polyCenter(sf.pts); g.save(); g.translate(c[0], c[1]); g.scale(px1, px1); g.font = '11px system-ui'; g.fillStyle = '#6f45d9'; g.textAlign = 'center'; g.fillText(`가벽 ${sf.h || L.soffitH || 2400}`, 0, 0); g.restore(); }
     if (L.dimsOn !== false) for (const d of L.dims || []) this._tape(d.x1, d.y1, d.x2, d.y2, px1);
     // 배관 · 전선 · 덕트 (종류별 색 · 굵기)
-    for (const l of L.lines || []) { const k = LINEKINDS[l.kind]; if (!k || !l.pts || l.pts.length < 2) continue; g.save(); g.strokeStyle = l.color || k.color; g.lineWidth = Math.max(2 * px1, Math.min(l.w || k.w, 300)); g.globalAlpha = 0.85; if (k.z === 'below') g.setLineDash([10 * px1, 6 * px1]); g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath(); l.pts.forEach((q, i) => (i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]))); g.stroke(); g.restore(); }
+    for (const l of L.lines || []) { const k = LINEKINDS[l.kind]; if (!k || !l.pts || l.pts.length < 2) continue; g.save(); g.strokeStyle = l.color || k.color; g.lineWidth = Math.max(2 * px1, Math.min(l.w || k.w, 300)); g.globalAlpha = 0.85; if (k.z === 'below') g.setLineDash([10 * px1, 6 * px1]); g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath(); l.pts.forEach((q, i) => (i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]))); if (this.sel && this.sel.kind === 'line' && this.sel.id === l.id) { g.save(); g.strokeStyle = '#2f7df6'; g.globalAlpha = 0.9; g.lineWidth = Math.max(8 * px1, Math.min(l.w || k.w, 300) + 8 * px1); g.setLineDash([]); g.stroke(); g.restore(); } g.stroke(); g.restore(); }
     if (this.tool === 'line' && this.lpts && this.lpts.length) { const k = LINEKINDS[this.lineKind] || LINEKINDS.wire, R2 = [...this.lpts, ...(this.hover ? [this.hover] : [])]; g.save(); g.strokeStyle = k.color; g.lineWidth = Math.max(3 * px1, k.w); g.globalAlpha = 0.7; g.beginPath(); R2.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.stroke(); g.restore(); }
     { const rh = this._rotHandle(); if (rh) { const it = rh.it; g.save(); g.strokeStyle = '#2f7df6'; g.fillStyle = '#fff'; g.lineWidth = 2 * px1; g.beginPath(); g.moveTo(it.x - Math.sin(rh.a) * it.d / 2, it.y + Math.cos(rh.a) * it.d / 2); g.lineTo(rh.x, rh.y); g.stroke(); g.beginPath(); g.arc(rh.x, rh.y, 9 * px1, 0, Math.PI * 2); g.fill(); g.stroke();
       g.beginPath(); g.arc(rh.x, rh.y, 4.5 * px1, -2.2, 1.4); g.stroke(); if (this.rotInfo != null) { g.fillStyle = '#2f7df6'; g.font = `600 ${13 * px1}px system-ui`; g.textAlign = 'left'; g.fillText(this.rotInfo + '°', rh.x + 14 * px1, rh.y + 4 * px1); } g.restore(); } }
