@@ -20,7 +20,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.32';
+export const APP_VERSION = '2.1.33';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -205,6 +205,7 @@ const ACT = {
   keys: () => showKeys(),
   hist: () => { S.panel = 'hist'; S.propsOpen = true; renderProps(); },
   uiset: () => { S.panel = 'uiset'; S.propsOpen = true; renderProps(); },
+  orient: () => { S.panel = 'orient'; S.propsOpen = true; renderProps(); },
   lang: () => { setLang(lang() === 'en' ? 'ko' : 'en'); renderProps(); if (!$('#home').hidden) renderHome(); toast(lang() === 'en' ? 'English screen (names in your project stay as they are)' : '한국어 화면으로 바꿨어요'); },
   sketch: () => setPlanTool('sketch'),
   cmt: () => { S.panel = 'cmt'; S.propsOpen = true; renderProps(); },
@@ -270,6 +271,7 @@ function renderProps() {
   if (S.panel === 'hist') return renderHist(body);
   if (S.panel === 'uiset') return renderUiSet(body);
   if (S.panel === 'site') return renderSite(body);
+  if (S.panel === 'orient') return renderOrient(body);
   if (S.panel === 'cmt') return renderCmt(body);
   if (S.panel === 'multi' && (S.multi || []).length) return renderMulti(body);
   if (S.panel === 'dxf') return renderDxf(body);
@@ -1318,7 +1320,7 @@ function renderWall(body, w) {
     <div class="row"><label class="fld">시트지 면<select id="shSide"><option value="">없음</option><option value="a" ${w.sheet && w.sheet.side === 'a' ? 'selected' : ''}>앞면</option><option value="b" ${w.sheet && w.sheet.side === 'b' ? 'selected' : ''}>뒷면</option><option value="both" ${w.sheet && w.sheet.side === 'both' ? 'selected' : ''}>양면</option></select></label><label class="fld">시트지 색<input type="color" id="shCol" value="${w.sheet && /^#[0-9a-f]{6}$/i.test(w.sheet.color) ? w.sheet.color : '#d8c7a6'}"></label></div>
     <div class="btns"><button class="btn" data-a="shImg">${w.sheet && w.sheet.img ? '시트지 이미지 바꾸기' : '시트지에 이미지 (사진 · 패턴)'}</button>${w.sheet && w.sheet.img ? '<button class="btn" data-a="shImgDel">이미지 빼기</button>' : ''}<button class="btn" data-a="art">벽 그림 넣기</button></div>
     ${(w.arts || []).map((A, i) => `<div class="row2"><span class="hint">그림 ${i + 1} · ${A.w}×${A.h}</span><span><button class="btn" data-art="${i}:big">크게</button><button class="btn" data-art="${i}:small">작게</button><button class="btn" data-art="${i}:left">◀</button><button class="btn" data-art="${i}:right">▶</button><button class="btn" data-art="${i}:up">▲</button><button class="btn" data-art="${i}:down">▼</button><button class="btn danger" data-art="${i}:del">✕</button></span></div>`).join('')}
-    <div class="btns"><button class="btn danger" data-a="del">삭제</button></div>`;
+    <div class="btns"><button class="btn" data-a="alignH">이 벽을 수평으로 (도면 전체 돌리기)</button><button class="btn" data-a="orient">작업 방향…</button><button class="btn danger" data-a="del">삭제</button></div>`;
   $$('[data-k]', body).forEach((i) => {
     const k = i.dataset.k;
     if (k === 'color') { i.oninput = () => { w.color = i.value; liveStructure(); }; i.onchange = () => commit(); return; }
@@ -1343,6 +1345,7 @@ function renderWall(body, w) {
   $$('[data-a]', body).forEach((b) => (b.onclick = async () => {
     const a = b.dataset.a, L0 = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
     if (a === 'del') return plan.erase({ kind: 'wall', id: w.id });
+    if (a === 'alignH') { alignWallH(w); return renderProps(); } if (a === 'orient') return ACT.orient();
     if (a === 'split' || a === 'split3') { const n = a === 'split' ? 2 : 3; splitWall(w, [...Array(n - 1).keys()].map((k) => (L0 * (k + 1)) / n)); return done(`벽을 ${n}개로 나눴어요`); }
     if (a === 'splitAt') return askNum(`시작점에서 몇 mm (0 ~ ${Math.round(L0)})`, Math.round(L0 / 2), (x) => { if (x > 50 && x < L0 - 50) { splitWall(w, [x]); done('벽을 나눴어요'); } });
     if (a === 'rot45' || a === 'rot90') { rotateWall(w, a === 'rot45' ? 45 : 90); return done(); }
@@ -1585,6 +1588,7 @@ const DOCK = [
   { run: () => setPlanTool('measure'), g: 'plan', label: '줄자', icon: '<path d="M3 15l12-12 6 6-12 12z"/><path d="M7 11l2 2M10 8l2 2M13 5l2 2"/>' },
   { act: 'rooms', g: 'plan', label: '공간', icon: '<path d="M4 4h16v16H4z" stroke-dasharray="3 2.5"/><path d="M9 12h6"/>' },
   { run: () => slopeTool(), g: 'plan', label: '구배', icon: '<path d="M3 17L21 9M3 17h18"/><path d="M15 7l3 2.6-3.6 1.1"/>' },
+  { act: 'orient', g: 'plan', label: '작업 방향', icon: '<path d="M12 3v4M12 3l-2.5 2.5M12 3l2.5 2.5"/><path d="M5 12a7 7 0 1 0 7-7"/><path d="M3 9l2 3 3-2"/>' },
   { act: 'bg', g: 'plan', label: '배경', icon: '<path d="M3 20h18M5 20V10h4v10M11 20V5h5v15M18 20v-7h2"/>' },
   '|',
   { id: 'btnStyle', g: 'view', label: '스타일', icon: '<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.6-.9 1.2-1.8-.5-1-.1-2.2 1.2-2.2H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/>', attrs: 'aria-haspopup="menu" aria-expanded="false"' },
@@ -1889,7 +1893,8 @@ function siteBird() { const E = envOf(S.model), R = (E.site && E.site.R) || 500,
 /* ---------- 상권 2D: 위성 · 지도 바닥 + 건물 외곽(용도 색) · 찾은 주소 · 고르기 ---------- */
 const siteE = () => { const E = envOf(S.model); return E.type === 'site' && E.site ? E : null; };
 function siteUnder(g, px1) {
-  const E = siteE(); if (!E) return; const St = E.site, ax = E.siteAx || 0, ay = E.siteAy || 0, K = 1000, M = SITE.siteMap(St, E.siteMap || 'none');
+  const E = siteE(); if (!E || !site2d(E)) return; const St = E.site, ax = E.siteAx || 0, ay = E.siteAy || 0, K = 1000, M = SITE.siteMap(St, E.siteMap || 'none');
+  g.save(); g.rotate(((E.siteRot || 0) * Math.PI) / 180); /* 작업 방향에 맞춰 상권도 같이 돈다 */
   if (M) { const [x0, y0, x1, y1] = M.b; g.drawImage(M.cv, (x0 - ax) * K, (y0 - ay) * K, (x1 - x0) * K, (y1 - y0) * K); }
   g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
   if (!M) { g.strokeStyle = '#c4c6cb'; for (const r of St.roads || []) { g.lineWidth = r.w * K; g.beginPath(); r.p.forEach(([x, y], k) => (k ? g.lineTo((x - ax) * K, (y - ay) * K) : g.moveTo((x - ax) * K, (y - ay) * K))); g.stroke(); } }
@@ -1898,9 +1903,10 @@ function siteUnder(g, px1) {
     g.globalAlpha = M ? (hit ? 0.7 : 0.35) : 0.85; g.fillStyle = col; g.fill(); g.globalAlpha = 1; g.lineWidth = (sel ? 3 : hit ? 2 : 0.8) * px1; g.strokeStyle = sel ? '#2f7df6' : hit ? '#b40000' : 'rgba(30,35,45,.55)'; g.stroke(); });
   const hb = St.buildings[St.hit]; if (hb && E.siteStore !== St.hit) { const cx = (hb.p.reduce((a, q) => a + q[0], 0) / hb.p.length - ax) * K, cy = (hb.p.reduce((a, q) => a + q[1], 0) / hb.p.length - ay) * K, r = 9 * px1;
     g.fillStyle = '#ff2d2d'; g.strokeStyle = '#fff'; g.lineWidth = 2 * px1; g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy - r * 2.2, r, Math.PI * 0.8, Math.PI * 0.2); g.closePath(); g.fill(); g.stroke(); g.fillStyle = '#fff'; g.beginPath(); g.arc(cx, cy - r * 2.2, r * 0.4, 0, 7); g.fill(); }
-  g.restore();
+  g.restore(); g.restore();
 }
-function sitePick2d(p) { const E = siteE(); if (!E) return null; const ax = E.siteAx || 0, ay = E.siteAy || 0, x = p.x / 1000 + ax, y = p.y / 1000 + ay; const i = E.site.buildings.findIndex((b, k) => k !== E.siteStore && SITE.inPoly(x, y, b.p)); return i >= 0 ? { kind: 'site', id: i } : null; }
+const site2d = (E) => (E.site2d ?? E.siteStore == null); /* 도면 작업 중 2D 는 기본으로 배경 없음 */
+function sitePick2d(p) { const E = siteE(); if (!E || !site2d(E)) return null; const a = (-(E.siteRot || 0) * Math.PI) / 180, px = p.x * Math.cos(a) - p.y * Math.sin(a), py = p.x * Math.sin(a) + p.y * Math.cos(a), ax = E.siteAx || 0, ay = E.siteAy || 0, x = px / 1000 + ax, y = py / 1000 + ay; const i = E.site.buildings.findIndex((b, k) => k !== E.siteStore && SITE.inPoly(x, y, b.p)); return i >= 0 ? { kind: 'site', id: i } : null; }
 function siteBounds2d() { const E = siteE(); if (!E) return null; const R = E.site.R * 1000, ax = (E.siteAx || 0) * 1000, ay = (E.siteAy || 0) * 1000; return [-R - ax, -R - ay, R - ax, R - ay]; }
 function siteFit2d() { setTimeout(() => plan.fit(), 60); }
 
@@ -1922,6 +1928,37 @@ function bindSiteLayers(body, E, re) {
   $('#siT', body).onchange = (e) => { E.siteTrees = e.target.checked; re(); };
   $('#siH', body).onchange = (e) => { E.hk = +e.target.value; re(); };
 }
+/* ---------- 작업 방향: 층 전체(벽 · 기물 · 공간 · 선 · 바닥판 · 치수 · 핀)와 상권 배경을 같은 각도로 돌린다 ---------- */
+function rotateWork(deg, quiet) {
+  if (!deg) return; const L = level(), a = (deg * Math.PI) / 180, c = Math.cos(a), s2 = Math.sin(a), R = (x, y) => [Math.round(x * c - y * s2), Math.round(x * s2 + y * c)], Rp = (p) => R(p[0], p[1]);
+  for (const w of L.walls) { [w.x1, w.y1] = R(w.x1, w.y1); [w.x2, w.y2] = R(w.x2, w.y2); }
+  for (const it of L.items) { [it.x, it.y] = R(it.x, it.y); it.rot = ((((it.rot || 0) + deg) % 360) + 360) % 360; }
+  for (const r of L.rooms || []) r.pts = r.pts.map(Rp); for (const l of L.lines || []) l.pts = l.pts.map(Rp); for (const sf of L.soffits || []) sf.pts = sf.pts.map(Rp); for (const k of L.sketches || []) if (k.pts) k.pts = k.pts.map(Rp);
+  for (const d of L.dims || []) { [d.x1, d.y1] = R(d.x1, d.y1); [d.x2, d.y2] = R(d.x2, d.y2); } if (L.slab) L.slab = L.slab.map(Rp);
+  for (const cm of S.model.comments || []) if ((cm.lv ?? 0) === S.model.activeLevel && cm.x != null) [cm.x, cm.y] = R(cm.x, cm.y);
+  const E = envOf(S.model); if (E.site) E.siteRot = Math.round(((E.siteRot || 0) + deg) * 10) / 10;
+  engine.setLevel(L); applyEnv(); commit(); syncPins(); plan.redraw(); if (!quiet) toast(`작업 방향 ${deg > 0 ? '+' : ''}${Math.round(deg * 10) / 10}°`, 1200);
+}
+function alignWallH(w) { let a = (Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180) / Math.PI, d = -a; while (d > 90) d -= 180; while (d <= -90) d += 180; if (Math.abs(d) < 0.05) return toast('이미 수평이에요'); rotateWork(Math.round(d * 100) / 100, true); toast(`이 벽이 수평이 되게 ${Math.round(d * 10) / 10}° 돌렸어요`); }
+function renderOrient(body) {
+  $('#propsTitle').textContent = '작업 방향 · 도면 돌리기'; const E = envOf(S.model), w = selWall();
+  body.innerHTML = `<p class="hint">층 전체(벽 · 기물 · 공간 · 선 · 바닥)를 돌려 원하는 방향을 위로 두고 그려요. ${E.site ? '상권 배경도 같은 각도로 같이 돌아서 틀어지지 않아요.' : ''}${E.site ? ` · 지금 북쪽에서 ${Math.round((E.siteRot || 0) * 10) / 10}°` : ''}</p>
+    <div class="btns">${w ? '<button class="btn pri" id="orW">고른 벽을 수평으로</button>' : '<span class="hint">벽을 고르면 [고른 벽을 수평으로] 가 생겨요</span>'}</div>
+    <div class="seg2">${[[-90, '⟲ 90°'], [-15, '⟲ 15°'], [-1, '⟲ 1°'], [1, '⟳ 1°'], [15, '⟳ 15°'], [90, '⟳ 90°']].map(([d, n]) => `<button data-od="${d}">${n}</button>`).join('')}</div>
+    <label class="fld">잡고 돌리기 (−45° ~ +45°)<input type="range" id="orS" min="-45" max="45" step="0.5" value="0"><small id="orV">0°</small></label>
+    <div class="row"><label class="fld">각도 직접 (°)<input type="number" id="orN" step="0.5" value="0"></label><button class="btn" id="orGo">돌리기</button></div>
+    ${E.site ? `<div class="btns"><button class="btn" id="orN0">북쪽을 위로 (지도 원래 방향)</button></div><label class="tog">2D 에 상권 배경 보이기<input type="checkbox" id="or2d" ${site2d(E) ? 'checked' : ''}></label>` : ''}
+    <div class="sec">바닥판</div><label class="tog">바닥판을 벽(공간) 모양에 맞추기<input type="checkbox" id="orSlab" ${level().slab ? 'checked' : ''}></label>`;
+  const ow = $('#orW', body); if (ow) ow.onclick = () => { alignWallH(w); renderProps(); };
+  $$('[data-od]', body).forEach((b) => (b.onclick = () => { rotateWork(+b.dataset.od); renderProps(); }));
+  let last = 0; const sl = $('#orS', body); sl.oninput = () => { const v = +sl.value; rotateWork(v - last, true); last = v; $('#orV', body).textContent = v + '°'; }; sl.onchange = () => { toast(`${last}° 돌렸어요`); renderProps(); };
+  $('#orGo', body).onclick = () => { rotateWork(+$('#orN', body).value || 0); renderProps(); };
+  const n0 = $('#orN0', body); if (n0) n0.onclick = () => { rotateWork(-(E.siteRot || 0)); renderProps(); };
+  const o2 = $('#or2d', body); if (o2) o2.onchange = () => { E.site2d = o2.checked; commit(); plan.redraw(); };
+  $('#orSlab', body).onchange = (e) => { const L = level(); if (e.target.checked) { const r = (L.rooms || []).slice().sort((a, b) => Math.abs(polyA(b.pts)) - Math.abs(polyA(a.pts)))[0]; if (!r) { e.target.checked = false; return toast('공간(방)이 있어야 해요 · 공간 자동 찾기 먼저'); } L.slab = r.pts.map((q) => q.slice()); } else delete L.slab; engine.setLevel(L); commit(); };
+}
+const polyA = (P) => { let a = 0; for (let i = 0; i < P.length; i++) { const [x1, y1] = P[i], [x2, y2] = P[(i + 1) % P.length]; a += x1 * y2 - x2 * y1; } return a / 2; };
+
 /** 상권 패널: 색 · 높이 · 범례 · 고른 건물 정보 · 도면 시작 */
 function renderSite(body) {
   const E = envOf(S.model), St = E.site; $('#propsTitle').textContent = '상권 3D';
@@ -1947,12 +1984,16 @@ async function siteStart(i) {
   const E = envOf(S.model), St = E.site, b = St && St.buildings[i]; if (!b) return; const L = level();
   if (E.siteStore === i) { setPane('split'); engine.view('iso'); return; }
   if (E.siteStore != null || L.walls.length) { if (!(await ask('다른 상가로 도면을 시작할까요?', '지금 그린 벽 · 기물은 그대로 두고 새 상가 외곽으로 벽을 다시 세워요. (되돌리기 가능)'))) return; }
-  const cx = b.p.reduce((a, q) => a + q[0], 0) / b.p.length, cy = b.p.reduce((a, q) => a + q[1], 0) / b.p.length, P = b.p.map(([x, y]) => [Math.round((x - cx) * 1000), Math.round((y - cy) * 1000)]);
+  const cx = b.p.reduce((a, q) => a + q[0], 0) / b.p.length, cy = b.p.reduce((a, q) => a + q[1], 0) / b.p.length;
+  /* 작업 방향: 가장 긴 변을 가로로 (상권 배경도 같은 각도로 돌림) → 모눈 · 벽이 건물과 나란해진다 */
+  let best = 0, ang = 0; b.p.forEach((q, k) => { const r = b.p[(k + 1) % b.p.length], l = Math.hypot(r[0] - q[0], r[1] - q[1]); if (l > best) { best = l; ang = (Math.atan2(r[1] - q[1], r[0] - q[0]) * 180) / Math.PI; } });
+  let rot = -ang; while (rot > 90) rot -= 180; while (rot <= -90) rot += 180; rot = Math.round(rot * 10) / 10; const ra = (rot * Math.PI) / 180, co = Math.cos(ra), si = Math.sin(ra);
+  const P = b.p.map(([x, y]) => { const X = (x - cx) * 1000, Y = (y - cy) * 1000; return [Math.round(X * co - Y * si), Math.round(X * si + Y * co)]; });
   const T = S.model.wallT || 150; L.walls = P.map((q, k) => { const r = P[(k + 1) % P.length]; return { id: uid('w'), x1: q[0], y1: q[1], x2: r[0], y2: r[1], t: T, h: L.ceilingH || 2700 }; }).filter((w) => Math.hypot(w.x2 - w.x1, w.y2 - w.y1) > 200);
-  L.rooms = [{ id: uid('r'), name: b.name || '매장', pts: P }]; L.openings = []; E.siteStore = i; E.siteAx = cx; E.siteAy = cy; if (SITE.vworld().key) E.siteMap = 'sat'; E.siteRoads = true; E.siteZones = false; E.siteColor = 'white'; /* 작업용: 위성 + 실제 도로선 + 흰 매스만 */
+  L.rooms = [{ id: uid('r'), name: b.name || '매장', kind: '홀', pts: P, lift: 0, color: '#c9c3b8', finish: 'tile', slope: null }]; L.slab = P.map((q) => q.slice()); L.openings = []; E.siteStore = i; E.siteAx = cx; E.siteAy = cy; E.siteRot = rot; delete E.site2d; if (SITE.vworld().key) E.siteMap = 'sat'; E.siteRoads = true; E.siteZones = false; E.siteColor = 'white'; /* 작업용: 위성 + 실제 도로선 + 흰 매스만 */
   if (/^상권 · /.test(S.model.name) && b.name) S.model.name = `${b.name} (${St.title || ''})`.slice(0, 40);
   engine.setLevel(L); applyEnv(); commit(); S.siteSel = i; engine.siteMark(null); plan.fit && plan.fit(); setPane('split'); engine.view('iso'); renderProps();
-  toast('상가 외곽으로 벽을 세웠어요 · 문 · 기물을 넣어 도면을 이어 가세요 (지상 1층 외곽 기준)', 4500);
+  toast(`상가 외곽으로 벽을 세웠어요 · 긴 벽이 가로가 되게 ${Math.abs(rot)}° 돌려 놓았어요 (작업 방향에서 바꿀 수 있어요)`, 5000);
 }
 
 const errTxt = (e) => (e && e.message ? e.message : String(e)) + (e && e.detail ? `\n   → ${e.detail}` : '');
@@ -2174,7 +2215,7 @@ async function boot() {
     }
     if (engine.walker.active) return;
     if (mod && k === 'b') { e.preventDefault(); S.chordB = Date.now(); toast('Ctrl+B · 이어서 W = 벽 그리기', 1800); return; }
-    if (!mod && k === 'w' && Date.now() - (S.chordB || 0) < 1800) { e.preventDefault(); S.chordB = 0; setPlanTool('wall'); toast('벽 그리기 · 점을 차례로 찍어요 · Esc 로 끝', 4000); return; }
+    if (k === 'w' && Date.now() - (S.chordB || 0) < 1800) { e.preventDefault(); S.chordB = 0; setPlanTool('wall'); toast('벽 그리기 · 점을 차례로 찍어요 · Esc 로 끝', 4000); return; }
     if (mod && k === 'y') { e.preventDefault(); redo(); return; }
     if (mod && k === 'r') { e.preventDefault(); if (it) { patchSel({ rot: ((it.rot || 0) + 90) % 360 }, false); renderProps(); } return; }
     if (mod && k === 'x' && it) { e.preventDefault(); S.clipM = null; S.clip = JSON.parse(JSON.stringify(it)); plan.erase(S.sel); toast('잘라냈어요 · Ctrl+V 로 붙여넣기'); return; }

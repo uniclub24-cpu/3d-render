@@ -380,7 +380,7 @@ export class Engine {
     const b = E.site.buildings[i]; if (!b) return; const ax = E.siteAx || 0, ay = E.siteAy || 0, h = siteH(b, E.hk ?? 1);
     const pts = b.p.map(([x, y]) => new THREE.Vector3(x - ax, h + 0.05, y - ay)); pts.push(pts[0].clone()); const top = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: '#2f7df6' }));
     const bot = top.clone(); bot.position.y = -h; const g = new THREE.Group(); g.add(top, bot); for (const p of pts.slice(0, -1)) { const v = new THREE.Line(new THREE.BufferGeometry().setFromPoints([p, p.clone().setY(0.05)]), top.material); g.add(v); }
-    this._siteMark = g; this.scene.add(g); this.invalidate(true);
+    g.rotation.y = (-(E.siteRot || 0) * Math.PI) / 180; this._siteMark = g; this.scene.add(g); this.invalidate(true);
   }
   /** 공간만 보기: 그 다각형 안의 기물과 닿는 벽만 남긴다 (pts = null 이면 전체) */
   setFocus(pts) { this.focusPts = pts && pts.length >= 3 ? pts : null; this.applyFocus(); }

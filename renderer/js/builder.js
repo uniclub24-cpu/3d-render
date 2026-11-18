@@ -308,11 +308,20 @@ export function levelBounds(level) {
   level.walls.forEach((w) => { add(w.x1, w.y1); add(w.x2, w.y2); }); level.items.forEach((i) => add(i.x, i.y)); level.rooms.forEach((r) => r.pts.forEach((p) => add(p[0], p[1])));
   return Number.isFinite(b[0]) ? b : [0, 0, 8000, 6000];
 }
+/** 다각형을 바깥으로 d(mm) 밀기 (모서리는 이음) */
+export function offsetPoly(P, d) {
+  let a = 0; for (let i = 0; i < P.length; i++) { const [x1, y1] = P[i], [x2, y2] = P[(i + 1) % P.length]; a += x1 * y2 - x2 * y1; } const sg = a > 0 ? 1 : -1, n = P.length;
+  return P.map((q, i) => { const p0 = P[(i - 1 + n) % n], p1 = P[(i + 1) % n], e1 = [q[0] - p0[0], q[1] - p0[1]], e2 = [p1[0] - q[0], p1[1] - q[1]], l1 = Math.hypot(...e1) || 1, l2 = Math.hypot(...e2) || 1;
+    const n1 = [(e1[1] / l1) * sg, (-e1[0] / l1) * sg], n2 = [(e2[1] / l2) * sg, (-e2[0] / l2) * sg], m = [n1[0] + n2[0], n1[1] + n2[1]], ml = Math.hypot(...m) || 1, k = d / Math.max(0.35, (m[0] * n1[0] + m[1] * n1[1]) / ml);
+    return [q[0] + (m[0] / ml) * k, q[1] + (m[1] / ml) * k]; });
+}
 export function buildFloors(level) {
   const root = new THREE.Group(); root.name = '바닥';
   const b = levelBounds(level), pad = 80;
   // 기본 바닥판 (벽 바깥 테두리까지)
-  const slab = new THREE.Mesh(boxAt((b[0] - pad) * MM, (b[2] + pad) * MM, -0.12, 0, (b[1] - pad) * MM, (b[3] + pad) * MM), floorMaterial(level.floor.finish, level.floor.color));
+  let slab; /* 바닥판: level.slab(외곽 다각형)이 있으면 그 모양 + 벽 두께만큼 · 없으면 벽을 감싸는 사각 */
+  if (level.slab && level.slab.length > 2) { const P = offsetPoly(level.slab, (level.wallT || 150) / 2 + 20), g = new THREE.ExtrudeGeometry(new THREE.Shape(P.map(([x, y]) => new THREE.Vector2(x * MM, -y * MM))), { depth: 0.12, bevelEnabled: false }); g.rotateX(-Math.PI / 2); g.translate(0, -0.12, 0); slab = new THREE.Mesh(g, floorMaterial(level.floor.finish, level.floor.color)); }
+  else slab = new THREE.Mesh(boxAt((b[0] - pad) * MM, (b[2] + pad) * MM, -0.12, 0, (b[1] - pad) * MM, (b[3] + pad) * MM), floorMaterial(level.floor.finish, level.floor.color));
   { const p = slab.geometry.attributes.position, uv = slab.geometry.attributes.uv; for (let i = 0; i < p.count; i++) uv.setXY(i, p.getX(i), p.getZ(i)); } // 타일이 실제 크기로 깔리도록 좌표를 UV 로
   slab.receiveShadow = true; slab.name = '바닥판'; root.add(slab);
   // 공간별 바닥 (마감 · 단 높이)
