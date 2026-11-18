@@ -401,3 +401,5 @@ body.catdrag #drawer { opacity: .25; pointer-events: none; transition: opacity .
 .mapbox img { display: block; width: 100%; }
 .mapbox .mcrop { position: absolute; border: 2px solid #3d7bff; background: rgba(61,123,255,.08); pointer-events: none; }
 .mapbox .mpin { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #ff3b30; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); pointer-events: none; }
+#airHud .airhp { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+#airHud .airhp input { width: 54px; min-height: 28px; padding: 0 4px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; }

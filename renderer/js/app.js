@@ -6,6 +6,7 @@ import { MAT_LABEL } from './materials.js';
 import { STYLES } from './styles3d.js';
 import { Plan2D, KINDS, fitOpening } from './plan2d.js';
 import * as cloud from './cloud.js';
+import { airKind } from './air.js';
 import * as lib2 from './store.js';
 import * as SL from './slope.js';
 import { ENVTYPES, ENVCOL, ENVLV, envOf, envFront } from './env.js';
@@ -17,7 +18,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.26';
+export const APP_VERSION = '2.1.27';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -294,15 +295,20 @@ function renderProps() {
     <div class="sec">텍스처 입히기 (사진 · 무늬 이미지)</div>
     <div class="btns"><button class="btn" data-a="tex" ${it.asset ? 'disabled' : ''}>${it.tex ? '이미지 바꾸기' : '이미지 고르기'}</button>${it.tex ? `<button class="btn" data-a="texX">텍스처 지우기</button>` : ''}</div>
     ${it.tex ? `<label class="fld">반복 <b>${it.tex.rep || 1}회</b><input type="range" data-tx="rep" min="1" max="10" step="1" value="${it.tex.rep || 1}"></label>` : ''}
+    ${L && L.sign ? signUi(it, L) : ''}
     <div class="sec">조명</div>
     <label class="tog">이 기물에 불 켜기<input type="checkbox" data-l="on" ${lt && lt.on ? 'checked' : ''}></label>
     ${lt && lt.on ? `<div class="row"><label class="fld">밝기<input type="range" data-l="power" min="0.1" max="3" step="0.1" value="${lt.power ?? 1}"></label><label class="fld">빛 색<input type="color" data-l="color" value="${lt.color || '#ffe2bd'}"></label></div>
       <label class="fld">비추는 방향<select data-l="kind"><option value="spot" ${lt.kind === 'spot' ? 'selected' : ''}>아래로 비추기 (전등)</option><option value="point" ${lt.kind !== 'spot' ? 'selected' : ''}>사방으로 (스탠드 · 불빛)</option></select></label>${lightUi(lt)}` : ''}
+    ${airKindOf(it) === 'ac' ? `<div class="sec">에어컨 바람</div><label class="tog">에어컨 켜기 (공기 흐름에 찬 바람 넣기)<input type="checkbox" id="acOn" ${it.acOn ? 'checked' : ''}></label>${it.acOn ? `<label class="fld">세기 (마력)<input type="number" id="acHp" min="0.5" max="10" step="0.5" value="${it.acHp ?? 1}"></label>` : ''}` : ''}
     ${it.type === 'fence' ? '<div class="btns"><button class="btn pri" data-a="fenceL">펜스에 등 달기 (기둥마다)</button></div>' : ''}
     ${SL.isDrainItem(it, S.lib) ? '<div class="btns"><button class="btn pri" data-a="drain">이 배수 기물로 구배 잡기</button></div>' : ''}
     ${it.onSlope ? '<div class="row2"><span class="hint">구배 · 단 위에 올려져 있어요</span><button class="btn" data-a="unfit">원래 높이로</button></div>' : SL.needFit(level(), it, S.lib) ? `<div class="row2"><span class="hint warn">바닥(구배 · 단)에 ${SL.needFit(level(), it, S.lib)}mm 묻혀요</span><button class="btn pri" data-a="fit">바닥 위로</button></div>` : ''}
     <div class="btns"><button class="btn pri" data-a="design" ${it.asset ? 'disabled title="가져온 3D 파일은 디자인 수정이 안 돼요"' : ''}>디자인 수정 (점 · 면 · 부품 색)</button></div>
     <div class="btns"><button class="btn" data-a="rot90">90° 돌리기</button><button class="btn" data-a="dup">복제</button><button class="btn danger" data-a="del">삭제</button></div>`;
+  if (L && L.sign) bindSignUi(body, it, L);
+  const ao = $('#acOn', body); if (ao) ao.onchange = () => { const t = selItem(); if (ao.checked) t.acOn = true; else delete t.acOn; commit(); if (engine.air.on) engine.air.refresh(); else if (ao.checked) toast('공기 흐름(보기 → 공기)을 켜면 찬 바람이 보여요', 2500); renderProps(); };
+  const ah = $('#acHp', body); if (ah) ah.onchange = () => { const t = selItem(); t.acHp = Math.max(0.5, +ah.value || 1); commit(); if (engine.air.on) engine.air.refresh(); };
   $$('[data-k]', body).forEach((i) => {
     const k = i.dataset.k;
     if (k === 'rot') { i.oninput = () => { const t = selItem(); t.rot = +i.value; engine.moveItem(t); $('#vRot').textContent = i.value + '°'; }; i.onchange = () => commit(); return; }
@@ -568,6 +574,28 @@ function renderXray(body) {
   $$('[data-mh]', body).forEach((b) => (b.onclick = () => { const h = b.dataset.mh === '1'; setXray(null); engine.setMepHide(h); store.set('byr.mepHide', h); renderProps(); toast(h ? '설치물(배관 · 전선 · 콘센트 · 수전 위치 등)을 숨겼어요 · 발표에서도 안 보여요' : '설치물을 보여요'); }));
   $$('[data-lk]', body).forEach((b) => (b.onclick = () => { plan.lineKind = b.dataset.lk; setPlanTool('line'); const c = lineCat(LINEKINDS[b.dataset.lk]); if (engine.xray && c && engine.xray !== c) setXray(c); renderProps(); toast(`${LINEKINDS[b.dataset.lk].name} · 2D 에서 점을 차례로 누르세요`); }));
   $$('[data-k]', body).forEach((i) => (i.onchange = () => { LOPT[i.dataset.k] = Math.max(0, Math.round(+i.value || 0)); }));
+}
+
+/* ---------- 간판: 글자 · 불 · 색 · 글자별로 나누기 ---------- */
+function signUi(it, L) {
+  const S0 = { ...L.sign, ...(it.sign || {}) }, k = S0.kind, txt = it.signText ?? S0.text ?? '', hx = (v, d) => (/^#[0-9a-f]{6}$/i.test(v || '') ? v : d);
+  return `<div class="sec">간판</div>
+    <label class="fld">글자<input type="text" id="sgT" value="${esc(txt)}" placeholder="${esc(S0.text || '')}"></label>
+    <label class="tog">간판 불 켜기 (글자 · 판이 빛나요)<input type="checkbox" id="sgOn" ${it.signOff ? '' : 'checked'}></label>
+    <div class="row">${['ledpanel', 'channel', 'panel'].includes(k) ? `<label class="fld">글자 색 (빛)<input type="color" id="sgFg" value="${hx(S0.fg, '#ffffff')}"></label>` : ''}${k === 'ledpanel' ? `<label class="fld">판 색<input type="color" id="sgPn" value="${hx(S0.panel, '#18191c')}"></label>` : ''}${k === 'channel' ? `<label class="fld">옆면 색 (위 '색')</label>` : ''}</div>
+    ${k === 'channel' && [...txt].filter((c) => c.trim()).length > 1 ? '<div class="btns"><button class="btn pri" id="sgSplit">글자별로 나누기 (한 글자씩 따로 고르기)</button></div><p class="hint">나누면 글자마다 위치 · 색 · 불을 따로 정할 수 있어요.</p>' : ''}`;
+}
+function bindSignUi(body, it, L) {
+  const up = (f) => { const t = selItem(); if (!t) return; f(t); engine.rebuildItem(t); commit(); };
+  const T = $('#sgT', body); if (T) T.onchange = () => { up((t) => (t.signText = T.value)); renderProps(); };
+  const on = $('#sgOn', body); if (on) on.onchange = () => up((t) => { if (on.checked) delete t.signOff; else t.signOff = true; });
+  const fg = $('#sgFg', body); if (fg) fg.onchange = () => up((t) => { t.sign = { ...(t.sign || {}), fg: fg.value }; if (t.light) t.light.color = fg.value; });
+  const pn = $('#sgPn', body); if (pn) pn.onchange = () => up((t) => (t.sign = { ...(t.sign || {}), panel: pn.value }));
+  const sp = $('#sgSplit', body); if (sp) sp.onclick = () => {
+    const t = selItem(), S0 = { ...L.sign, ...(t.sign || {}) }, ch = [...(t.signText ?? S0.text ?? '')].filter((c) => c.trim()), n = ch.length, cell = Math.min(t.w / n, t.h * 1.05), a = (-t.rot * Math.PI) / 180, lv = level(), ids = [];
+    ch.forEach((c, i) => { const off = -t.w / 2 + (t.w - cell * n) / 2 + cell * (i + 0.5), x = t.x + Math.cos(a) * off, y = t.y - Math.sin(a) * off; const q = mkItem('ch_letter', Math.round(x), Math.round(y), t.rot, { elev: t.elev, w: Math.round(cell), h: t.h, d: t.d, color: t.color, signText: c, sign: t.sign ? { ...t.sign } : undefined, name: `돌출 글자 '${c}'`, ...(t.signOff ? { signOff: true } : {}) }); if (t.light) q.light = { ...t.light, power: Math.max(0.15, (t.light.power || 0.6) / n * 1.5) }; lv.items.push(q); ids.push(q.id); });
+    lv.items = lv.items.filter((q) => q !== t); engine.setLevel(lv); commit(); setSel({ kind: 'item', id: ids[0] }); toast(`${n}글자로 나눴어요 · 글자를 눌러 하나씩 고르세요`);
+  };
 }
 
 /** 배관 · 전선 하나: 높이(바닥에서 중심까지) · 굵기(지름) · 모양 · 색 · 지우기 */
@@ -949,14 +977,16 @@ function renderDxf(body) {
     if (DXFO.replace) { L.walls = made; L.openings = []; } else L.walls.push(...made); S.dxf = null; S.panel = 'props'; S.sel = null; engine.setLevel(L); applyEnv(); plan.fit(); commit(); renderProps(); toast(`DXF 에서 벽 ${made.length}개를 만들었어요 · 공간 → "벽 따라 공간 자동 찾기" 로 바닥을 만들 수 있어요`, 7000); };
 }
 /* ----- 공기 흐름 · 열/연기 ----- */
+const airKindOf = (it) => airKind(it, S.lib[it.type]);
 function toggleAir() {
   const A = engine.air; if (A.on) { A.stop(); $('#airHud').hidden = true; } else { if (S.pane === '2d') setPane('split'); A.start(); $('#airHud').hidden = false; A.info(); }
   const b = $('#dkAir'); if (b) b.setAttribute('aria-pressed', String(A.on));
 }
 function airHud(i) {
   const h = $('#airHud'); if (!h || h.hidden) return;
-  h.innerHTML = `<span><b>공기</b> 급기 ${i.in} · 배기 ${i.out} · 후드 ${i.hood} · 출입구 ${i.door}</span>${i.heat ? `<span>열원 ${i.heat} · 후드 포집 <b class="${i.capture != null && i.capture < 70 ? 'warn' : ''}">${i.capture == null ? '계산 중' : i.capture + '%'}</b></span>` : ''}${!i.out && !i.hood ? '<span class="warn">후드 · 배기가 없어요</span>' : ''}<button class="btn" id="airSmoke" aria-pressed="${engine.air.smoke}">연기</button><button class="btn" id="airOff">끄기</button>`;
-  $('#airSmoke').onclick = () => { engine.air.smoke = !engine.air.smoke; airHud(i); }; $('#airOff').onclick = () => toggleAir();
+  h.innerHTML = `<span><b>공기</b> 급기 ${i.in} · 배기 ${i.out} · 후드 ${i.hood} · 출입구 ${i.door}${i.ac ? ` · 에어컨 ${i.ac}` : ''}</span><span class="airhp">급기 팬 <input type="number" id="airHpIn" min="0.25" max="10" step="0.25" value="${i.hpIn}">마력 · 배기 팬 <input type="number" id="airHpOut" min="0.25" max="10" step="0.25" value="${i.hpOut}">마력 <small>(디퓨저 수로 나눔)</small></span>${i.heat ? `<span>열원 ${i.heat} · 후드 포집 <b class="${i.capture != null && i.capture < 70 ? 'warn' : ''}">${i.capture == null ? '계산 중' : i.capture + '%'}</b></span>` : ''}${!i.out && !i.hood ? '<span class="warn">후드 · 배기가 없어요</span>' : ''}<button class="btn" id="airSmoke" aria-pressed="${engine.air.smoke}">연기</button><button class="btn" id="airOff">끄기</button>`;
+  $('#airSmoke').onclick = () => { engine.air.smoke = !engine.air.smoke; airHud(i); };
+  for (const [id, k] of [['#airHpIn', 'in'], ['#airHpOut', 'out']]) $(id).onchange = (e) => { const L = level(); L.airHp = { ...(L.airHp || {}), [k]: Math.max(0.25, +e.target.value || 1) }; commit(); engine.air.refresh(); }; $('#airOff').onclick = () => toggleAir();
 }
 /* ----- 동선 시뮬레이터 (직원 배치) ----- */
 function renderSim(body) {
@@ -1142,6 +1172,7 @@ const DE = { it: null };
 function escAll() {
   if (engine.design.active) { const d = engine.design; if (d.dirty) { ask('디자인 수정을 끝낼까요?', '고친 내용을 저장하고 나갈지, 버리고 나갈지 골라요.', [{ label: '계속 수정', value: null }, { label: '버리고 나가기', value: false }, { label: '저장하고 나가기', value: true, kind: 'pri' }]).then((r) => { if (r != null) { endDesign(r); renderProps(); } }); } else { endDesign(false); renderProps(); } return true; }
   if (engine.walker.active) { engine.walker.stop ? engine.walker.stop() : stopWalk?.(); return true; }
+  if (engine.controls.autoRotate || tourOn) { engine.setSpin(false); if (tourOn) { tourOn = false; engine.stopFly(); } $$('[data-pv="spin"]').forEach((x) => x.setAttribute('aria-pressed', 'false')); if (S.panel === 'view') renderProps(); toast('360° 보기를 멈췄어요', 1200); return true; }
   if (S.dragTmp || engine.dragging) { engine.cancelDrag?.(); plan.cancelDrag?.(); }
   if (S.patrol || S.cutRoom || S.roomDrag) { S.patrol = null; S.cutRoom = false; S.roomDrag = null; plan.redraw(); }
   if (plan.tool && plan.tool !== 'select') { plan.picker = null; plan.cancelTool?.(); setPlanTool('select'); if (S.tucked) untuck(); toast('그리기를 멈췄어요', 1200); return true; }
@@ -1599,7 +1630,7 @@ function setPlanTool(t) { if (engine.design.active && t !== 'select') { endDesig
 /* ---------- 프레젠테이션 모드 (고객 · 파트너 시연) ----------
  * 편집 막대를 숨기고 3D 만 크게. 위: 자유 보기 · 설치물 보기 · 조명 모드 / 아래: 스타일 필터 막대 (언제든 바꿈)
  * 나가면 재질 · 투명도 · 천장 · 조명 밝기 · 스타일 · 화면 나눔을 모두 들어오기 전으로. 모델은 바꾸지 않는다. */
-const LGROUPS = [['triple', '3구 매입등'], ['neon', '네온 · 무드등'], ['out', '외부등 (테라스)'], ['down', '매입 · 직부등'], ['pendant', '펜던트'], ['flat', 'LED 평판 · 라인등'], ['hood', '후드등'], ['pin', '핀 · 레일 조명'], ['etc', '스탠드 · 벽등 · 기타']];
+const LGROUPS = [['sign', '간판 (불 들어오는)'], ['triple', '3구 매입등'], ['neon', '네온 · 무드등'], ['out', '외부등 (테라스)'], ['down', '매입 · 직부등'], ['pendant', '펜던트'], ['flat', 'LED 평판 · 라인등'], ['hood', '후드등'], ['pin', '핀 · 레일 조명'], ['etc', '스탠드 · 벽등 · 기타']];
 const present = {
   on: false, mode: 'free', prev: null, op: 0.25, master: 0.2,
   enter() {
@@ -1612,6 +1643,7 @@ const present = {
     const p = this.prev || {}; if (p.style && p.style !== engine.style) setStyle(p.style, true); else engine.setStyle(engine.style); setPane(p.pane || '3d'); engine.invalidate(true);
   },
   set(m) {
+    if (m === 'light' && this.mode !== 'light') this.gv = { ...(this.gv || {}), sign: this.gv?.sign ?? 1, neon: this.gv?.neon ?? 1 };
     this.mode = m; engine.setPresent(m, { opacity: this.op, dim: this.master }); const b = this.box; if (!b) return;
     $$('[data-pm]', b).forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.pm === m)));
     const side = $('.pr-side', b); side.hidden = m === 'free';
@@ -1947,7 +1979,7 @@ async function boot() {
   // 안드로이드 뒤로 단추 (Capacitor App 플러그인)
   try { const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App; if (A) A.addListener('backButton', () => { goBack(); }); } catch (e) { console.warn(e); }
   window.addEventListener('keydown', (e) => {
-    if (present.on) { if (e.key === 'Escape') { e.preventDefault(); present.exit(); } else if (/^[123]$/.test(e.key)) present.set(['free', 'mep', 'light'][+e.key - 1]); if (!/^[wasd]$/i.test(e.key) || e.ctrlKey || e.metaKey) return; } /* 발표 중엔 편집 단축키 끔 */
+    if (present.on) { if (e.key === 'Escape') { e.preventDefault(); if (engine.controls.autoRotate) { engine.setSpin(false); $$('[data-pv="spin"]').forEach((x) => x.setAttribute('aria-pressed', 'false')); toast('360° 보기를 멈췄어요 · Esc 한 번 더 = 발표 끝', 1500); } else present.exit(); } else if (/^[123]$/.test(e.key)) present.set(['free', 'mep', 'light'][+e.key - 1]); if (!/^[wasd]$/i.test(e.key) || e.ctrlKey || e.metaKey) return; } /* 발표 중엔 편집 단축키 끔 */
     if (e.key === 'Escape' && (S.dlgClose || !$('#home').hidden && !S.propsOpen)) { e.preventDefault(); if (S.dlgClose) S.dlgClose(); else closeHome(); return; }
     /* 글자를 치는 칸에서만 단축키를 양보 (슬라이더 · 체크 · 색 · 단추에 초점이 남아 있어도 단축키는 먹게) */
     const ae = document.activeElement, typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || (ae.tagName === 'INPUT' && !/^(range|checkbox|radio|color|button|submit|file)$/.test(ae.type)) || ae.isContentEditable);

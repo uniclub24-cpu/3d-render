@@ -8,7 +8,7 @@ import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
-import { buildItem, buildWalls, buildFloors, placeItem, levelBounds, MM , buildCeiling } from './builder.js';
+import { buildItem, buildWalls, buildFloors, placeItem, levelBounds, MM , buildCeiling, signLit } from './builder.js';
 import { Walker } from './walk.js';
 import { buildDims } from './dims.js';
 import { buildLines, itemCat, isMepItem } from './lines.js';
@@ -304,6 +304,7 @@ export class Engine {
   lightGroup(it) { if (!it) return null; const L = this.ctx.lib[it.type] || {}, t = it.type || '', sh = L.shape || '', nm = `${it.name || ''} ${L.name || ''} ${t}`;
     if (/fryer|range|griddle|wok|oven|steam|soup|튀김|레인지|화구|그리들|오븐|국솥/i.test(t + ' ' + (L.name || '')) && !/등\b|조명/.test(it.name || '')) return null; /* 조리 기구 불빛은 조명 아님 */
     const byName = /조명|직부|다운라이트|펜던트|매입등|평판|라인등|핀조명|스포트|레일등|후드등|벽등|스탠드|램프|네온|무드등|외부등|lamp|light|LT-\d/i.test(nm);
+    if (L.sign && signLit({ ...L.sign, ...(it.sign || {}) }, it)) return 'sign'; /* 불 들어오는 간판 */
     const lit = (it.light && it.light.on) || L.cat === '조명' || /^l_/.test(t) || (L.light && /light|pendant|track|lamp/.test(sh)) || byName; if (!lit) return null;
     if (/네온|neon|무드|strip/i.test(nm)) return 'neon';
     if (/외부등|l_post|정원등|기둥등/i.test(nm)) return 'out';
@@ -334,7 +335,7 @@ export class Engine {
     } else if (mode === 'light') {
       this.showCeiling(false); this.presentLights = true; this._envI0 = this.scene.environmentIntensity; setEnvMap(null); this._envOff = true; /* 스테인리스 반사도 같이 어둡게 */ this.renderer.toneMappingExposure *= 1.1;
       const u = this.stylePass.mat.uniforms; u.uGlow.value = Math.max(u.uGlow.value, 0.55); u.uVig.value = Math.max(u.uVig.value, 0.35); this.stylePass.enabled = true; /* 어두운 데서 빛 번짐이 보이게 */
-      for (const g of this.items.children) if (this._isLightItem(g)) this.setDim(g.userData.itemId, o.dim ?? 0.2, true); this._darkness();
+      for (const g of this.items.children) if (this._isLightItem(g)) { const it = this.level.items.find((q) => q.id === g.userData.itemId), grp = this.lightGroup(it); this.setDim(g.userData.itemId, grp === 'sign' || grp === 'neon' ? 1 : o.dim ?? 0.2, true); } this._darkness(); /* 간판 · 네온은 켠 채로 시작 */
     } else if (this.envGroup) this.envGroup.visible = !this.focusPts;
     this._limitLights(); this.renderer.shadowMap.needsUpdate = true;
   }
