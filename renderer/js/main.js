@@ -15,7 +15,7 @@ import { buildLines, itemCat, isMepItem } from './lines.js';
 import { figKind } from './figures.js';
 const lumC = (c) => c.r * 0.3 + c.g * 0.59 + c.b * 0.11;
 import { AirSim } from './air.js';
-import { siteHit, siteFloors } from './site.js';
+import { siteHit, siteH } from './site.js';
 import { KitchenSim } from './sim.js';
 import { setEnvMap } from './materials.js';
 import { STYLES, StylePass, applyStyleMaterials, restoreMaterials } from './styles3d.js';
@@ -376,7 +376,7 @@ export class Engine {
   /** 고른 건물 강조 (파란 테두리 상자) */
   siteMark(i) {
     if (this._siteMark) { this.scene.remove(this._siteMark); disposeTree(this._siteMark); this._siteMark = null; } const E = this.envE; if (i == null || !E || !E.site) return this.invalidate(true);
-    const b = E.site.buildings[i]; if (!b) return; const ax = E.siteAx || 0, ay = E.siteAy || 0, h = Math.max(2.8, siteFloors(b) * 3.3 * (E.hk ?? 1));
+    const b = E.site.buildings[i]; if (!b) return; const ax = E.siteAx || 0, ay = E.siteAy || 0, h = siteH(b, E.hk ?? 1);
     const pts = b.p.map(([x, y]) => new THREE.Vector3(x - ax, h + 0.05, y - ay)); pts.push(pts[0].clone()); const top = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: '#2f7df6' }));
     const bot = top.clone(); bot.position.y = -h; const g = new THREE.Group(); g.add(top, bot); for (const p of pts.slice(0, -1)) { const v = new THREE.Line(new THREE.BufferGeometry().setFromPoints([p, p.clone().setY(0.05)]), top.material); g.add(v); }
     this._siteMark = g; this.scene.add(g); this.invalidate(true);

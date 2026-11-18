@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld('byr', {
   info: () => ipcRenderer.invoke('app:info'), // { version, update: 'setup' | 'portable' | 'dev' }
   openUrl: (u) => ipcRenderer.invoke('open:url', u),
   netGet: (u) => ipcRenderer.invoke('net:get', u), // 공공데이터 · 지도 API
+  netBin: (u) => ipcRenderer.invoke('net:bin', u), // 지도 타일
   onUpdate: (fn) => ipcRenderer.on('update', (e, m) => fn(m)),
 });

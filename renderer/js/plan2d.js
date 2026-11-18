@@ -47,12 +47,12 @@ export class Plan2D {
   fit() {
     const L = this.L; if (!L) return; if (!this.cv.clientWidth || !this.cv.clientHeight) { this._needFit = true; return; } this._needFit = false; /* 숨겨져 있으면 보일 때 맞춘다 */ const b = [Infinity, Infinity, -Infinity, -Infinity], add = (x, y) => { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); };
     L.walls.forEach((w) => { add(w.x1, w.y1); add(w.x2, w.y2); }); L.items.forEach((i) => add(i.x, i.y)); L.rooms.forEach((r) => r.pts.forEach((p) => add(p[0], p[1])));
-    if (!Number.isFinite(b[0])) b.splice(0, 4, 0, 0, 8000, 6000);
+    if (!Number.isFinite(b[0])) { const xb = this.api.extraBounds && this.api.extraBounds(); b.splice(0, 4, ...(xb || [0, 0, 8000, 6000])); }
     const w = this.cv.clientWidth, h = this.cv.clientHeight, padL = 72, padT = 84, pad = 28;
     const sc = Math.min((w - padL - pad) / Math.max(1000, b[2] - b[0]), (h - padT - pad) / Math.max(1000, b[3] - b[1]));
     this.view.sc = sc; this.view.ox = b[0] - (padL + (w - padL - pad - (b[2] - b[0]) * sc) / 2) / sc; this.view.oy = b[1] - (padT + (h - padT - pad - (b[3] - b[1]) * sc) / 2) / sc; this.redraw();
   }
-  zoomAt(px, py, f) { const m = this.toMm(px, py), v = this.view; v.sc = Math.min(2, Math.max(0.01, v.sc * f)); v.ox = m.x - px / v.sc; v.oy = m.y - py / v.sc; this.redraw(); }
+  zoomAt(px, py, f) { const m = this.toMm(px, py), v = this.view; v.sc = Math.min(2, Math.max(0.0002, v.sc * f)); v.ox = m.x - px / v.sc; v.oy = m.y - py / v.sc; this.redraw(); }
 
   /* ---------- 붙이기(스냅) ---------- */
   ends() { return this.L.walls.flatMap((w) => [{ w, k: 1, x: w.x1, y: w.y1 }, { w, k: 2, x: w.x2, y: w.y2 }]); }
@@ -88,7 +88,7 @@ export class Plan2D {
     const ln = this.hitLine(p); if (ln) { ln.id ||= 'l' + Math.random().toString(36).slice(2, 9); return { kind: 'line', id: ln.id }; }
     const w = this.hitWall(p); if (w) return { kind: 'wall', id: w.w.id };
     const r = this.hitRoom(p); if (r) return { kind: 'room', id: r.id };
-    return null;
+    return (this.api.pickUnder && this.api.pickUnder(p)) || null; /* 상권 건물 */
   }
 
   /* ---------- 편집 ---------- */
@@ -150,7 +150,7 @@ export class Plan2D {
       if (!free && !(mod && e.shiftKey) && hit.kind !== 'room') { act = { pan: true, start, last: start }; return; } /* 잠금: 눌러서 고르기만, 끌면 화면 이동 */
       if (hit.kind === 'item') act = this._dragItem(this.L.items.find((i) => i.id === hit.id), p, start);
       else if (hit.kind === 'opening') act = this._dragOpening(this.L.openings.find((o) => o.id === hit.id), start);
-      else if (hit.kind === 'line') act = { pan: true, start, last: start };
+      else if (hit.kind === 'line' || hit.kind === 'site') act = { pan: true, start, last: start };
       else if (hit.kind === 'room') act = was ? this._dragRoom(this.L.rooms.find((r) => r.id === hit.id), p, start) : { pan: true, start, last: start }; // 고른 공간을 다시 끌면 공간째 옮기기, 아니면 화면 이동
       else act = this._dragWall(this.L.walls.find((w) => w.id === hit.id), p, start);
     });
@@ -290,6 +290,7 @@ export class Plan2D {
     // 밑그림 (도면 사진 · 스캔을 깔고 따라 그리기)
     const bg = L.bg; if (bg && bg.src) { if (!this._bgImg || this._bgImg.src0 !== bg.src) { this._bgImg = new Image(); this._bgImg.src0 = bg.src; this._bgImg.onload = () => this.redraw(); this._bgImg.src = bg.src; }
       const im = this._bgImg; if (im.complete && im.naturalWidth) { g.globalAlpha = bg.opacity ?? 0.5; g.drawImage(im, bg.x || 0, bg.y || 0, bg.wmm, (bg.wmm * im.naturalHeight) / im.naturalWidth); g.globalAlpha = 1; } }
+    if (this.api.under) this.api.under(g, px1); /* 상권: 지도 · 건물 외곽 */
     // 공간 (태그 색)
     const poly = (pts) => { g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]))); g.closePath(); };
     for (const r of L.rooms) { if (r.pts.length < 3) continue; const sel = this.sel && this.sel.id === r.id; poly(r.pts); g.fillStyle = (KINDS[r.kind] || r.color || '#d9d2c4') + (sel ? '88' : '55'); g.fill();

@@ -20,7 +20,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.29';
+export const APP_VERSION = '2.1.30';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -72,6 +72,7 @@ function setSel(sel) {
   S.sel = sel || null; plan.select(S.sel, true);
   if (S.sel && S.sel.kind === 'item') { if (engine.selId !== S.sel.id) engine.select(S.sel.id); }
   else { if (engine.selId) engine.select(null); const L = level(), w = S.sel && (S.sel.kind === 'wall' ? S.sel.id : S.sel.kind === 'opening' ? (L.openings.find((o) => o.id === S.sel.id) || {}).wall : null); engine.highlight(w || null); }
+  if (S.sel && S.sel.kind === 'site') { const i = S.sel.id; S.sel = null; engine.select(null); S.siteSel = i; engine.siteMark(i); S.panel = 'site'; S.propsOpen = true; plan.redraw(); return renderProps(); }
   engine.selectLine(S.sel && S.sel.kind === 'line' ? S.sel.id : null);
   if (S.sel) { S.propsOpen = true; S.panel = 'props'; } renderProps();
 }
@@ -1844,6 +1845,8 @@ function renderSiteFind() {
     <section class="hsec"><b>3. 공공데이터 키 (브이월드)</b>
       <p class="hint">${V.key ? '✓ 키가 있어요 · 건물 층수 · 용도(건축물대장) · 용도지역을 받아요.' : '키가 없으면 OpenStreetMap 만 써요 (건물이 빠지거나 층수가 비는 곳이 있어요). 브이월드(vworld.kr) → 오픈API → 인증키 발급에서 무료로 받을 수 있어요.'}</p>
       <div class="row"><label class="fld">인증키<input id="sfK" type="password" value="${esc(V.key || '')}" placeholder="브이월드 인증키" autocomplete="off"></label><label class="fld">등록한 서비스 URL<input id="sfD" value="${esc(V.domain || '')}" placeholder="예: http://localhost"></label></div>
+      <p class="hint">${V.dkey ? '✓ 공공데이터포털 키가 있어요 · 건축물대장(높이 · 주용도 · 연면적 · 준공연도)을 붙여요.' : '공공데이터포털(data.go.kr) 키를 넣으면 건축물대장의 실제 높이 · 주용도를 붙여요 (건축HUB 건축물대장정보 활용 신청).'}</p>
+      <div class="row"><label class="fld">공공데이터포털 키 (일반 인증키)<input id="sfDK" type="password" value="${esc(V.dkey || '')}" placeholder="data.go.kr 일반 인증키 (Decoding)" autocomplete="off"></label></div>
       <div class="btns"><button class="btn" data-sf="key">키 저장 (이 기기에만)</button>${V.key ? '<button class="btn" data-sf="keyx">키 지우기</button>' : ''}</div></section>
     <section class="hsec"><div class="ilive" id="sfLive" hidden></div><pre class="ilog" id="sfLog" ${SF.log ? '' : 'hidden'}>${esc(SF.log)}</pre></section>`;
   const log = (t) => { SF.log += (SF.log ? '\n' : '') + t; const el = $('#sfLog'); if (el) { el.hidden = false; el.textContent = SF.log; el.scrollTop = 1e9; } };
@@ -1852,7 +1855,7 @@ function renderSiteFind() {
   $$('[data-sfr]', B).forEach((b) => (b.onclick = () => { SF.q = $('#sfQ').value; SF.R = +b.dataset.sfr; renderSiteFind(); }));
   $$('[data-sr]', B).forEach((b) => (b.onclick = () => siteBuild(SF.res[+b.dataset.sr], log)));
   $$('[data-sf]', B).forEach((b) => (b.onclick = () => { const a = b.dataset.sf; if (a === 'back') return renderHome(); if (a === 'find') return find();
-    if (a === 'key') { SITE.setVworld({ key: $('#sfK').value.trim(), domain: $('#sfD').value.trim() }); SF.q = $('#sfQ').value; toast('키를 이 기기에 저장했어요'); return renderSiteFind(); }
+    if (a === 'key') { SITE.setVworld({ key: $('#sfK').value.trim(), domain: $('#sfD').value.trim(), dkey: $('#sfDK').value.trim() }); SF.q = $('#sfQ').value; toast('키를 이 기기에 저장했어요'); return renderSiteFind(); }
     if (a === 'keyx') { SITE.setVworld({}); return renderSiteFind(); } }));
 }
 const siteErr = (e) => { const c = e && e.code || ''; return /E-VW/.test(c) ? `브이월드 오류 (${e.message}) · 키 · 등록 URL 을 확인해 주세요` : /E-NET0|E-NET$/.test(c) ? '인터넷 연결 또는 서버 응답이 없어요' : /E-NET4/.test(c) ? `서버가 거절했어요 (${c.slice(5)}) · 키를 확인해 주세요` : (e && e.message) || String(e); };
@@ -1860,32 +1863,55 @@ async function siteBuild(r, log) {
   if (SF.busy) return; SF.busy = true; $$('#homeBody button').forEach((b) => (b.disabled = true)); const live = $('#sfLive'), t0 = Date.now(); let cur = '';
   const iv = setInterval(() => { if (live) { live.hidden = !cur; live.innerHTML = cur ? `<span class="spin"></span><span>${esc(cur)}</span><b>${Math.round((Date.now() - t0) / 1000)}초</b>` : ''; } }, 500);
   try {
-    log(`📍 ${r.title} · 반경 ${SF.R}m`); const site = await SITE.loadSite(r.lon, r.lat, SF.R, (m) => { cur = m; if (/^✓|건너뜀/.test(m)) log(m); });
+    log(`📍 ${r.title} · 반경 ${SF.R}m`); const step = (m) => { cur = m; if (/^✓|건너뜀|건물 필드|실패|비었|대신/.test(m)) log(m); }, site = await SITE.loadSite(r.lon, r.lat, SF.R, step);
+    const V = SITE.vworld(); if (V.dkey && site.buildings.length) { try { await SITE.enrichLedger(site, V.dkey, step); } catch (e) { log('⛔ 건축물대장: ' + siteErr(e)); } }
     if (!site.buildings.length && !site.roads.length) throw new Error('이 범위에서 받은 자료가 없어요');
     site.title = r.title; const m = emptyProject(`상권 · ${r.title}`.slice(0, 40)); const L = m.levels[0]; L.walls = []; L.rooms = []; L.openings = [];
-    m.env = { ...(m.env || {}), type: 'site', site, siteColor: 'use', hk: 1 }; closeHome(); await setModel(m); siteBird(); S.panel = 'site'; S.propsOpen = true; renderProps();
+    m.env = { ...(m.env || {}), type: 'site', site, siteColor: 'use', hk: 1, siteMap: SITE.vworld().key ? 'hyb' : 'none' }; closeHome(); await setModel(m); S.siteSel = site.hit >= 0 ? site.hit : null; siteBird(); siteFit2d(); S.panel = 'site'; S.propsOpen = true; renderProps();
     toast('상권을 세웠어요 · 건물을 누르면 정보 · 도면 시작', 3500);
   } catch (e) { console.error(e); log('⛔ ' + siteErr(e)); } finally { clearInterval(iv); cur = ''; if (live) live.hidden = true; SF.busy = false; $$('#homeBody button').forEach((b) => (b.disabled = false)); }
 }
-function siteBird() { const E = envOf(S.model), R = (E.site && E.site.R) || 500, c = engine.camera, t = engine.controls.target, ax = 0, ay = 0; if (S.pane === '2d') setPane('3d'); t.set(ax, 0, ay); c.position.set(ax + R * 0.45, R * 0.75, ay + R * 0.95); engine.controls.update(); engine.invalidate(true); }
+function siteBird() { const E = envOf(S.model), R = (E.site && E.site.R) || 500, c = engine.camera, t = engine.controls.target, ax = 0, ay = 0; if (S.pane === '2d') setPane('3d'); t.set(ax, 0, ay); c.position.set(ax + R * 0.3, R * 0.5, ay + R * 0.85); engine.controls.update(); engine.invalidate(true); }
+/* ---------- 상권 2D: 위성 · 지도 바닥 + 건물 외곽(용도 색) · 찾은 주소 · 고르기 ---------- */
+const siteE = () => { const E = envOf(S.model); return E.type === 'site' && E.site ? E : null; };
+function siteUnder(g, px1) {
+  const E = siteE(); if (!E) return; const St = E.site, ax = E.siteAx || 0, ay = E.siteAy || 0, K = 1000, M = SITE.siteMap(St, E.siteMap || 'none');
+  if (M) { const [x0, y0, x1, y1] = M.b; g.drawImage(M.cv, (x0 - ax) * K, (y0 - ay) * K, (x1 - x0) * K, (y1 - y0) * K); }
+  g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
+  if (!M) { g.strokeStyle = '#c4c6cb'; for (const r of St.roads || []) { g.lineWidth = r.w * K; g.beginPath(); r.p.forEach(([x, y], k) => (k ? g.lineTo((x - ax) * K, (y - ay) * K) : g.moveTo((x - ax) * K, (y - ay) * K))); g.stroke(); } }
+  St.buildings.forEach((b, i) => { if (i === E.siteStore) return; g.beginPath(); b.p.forEach(([x, y], k) => (k ? g.lineTo((x - ax) * K, (y - ay) * K) : g.moveTo((x - ax) * K, (y - ay) * K))); g.closePath();
+    const hit = i === St.hit, sel = i === S.siteSel, col = hit ? '#ff2d2d' : (SITE.USES.find(([n]) => n === b.use) || [, '#c7cbd1'])[1];
+    g.globalAlpha = M ? (hit ? 0.7 : 0.35) : 0.85; g.fillStyle = col; g.fill(); g.globalAlpha = 1; g.lineWidth = (sel ? 3 : hit ? 2 : 0.8) * px1; g.strokeStyle = sel ? '#2f7df6' : hit ? '#b40000' : 'rgba(30,35,45,.55)'; g.stroke(); });
+  const hb = St.buildings[St.hit]; if (hb && E.siteStore !== St.hit) { const cx = (hb.p.reduce((a, q) => a + q[0], 0) / hb.p.length - ax) * K, cy = (hb.p.reduce((a, q) => a + q[1], 0) / hb.p.length - ay) * K, r = 9 * px1;
+    g.fillStyle = '#ff2d2d'; g.strokeStyle = '#fff'; g.lineWidth = 2 * px1; g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy - r * 2.2, r, Math.PI * 0.8, Math.PI * 0.2); g.closePath(); g.fill(); g.stroke(); g.fillStyle = '#fff'; g.beginPath(); g.arc(cx, cy - r * 2.2, r * 0.4, 0, 7); g.fill(); }
+  g.restore();
+}
+function sitePick2d(p) { const E = siteE(); if (!E) return null; const ax = E.siteAx || 0, ay = E.siteAy || 0, x = p.x / 1000 + ax, y = p.y / 1000 + ay; const i = E.site.buildings.findIndex((b, k) => k !== E.siteStore && SITE.inPoly(x, y, b.p)); return i >= 0 ? { kind: 'site', id: i } : null; }
+function siteBounds2d() { const E = siteE(); if (!E) return null; const R = E.site.R * 1000, ax = (E.siteAx || 0) * 1000, ay = (E.siteAy || 0) * 1000; return [-R - ax, -R - ay, R - ax, R - ay]; }
+function siteFit2d() { setTimeout(() => plan.fit(), 60); }
+
 /** 상권 패널: 색 · 높이 · 범례 · 고른 건물 정보 · 도면 시작 */
 function renderSite(body) {
   const E = envOf(S.model), St = E.site; $('#propsTitle').textContent = '상권 3D';
   if (!St) { body.innerHTML = '<p class="hint">상권 자료가 없어요 · 홈 → 주소로 상가 찾기</p>'; return; }
   const b = S.siteSel != null ? St.buildings[S.siteSel] : null, cnt = {}; for (const q of St.buildings) cnt[q.use] = (cnt[q.use] || 0) + 1;
   body.innerHTML = `<p class="hint">${esc(St.title || '')} · 반경 ${St.R}m · 건물 ${St.buildings.length} · ${esc(St.src.join(' · '))} (${esc(St.at || '')})</p>
-    ${b ? `<div class="hsec sitesel"><b>${esc(b.name || '이름 없는 건물')}</b><small>${esc(b.use)} · 지상 ${b.f ? b.f + '층' : '층수 모름 (' + SITE.siteFloors(b) + '층으로 표시)'}${b.addr ? ' · ' + esc(b.addr) : ''}</small>
+    ${b ? `<div class="hsec sitesel"><b>${esc(b.name || '이름 없는 건물')}</b><small>${S.siteSel === St.hit ? '📍 찾은 주소 · ' : ''}${esc(b.useNm || b.use)} · 지상 ${b.f ? b.f + '층' : '층수 모름 (' + SITE.siteFloors(b) + '층으로 표시)'}${b.h ? ` · 높이 ${b.h}m` : ''}${b.area ? ` · 연면적 ${b.area.toLocaleString()}㎡` : ''}${b.year ? ` · ${b.year}년 준공` : ''}${b.addr ? ' · ' + esc(b.addr) : ''}${b.ledger ? ' · 건축물대장' : ''}</small>
       <div class="btns"><button class="btn pri" id="siGo">${E.siteStore === S.siteSel ? '이 상가 도면으로 가기' : '이 건물(상가)로 도면 시작'}</button><button class="btn" id="siX">선택 해제</button></div></div>` : '<p class="hint">3D 에서 건물을 누르면 용도 · 층수가 나오고, 그 상가로 도면을 시작할 수 있어요.</p>'}
+    <div class="fld">바닥 지도 <small>브이월드</small><div class="seg2">${SITE.MAPS.map(([k, n]) => `<button data-sm="${k}" aria-pressed="${(E.siteMap || 'none') === k}" ${k !== 'none' && !SITE.vworld().key ? 'disabled title="브이월드 키가 있어야 해요"' : ''}>${n}</button>`).join('')}</div></div>
     <div class="fld">색<div class="seg2">${[['use', '용도'], ['floors', '층수'], ['zone', '용도지역']].map(([k, n]) => `<button data-sc="${k}" aria-pressed="${(E.siteColor || 'use') === k}" ${k === 'zone' && !St.zones.length ? 'disabled title="브이월드 키가 있어야 해요"' : ''}>${n}</button>`).join('')}</div></div>
     <label class="fld">높이 과장 <b>${(E.hk ?? 1).toFixed(1)}×</b><input type="range" id="siH" min="0.5" max="3" step="0.1" value="${E.hk ?? 1}"></label>
     <label class="tog">가로수 · 나무<input type="checkbox" id="siT" ${E.siteTrees !== false ? 'checked' : ''}></label>
+    ${SITE.vworld().dkey ? `<div class="btns"><button class="btn" id="siLed">건축물대장 ${St.src.includes('건축물대장') ? '다시 ' : ''}받기 (높이 · 주용도)</button></div>` : ''}
     <div class="btns"><button class="btn" id="siBird">전체 보기</button><button class="btn" id="siWalk">도로 둘러보기 (걷기)</button></div>
     <div class="legend">${(E.siteColor || 'use') === 'use' ? SITE.USES.filter(([n]) => cnt[n]).map(([n, c]) => `<span><i style="background:${c}"></i>${n} ${cnt[n]}</span>`).join('') : (E.siteColor === 'floors' ? [['1~2층', '#d6e3f2'], ['3~4층', '#a9c4e6'], ['5~7층', '#7aa0d4'], ['8~14층', '#4f78b8'], ['15층+', '#2f4f8f']] : [...new Set(St.zones.map((z) => z.name))].slice(0, 12).map((n) => [n || '기타', SITE.zoneColor(n)])).map(([n, c]) => `<span><i style="background:${c}"></i>${esc(n)}</span>`).join('')}</div>`;
   const re = () => { applyEnv(); commit(); engine.siteMark(S.siteSel); renderProps(); };
   $$('[data-sc]', body).forEach((x) => (x.onclick = () => { E.siteColor = x.dataset.sc; re(); }));
+  $$('[data-sm]', body).forEach((x) => (x.onclick = () => { E.siteMap = x.dataset.sm; re(); plan.redraw(); }));
+  const led = $('#siLed', body); if (led) led.onclick = async () => { led.disabled = true; led.textContent = '건축물대장 받는 중…'; try { St.src = St.src.filter((x) => x !== '건축물대장'); const n = await SITE.enrichLedger(St, SITE.vworld().dkey, (m) => (led.textContent = m)); toast(`건물 ${n}개에 건축물대장을 붙였어요`); } catch (e) { toast('건축물대장 실패 · ' + siteErr(e), 4000); } re(); };
   $('#siH', body).onchange = (e) => { E.hk = +e.target.value; re(); };
   $('#siT', body).onchange = (e) => { E.siteTrees = e.target.checked; re(); };
-  $('#siBird', body).onclick = () => { if (E.siteStore != null) { const R = St.R; engine.controls.target.set(0, 0, 0); engine.camera.position.set(R * 0.45, R * 0.75, R * 0.95); engine.controls.update(); engine.invalidate(true); } else siteBird(); };
+  $('#siBird', body).onclick = () => { if (E.siteStore != null) { const R = St.R; engine.controls.target.set(0, 0, 0); engine.camera.position.set(R * 0.3, R * 0.5, R * 0.85); engine.controls.update(); engine.invalidate(true); } else siteBird(); };
   $('#siWalk', body).onclick = () => { setPane('3d'); engine.walker.start(); toast('W A S D · 화살표로 이동 · Shift 빠르게 · 끌어서 둘러보기 · Esc 끝', 4000); };
   const x = $('#siX', body); if (x) x.onclick = () => { S.siteSel = null; engine.siteMark(null); renderProps(); };
   const go = $('#siGo', body); if (go) go.onclick = () => siteStart(S.siteSel);
@@ -2029,7 +2055,7 @@ async function boot() {
   S.lib = lib.items; S.shapes = shapes; loadMyLib();
   engine = new Engine($('#view'), { lib: S.lib, shapes: S.shapes, assets: S.assets, zOf: (it) => SL.itemZ(level(), it, S.lib) });
   try { bindUi(); } catch (e) { console.warn(e); }
-  engine.mepHide = !!store.get('byr.mepHide', false); engine.onSite = (i) => { S.siteSel = i; engine.siteMark(i); S.panel = 'site'; S.propsOpen = true; renderProps(); }; engine.onLine = (id) => setSel({ kind: 'line', id });
+  engine.mepHide = !!store.get('byr.mepHide', false); engine.onSite = (i) => { S.siteSel = i; engine.siteMark(i); S.panel = 'site'; S.propsOpen = true; plan.redraw(); renderProps(); }; SITE.setSiteRedraw(() => { engine.invalidate(true); plan.redraw(); }); engine.onLine = (id) => setSel({ kind: 'line', id });
   lib2.onStatus(setSaveState);
   engine.onSelect = (id) => { if (id) { S.sel = { kind: 'item', id }; S.propsOpen = true; S.panel = 'props'; } else if (S.sel && S.sel.kind === 'item') S.sel = null; plan && plan.select(S.sel, true); renderProps(); };
   engine.onChange = () => { commit(); renderProps(); };
@@ -2038,6 +2064,7 @@ async function boot() {
   plan = new Plan2D($('#plan'), {
     roomScope: () => S.roomScope || 'all',
     level, lib: S.lib, style: () => engine.style, toast,
+    under: (g, px1) => siteUnder(g, px1), pickUnder: (p) => sitePick2d(p), extraBounds: () => siteBounds2d(),
     onSelect: (sel) => setSel(sel),
     onLive: (kind, x) => { if (kind === 'structure') liveStructure(); else if (kind === 'item') { engine.moveItem(x); drainMoved(x); } else if (kind === 'item-removed') engine.removeItem(x); else if (kind === 'itemSize') { engine.rebuildItem(x); if (S.sel && S.sel.id === x.id) renderProps(); } },
     freeMove: () => engine.mode === 'move', /* 이동 모드면 마우스로 그냥 끌어도 옮김 */
