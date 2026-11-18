@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('byr', {
   quit: () => ipcRenderer.invoke('app:quit'), // 앱 안에서 종료를 확인한 뒤
   info: () => ipcRenderer.invoke('app:info'), // { version, update: 'setup' | 'portable' | 'dev' }
   openUrl: (u) => ipcRenderer.invoke('open:url', u),
+  netGet: (u) => ipcRenderer.invoke('net:get', u), // 공공데이터 · 지도 API
   onUpdate: (fn) => ipcRenderer.on('update', (e, m) => fn(m)),
 });

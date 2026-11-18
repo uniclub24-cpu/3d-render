@@ -4,9 +4,10 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { material } from './materials.js';
 import { MM, levelBounds } from './builder.js';
+import { buildSiteGroup } from './site.js';
 
 export const ENVTYPES = [
-  ['map', '지도 캡처 (AI)'], ['basic', '기본 거리'], ['plaza', '프라자상권'], ['apt', '아파트상가'], ['main', '메인상권'], ['park', '공원 앞 상가'], ['none', '배경 없음'],
+  ['site', '상권 (주소 · 공공데이터)'], ['map', '지도 캡처 (AI)'], ['basic', '기본 거리'], ['plaza', '프라자상권'], ['apt', '아파트상가'], ['main', '메인상권'], ['park', '공원 앞 상가'], ['none', '배경 없음'],
 ];
 export const ENVCOL = [['bld', '주변 건물'], ['glass', '유리 · 창'], ['apt', '아파트'], ['road', '도로'], ['walk', '보도 · 바닥'], ['green', '나무 · 잔디']];
 export const ENVLV = { 5: [1, 1], 4: [0.8, 0.85], 3: [0.6, 0.7], 2: [0.42, 0.5], 1: [0.25, 0.3] };
@@ -37,6 +38,7 @@ export function buildEnv(level, E, { above = false, slabH = 3300, ceilingH = 270
   const cyl = (x, z, r, y0, y1, col, key, n = 8) => { const g = new THREE.CylinderGeometry(r * MM, r * MM, (y1 - y0) * MM, n); g.translate(x * MM, ((y0 + y1) / 2) * MM, z * MM); add(g, col, key); };
   const sph = (x, y, z, rx, ry, rz, col) => { const g = new THREE.SphereGeometry(1, 10, 7); g.scale(rx * MM, ry * MM, rz * MM); g.translate(x * MM, y * MM, z * MM); add(g, col, 'plain'); };
   const b = levelBounds(level), C = E.colors, EK = { h: E.hk ?? 1, n: E.nk ?? 1 };
+  if (type === 'site') { if (E.site) { const sg = buildSiteGroup(E.site, { color: E.siteColor || 'use', hk: E.hk ?? 1, trees: E.siteTrees !== false, skip: E.siteStore, ax: E.siteAx || 0, ay: E.siteAy || 0 }); sg.position.y = -0.001; root.add(sg); } return root; }
   if (type === 'map') { if (E.map) mapEnv(E.map, b, C, EK, add); return finish(root, bins); }
   if (type === 'basic') {
     box(b[0] - 20000, b[2] + 20000, -60 - 120, -40 - 120, b[1] - 20000, b[3] + 20000, '#9a9c98', 'concrete');

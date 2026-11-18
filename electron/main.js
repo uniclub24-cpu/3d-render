@@ -73,6 +73,11 @@ app.whenReady().then(() => {
   });
 
   // 파일 열기: [{ name, path, data(Uint8Array) }]
+  /* 공공데이터 · 지도 API (브라우저 CORS 우회) — 정해진 주소만 */
+  ipcMain.handle('net:get', async (e, url) => {
+    const u = String(url || ''); if (!/^https:\/\/(api\.vworld\.kr|apis\.data\.go\.kr|overpass-api\.de|overpass\.kumi\.systems|nominatim\.openstreetmap\.org)\//.test(u)) return { ok: false, status: 0, text: 'blocked' };
+    try { const r = await net.fetch(u, { headers: { 'User-Agent': 'BYR2/' + app.getVersion() } }); return { ok: r.ok, status: r.status, text: await r.text() }; } catch (err) { return { ok: false, status: 0, text: String(err && err.message || err) }; }
+  });
   ipcMain.handle('app:info', () => ({ version: app.getVersion(), update: UPD }));
   ipcMain.handle('open:url', (e, url) => { if (/^https:\/\/github\.com\/uniclub24-cpu\/3d-render\//.test(String(url))) shell.openExternal(url); }); /* 업데이트 받기 링크만 */
   ipcMain.handle('app:quit', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { w.__quit = true; w.close(); } });

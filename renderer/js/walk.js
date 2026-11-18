@@ -34,7 +34,7 @@ export class Walker {
     return false;
   }
   update(dt) {
-    const e = this.e, k = this.keys, sp = (k.has("shift") ? 4.2 : 2.2) * 1000 * dt; // mm/초
+    const e = this.e, k = this.keys, sp = (k.has("shift") ? 4.2 : 2.2) * 1000 * dt * (e.siteOn ? 4 : 1); /* 상권: 거리 둘러보기는 빠르게 */ // mm/초
     let f = (k.has('w') || k.has('arrowup') ? 1 : 0) - (k.has('s') || k.has('arrowdown') ? 1 : 0) - this.stick.y, s = (k.has('d') ? 1 : 0) - (k.has('a') ? 1 : 0) + this.stick.x;
     if (k.has('arrowleft')) this.yaw += 1.6 * dt; if (k.has('arrowright')) this.yaw -= 1.6 * dt;
     if (k.has('q')) this.eye = Math.max(400, this.eye - 900 * dt); if (k.has('e')) this.eye = Math.min(4000, this.eye + 900 * dt);

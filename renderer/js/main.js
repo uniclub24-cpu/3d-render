@@ -15,6 +15,7 @@ import { buildLines, itemCat, isMepItem } from './lines.js';
 import { figKind } from './figures.js';
 const lumC = (c) => c.r * 0.3 + c.g * 0.59 + c.b * 0.11;
 import { AirSim } from './air.js';
+import { siteHit, siteFloors } from './site.js';
 import { KitchenSim } from './sim.js';
 import { setEnvMap } from './materials.js';
 import { STYLES, StylePass, applyStyleMaterials, restoreMaterials } from './styles3d.js';
@@ -116,7 +117,7 @@ export class Engine {
     new ResizeObserver(() => this.resize()).observe(canvas);
     /* 필요할 때만 그리기: 엔진 함수가 불리거나(장면 바뀜) 시점이 움직이거나 움직이는 것(공기 · 동선 · 걷기 …)이 있을 때만 */
     this._need = 2; this._moveT = 0; this._lastR = 0;
-    const skip = new Set(['constructor', '_frame', 'getView', 'centerOnFloor', 'snapshot', 'snapshotAt', 'invalidate', 'pick', '_pickAt', '_pr', 'floorAt', '_applyMep', 'pickLine']);
+    const skip = new Set(['constructor', '_frame', 'getView', 'centerOnFloor', 'snapshot', 'snapshotAt', 'invalidate', 'pick', '_pickAt', '_pr', 'floorAt', '_applyMep', 'pickLine', 'pickSite']);
     for (const k of Object.getOwnPropertyNames(Engine.prototype)) { const d = Object.getOwnPropertyDescriptor(Engine.prototype, k); if (skip.has(k) || !d || typeof d.value !== 'function') continue; const f = d.value; this[k] = (...a) => { const out = f.apply(this, a); this.invalidate(true); return out; }; }
     this.controls.addEventListener('change', () => { this._need = Math.max(this._need, 1); this._moveT = performance.now(); this._lightsFollow(); });
     for (const ev of ['pointerdown', 'pointermove', 'wheel', 'pointerup']) canvas.addEventListener(ev, () => (this._need = Math.max(this._need, 1)), { passive: true });
@@ -364,6 +365,19 @@ export class Engine {
     this.envE = E; this.envMeta = meta; if (!E || !this.level) return;
     this.envGroup = buildEnv(this.level, E, meta); applyStyleMaterials(this.envGroup, this.style); this.scene.add(this.envGroup);
     this.ground.visible = E.type === 'none' || E.type === 'basic'; this.controls.maxDistance = E.type === 'none' || E.type === 'basic' ? 70 : 260;
+    const site = E.type === 'site' && !!E.site; this.siteOn = site; /* 상권(반경 500m): 멀리까지 보이게 */
+    this.persp.far = site ? 4000 : 160; this.persp.updateProjectionMatrix(); if (site) { this.controls.maxDistance = 1600; this.ground.visible = false; }
+    this.ssaoPass.enabled = !site && this.opt.ssao && QUALITY[this.qual].ssao; this.invalidate(true);
+  }
+  /** 상권 건물 고르기 → 건물 번호 */
+  pickSite(e) { if (!this.siteOn || !this.envGroup) return null; const hs = this._ray(e).intersectObject(this.envGroup, true); for (const h of hs) { const i = siteHit(h); if (i != null) return i; if (h.object.userData.site === undefined && h.distance < 0) break; } return null; }
+  /** 고른 건물 강조 (파란 테두리 상자) */
+  siteMark(i) {
+    if (this._siteMark) { this.scene.remove(this._siteMark); disposeTree(this._siteMark); this._siteMark = null; } const E = this.envE; if (i == null || !E || !E.site) return this.invalidate(true);
+    const b = E.site.buildings[i]; if (!b) return; const ax = E.siteAx || 0, ay = E.siteAy || 0, h = Math.max(2.8, siteFloors(b) * 3.3 * (E.hk ?? 1));
+    const pts = b.p.map(([x, y]) => new THREE.Vector3(x - ax, h + 0.05, y - ay)); pts.push(pts[0].clone()); const top = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: '#2f7df6' }));
+    const bot = top.clone(); bot.position.y = -h; const g = new THREE.Group(); g.add(top, bot); for (const p of pts.slice(0, -1)) { const v = new THREE.Line(new THREE.BufferGeometry().setFromPoints([p, p.clone().setY(0.05)]), top.material); g.add(v); }
+    this._siteMark = g; this.scene.add(g); this.invalidate(true);
   }
   /** 공간만 보기: 그 다각형 안의 기물과 닿는 벽만 남긴다 (pts = null 이면 전체) */
   setFocus(pts) { this.focusPts = pts && pts.length >= 3 ? pts : null; this.applyFocus(); }
@@ -500,7 +514,7 @@ export class Engine {
     const up = (e) => {
       active.delete(e.pointerId); this._touches = active.size; if ((this.design && this.design.active) || this.walker.active) { down = null; return; }
       if (drag) { e.stopImmediatePropagation(); const moved = drag.moved; drag = null; if (moved) { this.onChange(); return; } }
-      if (down && e.pointerId === down.id && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 7 && e.type === 'pointerup' && this.mode !== 'orbit') { const id = this.pick(e), ln = !id && this.pickLine(e); if (ln && this.onLine) { this.select(null); this.onLine(ln); } else this.select(id); } // 톡 누르면 선택 (기물 없으면 배관 · 전선)
+      if (down && e.pointerId === down.id && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 7 && e.type === 'pointerup' && this.mode !== 'orbit') { const id = this.pick(e), ln = !id && this.pickLine(e), sb = !id && !ln && this.siteOn ? this.pickSite(e) : null; if (ln && this.onLine) { this.select(null); this.onLine(ln); } else if (sb != null && this.onSite) { this.select(null); this.onSite(sb); } else this.select(id); } // 톡 누르면 선택 (기물 없으면 배관 · 전선)
       down = null;
     };
     cv.addEventListener('pointerup', up, true); cv.addEventListener('pointercancel', up, true);
