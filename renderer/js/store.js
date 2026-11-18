@@ -28,28 +28,31 @@ export async function saveLocal(model, opt = {}) {
   ls.set('byr.last', model.id); return now;
 }
 export async function loadLocal(id) { const r = await getRec(id); return r && !r.deleted ? JSON.parse(r.data) : null; }
-export async function listLocal() { const me = session() ? session().user : null; return (await allRecs()).filter((r) => !r.deleted).map(({ id, name, updated, synced, dirty, data, owner }) => ({ id, name, updated, synced, dirty: dirty ?? updated > (synced || 0), size: data.length, other: !!(owner && owner !== me) })).sort((a, b) => b.updated - a.updated); }
+export async function listLocal() { const me = session() ? session().user : null; return (await allRecs()).filter((r) => !r.deleted && !isDraft(r.id)).map(({ id, name, updated, synced, dirty, data, owner }) => ({ id, name, updated, synced, dirty: dirty ?? updated > (synced || 0), size: data.length, other: !!(owner && owner !== me) })).sort((a, b) => b.updated - a.updated); }
 /** 지우기: 계정에 올린 적이 있으면 "지움 표시"를 남겨 다음 동기화 때 계정에서도 지운다 */
 export async function removeLocal(id) { const r = await getRec(id); if (!r) return; if (r.synced) await putRec({ ...r, deleted: true, dirty: true, updated: Math.max(Date.now(), (r.updated || 0) + 1), data: '{}' }); else await delRec(id); if (ls.get('byr.last') === id) ls.set('byr.last', null); }
 export const lastId = () => ls.get('byr.last', null);
 
-/* ---------- 자동 저장 ---------- */
+/* ---------- 저장 (2.1.32~): 고칠 때는 '임시 복구본'만, 프로젝트는 [저장] 을 눌렀을 때만 덮어쓴다 ----------
+ * 임시 복구본(draft:<id>) = 앱이 꺼지거나 튕겨도 고친 내용을 살리기 위한 것. 목록에는 안 보이고, 다음에 열 때 "불러올까요?" 로 묻는다. */
+const DRAFT = 'draft:'; export const isDraft = (id) => String(id).startsWith(DRAFT);
 let saveT = 0, pending = null, status = () => {};
 export function onStatus(fn) { status = fn; }
-/** 고칠 때마다 부른다. 1초 동안 더 고치지 않으면 저장 → 로그인돼 있으면 5초 뒤 동기화 */
-export function autosave(model) {
-  pending = model; clearTimeout(saveT); status('저장 대기');
-  saveT = setTimeout(flush, 1000);
-}
-/** 저장. 성공 true · 실패하면 다시 시도 줄에 남기고 false (3초 뒤 자동 재시도) */
+export function autosave(model) { pending = model; clearTimeout(saveT); status('저장 안 됨 · Ctrl+S'); saveT = setTimeout(flush, 1500); }
+/** 고친 내용 → 임시 복구본 */
 export async function flush() {
   clearTimeout(saveT); if (!pending) return true; const m = pending; pending = null;
-  try { await saveLocal(m); saveFail = 0; status('이 기기에 저장됨'); if (session()) scheduleSync(5000); return true; }
-  catch (e) { console.error(e); if (!pending) pending = m; saveFail++; status(`⚠ 저장 실패 (${saveFail}회) · ${e.message || e} · 자동으로 다시 시도해요`); saveT = setTimeout(flush, Math.min(30000, 3000 * saveFail)); return false; }
+  try { await putRec({ id: DRAFT + m.id, name: m.name, updated: Date.now(), synced: 0, dirty: false, deleted: false, owner: null, data: JSON.stringify(m) }); saveFail = 0; return true; }
+  catch (e) { console.error(e); if (!pending) pending = m; saveFail++; status(`⚠ 임시 저장 실패 · ${e.message || e}`); saveT = setTimeout(flush, Math.min(30000, 3000 * saveFail)); return false; }
 }
+/** [저장]: 지금 프로젝트에 덮어쓰기 + 임시 복구본 지우기 */
+export async function saveProject(model) { clearTimeout(saveT); pending = null; const t = await saveLocal(model); await delRec(DRAFT + model.id).catch(() => {}); status('저장됨'); return t; }
+/** 저장 안 한 복구본 (프로젝트보다 새것일 때만) */
+export async function draftOf(id) { const d = await getRec(DRAFT + id), r = await getRec(id); return d && (!r || d.updated > (r.updated || 0)) ? JSON.parse(d.data) : null; }
+export async function dropDraft(id) { clearTimeout(saveT); pending = null; await delRec(DRAFT + id).catch(() => {}); }
+export const hasPending = () => !!pending;
 let saveFail = 0;
 export const saveFailed = () => saveFail > 0 || !!pending;
-// 앱을 닫거나 뒤로 보낼 때 바로 저장
 addEventListener('pagehide', () => { flush(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 
@@ -85,53 +88,35 @@ async function syncSecrets() {
     await sput('_secrets.json', JSON.stringify({ at: localAt, v, del })); localStorage.removeItem('byr.secretsDel'); const add = Object.keys(rv).filter((k) => !localStorage.getItem(k) && !del.includes(k)); for (const k of add) localStorage.setItem(k, rv[k]); if (add.length) try { window.dispatchEvent(new Event('byr-secrets-in')); } catch {} return 'up'; }
   return null;
 }
-if (typeof window !== 'undefined') window.addEventListener('byr-secrets', () => { if (session()) scheduleSync(1500); });
-export function syncNow() { return (syncing ||= doSync().finally(() => (syncing = null))); }
-async function doSync() {
-  if (!session()) return { skipped: true }; const uid = session().user;
-  status('동기화 중…'); await flush();
+let keyT = 0; if (typeof window !== 'undefined') window.addEventListener('byr-secrets', () => { if (!session()) return; clearTimeout(keyT); keyT = setTimeout(() => syncKeys(), 1500); });
+export function syncNow() { return (syncing ||= pullAll().finally(() => (syncing = null))); }
+/** 키만 맞추기 (켤 때 · 로그인 · 키 바꿀 때) */
+export async function syncKeys() { if (!session()) return null; try { return await syncSecrets(); } catch (e) { console.warn('[secrets]', e); return null; } }
+const readIdx = async () => { const t = await sget('_index.json'); return t ? JSON.parse(t) : {}; };
+/** [계정에 저장]: 이 프로젝트를 계정에 덮어 올린다 (묻지 않음 · 충돌 사본 없음) */
+export async function pushProject(id) {
+  if (!session()) throw new Error('로그인이 필요해요'); const uid = session().user, rec = await getRec(id); if (!rec || rec.deleted) throw new Error('먼저 [저장] 해 주세요');
+  status('계정에 저장 중…'); const g = await putProject(id, rec.data), idx = await readIdx(); idx[id] = { name: rec.name, updated: rec.updated, ...(g ? { gz: true } : {}) };
+  await sput('_index.json', JSON.stringify(idx)); const cur = await getRec(id); if (cur) await putRec({ ...cur, owner: uid, synced: rec.updated, dirty: cur.updated !== rec.updated }); ls.set('byr.syncAt', Date.now()); status('계정에 저장됨'); return true;
+}
+/** [계정에서 받기]: 계정에만 있는 것 · 이 기기에서 안 고친 것만 받는다. 이 기기에서 고친 게 있으면 건너뛰고 알려 줌 (충돌 사본을 만들지 않음) */
+async function pullAll() {
+  if (!session()) return { skipped: true }; const uid = session().user, res = { down: 0, skip: [], changed: [], err: [] }; status('계정에서 받는 중…');
   try { await syncSecrets(); } catch (e) { console.warn('[secrets]', e); }
-  const res = { up: 0, down: 0, del: 0, conflict: 0, changed: [], err: [] };
   try {
-    const txt = await sget('_index.json'); const idx = txt ? JSON.parse(txt) : {}; let idxDirty = false;
-    const recs = await allRecs(), seen = new Set(), done = [];
-    /* 받은 것 쓰기 · 단, 동기화하는 사이 이 기기에서 또 고쳤으면 건너뜀 (다음 동기화 때 충돌로 처리) */
-    const putIfSame = async (id, upd, rec2) => { const cur = await getRec(id); if (cur && upd != null && cur.updated !== upd) return false; await putRec({ ...rec2, owner: uid }); return true; };
-    for (const rec of recs) {
-      seen.add(rec.id); if (rec.owner && rec.owner !== uid) continue; /* 다른 계정 작업은 이 계정에 섞지 않음 */ const r = idx[rec.id];
-      const edited = rec.dirty ?? rec.updated > (rec.synced || 0);              // 마지막 동기화 뒤 이 기기에서 고쳤나
-      const changed = !!r && (r.deleted || r.updated !== rec.synced);          // 마지막 동기화 뒤 계정 쪽이 바뀌었나 (시계가 달라도 안전하게 "같은지"로 본다)
-      const up = async () => { let g; try { g = await putProject(rec.id, rec.data); } catch (e) { res.err.push(`${rec.name}: ${/bucket not found/i.test(String(e.message || e)) ? '저장 공간(models 버킷)이 없어요' : e.message || e}`); return; } idx[rec.id] = { name: rec.name, updated: rec.updated, ...(g ? { gz: true } : {}) }; idxDirty = true; res.up++;
-        /* 목록(_index)까지 올라간 뒤에 "올림" 확정 · 올리는 사이 새로 고친 내용은 덮지 않고 dirty 로 둔다 */
-        done.push(async () => { const cur = await getRec(rec.id); if (!cur) return; await putRec({ ...cur, owner: uid, synced: rec.updated, dirty: cur.updated !== rec.updated }); }); };
-      if (rec.deleted) { // 이 기기에서 지움
-        if (!r || !changed || r.deleted) { if (r && !r.deleted) await sdel(r.gz ? rec.id + '.json.gz' : rec.id + '.json').catch(() => {}); idx[rec.id] = { name: rec.name, updated: rec.updated, deleted: true }; idxDirty = true; res.del++; await delRec(rec.id); }
-        else { // 지웠는데 다른 기기에서 그 사이 고침 → 고친 쪽을 살린다
-          const data = await getProject(rec.id, r); if (data && await putIfSame(rec.id, rec.updated, { id: rec.id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, data })) res.down++; }
-        continue;
-      }
-      if (!r) { await up(); continue; }
-      if (!changed) { if (edited) await up(); continue; }
-      if (r.deleted) { if (edited) await up(); else { const cur = await getRec(rec.id); if (cur && cur.updated === rec.updated) { await delRec(rec.id); res.del++; res.changed.push(rec.id); } } continue; }
-      const data = await getProject(rec.id, r); if (!data) { if (edited) await up(); continue; }
-      if (edited) { // 양쪽에서 고침 → 이 기기 것을 "충돌 사본"으로 남기고 계정 것을 받는다
-        const mine = JSON.parse(rec.data), cid = 'p' + Math.random().toString(36).slice(2, 9); mine.id = cid; mine.name = `${mine.name} (충돌 사본)`;
-        await putRec({ id: cid, name: mine.name, updated: Date.now(), synced: 0, dirty: true, deleted: false, owner: uid, data: JSON.stringify(mine) }); res.conflict++;
-      }
-      if (await putIfSame(rec.id, rec.updated, { id: rec.id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, data })) { res.down++; res.changed.push(rec.id); }
+    const idx = await readIdx();
+    for (const [id, r] of Object.entries(idx)) {
+      if (r.deleted || / \(충돌 사본\)$/.test(r.name || '')) continue; const rec = await getRec(id);
+      if (rec && !rec.deleted) { if (rec.owner && rec.owner !== uid) continue; if (r.updated === rec.synced) continue; /* 이미 계정 것 */ if ((rec.updated || 0) > (rec.synced || 0)) { res.skip.push(rec.name); continue; } /* 이 기기에서 저장한 뒤 계정에 안 올림 → 덮지 않음 */ }
+      try { const data = await getProject(id, r); if (!data) continue; await putRec({ id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, owner: uid, data }); res.down++; res.changed.push(id); } catch (e) { res.err.push(`${r.name}: ${e.message || e}`); }
     }
-    for (const [id, r] of Object.entries(idx)) { // 계정에만 있는 것
-      if (seen.has(id) || r.deleted) continue; const data = await getProject(id, r); if (!data) continue;
-      if (await putIfSame(id, null, { id, name: r.name, updated: r.updated, synced: r.updated, dirty: false, deleted: false, data })) res.down++;
-    }
-    if (res.conflict) scheduleSync(500); // 충돌 사본도 올린다
-    if (!session() || session().user !== uid) throw new Error('동기화 중에 계정이 바뀌어 멈췄어요'); /* 계정 전환 */
-    if (idxDirty) await sput('_index.json', JSON.stringify(idx));
-    for (const f of done) await f();
-    ls.set('byr.syncAt', Date.now());
-    status(res.err.length ? `일부 못 올림 · ${res.err[0]}` : `동기화됨 · ${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`);
-  } catch (e) { console.warn('[sync]', e); const m = String(e.message || e); status(/bucket not found/i.test(m) ? '동기화 실패 · 서버에 저장 공간(models 버킷)이 없어요 — 관리자가 Supabase Storage 에 models 버킷을 만들어야 해요' : /row-level security|unauthorized|403/i.test(m) ? '동기화 실패 · 저장 공간 권한(정책)이 없어요 — models 버킷 정책을 확인해 주세요' : '동기화 실패 · ' + m); throw e; }
+    ls.set('byr.syncAt', Date.now()); status(res.err.length ? `받기 일부 실패 · ${res.err[0]}` : res.down ? `계정에서 ${res.down}개 받음` : '계정과 같아요');
+  } catch (e) { const m = String(e.message || e); status(/bucket not found/i.test(m) ? '받기 실패 · 서버에 저장 공간(models 버킷)이 없어요' : '받기 실패 · ' + m); throw e; }
   return res;
 }
+/** 지우기 (계정에서도) */
+export async function removeEverywhere(id) { const r = await getRec(id); await removeLocal(id); await delRec(id).catch(() => {}); await delRec(DRAFT + id).catch(() => {}); if (!session()) return; const idx = await readIdx(); const e = idx[id]; if (e && !e.deleted) { await sdel(e.gz ? id + '.json.gz' : id + '.json').catch(() => {}); idx[id] = { name: e.name || (r && r.name) || '', updated: Date.now(), deleted: true }; await sput('_index.json', JSON.stringify(idx)); } }
+/** '(충돌 사본)' 정리: 이 기기 + 계정 */
+export async function cleanConflicts() { let n = 0; for (const r of await allRecs()) if (!isDraft(r.id) && / \(충돌 사본\)/.test(r.name || '')) { await removeEverywhere(r.id); n++; } if (session()) { const idx = await readIdx(); let ch = false; for (const [id, e] of Object.entries(idx)) if (!e.deleted && / \(충돌 사본\)/.test(e.name || '')) { await sdel(e.gz ? id + '.json.gz' : id + '.json').catch(() => {}); idx[id] = { name: e.name, updated: Date.now(), deleted: true }; ch = true; n++; } if (ch) await sput('_index.json', JSON.stringify(idx)); } return n; }
 export const lastSync = () => ls.get('byr.syncAt', 0);
 export { SB };

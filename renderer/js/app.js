@@ -20,7 +20,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.31';
+export const APP_VERSION = '2.1.32';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -45,7 +45,7 @@ const CN = ['기물', '벽', '문/창', '공간', '설치물', '치수'];
 function histLabel(a, b) { if (!a || a[6] !== b[6]) return a && a[7] !== b[7] ? `층 ${b[7] > a[7] ? '추가' : '삭제'}` : '층 · 설정'; const d = CN.map((n, i) => (b[i] !== a[i] ? `${n} ${b[i] > a[i] ? '+' : '−'}${Math.abs(b[i] - a[i])}` : '')).filter(Boolean); return d.join(' · ') || (S.sel ? `${{ item: '기물', wall: '벽', opening: '문/창', room: '공간' }[S.sel.kind] || ''} 수정`.trim() : '수정'); }
 function commit() { const c = cnts(); S.undo.push(S.last); S.um.push({ t: Date.now(), l: histLabel(S.lastC, c) }); S.lastC = c; if (S.undo.length > 60) { S.undo.shift(); S.um.shift(); } S.redo.length = 0; S.rm.length = 0; S.last = snap(); syncBar(); afterChange(); if (S.panel === 'hist' && S.propsOpen) renderProps(); }
 /** 고칠 때마다: 자동 저장 · 조정 필요 다시 세기 · 2D 다시 그리기 */
-function afterChange() { lib2.autosave(S.model); refreshBad(); syncPins(); plan && plan.redraw(); }
+function afterChange() { S.dirty = true; lib2.autosave(S.model); refreshBad(); syncPins(); plan && plan.redraw(); }
 function restore(json) {
   const sel = S.sel; S.model = JSON.parse(json); S.last = json; engine.setLevel(level()); applyEnv(); afterChange();
   const L = level(), still = sel && ({ item: L.items, wall: L.walls, opening: L.openings, room: L.rooms }[sel.kind] || []).some((q) => q.id === sel.id);
@@ -53,13 +53,26 @@ function restore(json) {
 }
 function undo() { if (!S.undo.length) return; S.redo.push(S.last); S.rm.push(S.um.pop()); restore(S.undo.pop()); S.lastC = cnts(); }
 function redo() { if (!S.redo.length) return; S.undo.push(S.last); S.um.push(S.rm.pop()); restore(S.redo.pop()); S.lastC = cnts(); }
+/** 다른 프로젝트로 가기 전: 저장 안 한 것이 있으면 묻는다 (false = 취소) */
+async function leaveOk(nextId) {
+  if (!S.model || !S.dirty || (nextId && nextId === S.model.id)) return true;
+  const a = await ask('저장하지 않은 변경이 있어요', `"${S.model.name}" 을 저장할까요?`, [{ label: '취소', value: 'x' }, { label: '저장 안 함', value: 'no' }, { label: '저장', value: 'yes', kind: 'pri' }]);
+  if (a === 'x' || !a) return false; if (a === 'yes') await saveNow(); else { await lib2.dropDraft(S.model.id); S.dirty = false; } return true;
+}
+/** [저장]: 지금 프로젝트에 덮어쓰기 (이 기기) */
+async function saveNow(quiet) { if (!S.model) return; try { await lib2.saveProject(S.model); S.dirty = false; setSaveState('저장됨'); if (!quiet) toast('저장했어요 · 계정에도 두려면 [계정에 저장]', 2200); } catch (e) { toast('저장 실패 · ' + (e.message || e), 4000); } }
+/** [계정에 저장]: 저장 + 내 계정에 올리기 */
+async function saveCloud() { if (!cloud.session()) { toast('먼저 로그인해 주세요'); return ACT.account(); } await saveNow(true); try { await lib2.pushProject(S.model.id); setSaveState('계정에 저장됨'); toast('계정에 저장했어요 · 다른 기기 홈에서 [계정에서 받기]', 2500); } catch (e) { toast('계정 저장 실패 · ' + (e.message || e), 4500); } }
 async function setModel(model, fit = true) {
+  if (S.model && S.model !== model && S.model.id !== model.id && !(await leaveOk(model.id))) return false;
   S.aiPrev = null; if (typeof plan !== 'undefined' && plan) plan.preview = null; S.multi = []; S.tucked = null;
   if (S.model && S.model !== model) await lib2.flush();
   if (engine.sim.on) { engine.sim.stop(); plan.simA = null; syncSimBtn(); } if (engine.air.on) toggleAir(); if (engine.xray) setXray(null);
   S.model = migrate(model, S.lib); S.undo.length = S.redo.length = S.um.length = S.rm.length = 0; S.last = snap(); S.lastC = cnts(); setTimeout(syncPins); setFocus(null);
   await restoreAssets(); S.sel = null; engine.setLevel(level()); applyEnv(); loadRender(); syncCeilBtn(); if (fit) { engine.view('iso'); plan.fit(); } plan.select(null, true); syncBar(); renderProps();
-  try { await lib2.saveLocal(S.model); setSaveState('이 기기에 저장됨'); } catch (e) { console.warn(e); } refreshBad(); if (cloud.session()) lib2.scheduleSync(2000);
+  S.dirty = false; try { const had = await lib2.getRec(S.model.id); if (!had || had.deleted) { await lib2.saveProject(S.model); } else setSaveState(had.synced && had.synced === had.updated ? '계정에 저장됨' : '저장됨'); } catch (e) { console.warn(e); } refreshBad();
+  const d = await lib2.draftOf(S.model.id).catch(() => null); if (d) { const a = await ask('저장 안 한 변경이 남아 있어요', '지난번에 저장하지 않고 닫은 변경을 불러올까요?', [{ label: '버리기', value: 'no' }, { label: '불러오기', value: 'yes', kind: 'pri' }]); if (a === 'yes') { S.model = migrate(d, S.lib); engine.setLevel(level()); applyEnv(); plan.redraw(); renderProps(); S.dirty = true; setSaveState('저장 안 됨 · Ctrl+S'); } else await lib2.dropDraft(S.model.id); }
+  return true;
 }
 function syncBar() {
   $('#projName').textContent = S.model.name; document.title = S.model.name + ' · BYR Next ' + APP_VERSION;
@@ -105,7 +118,7 @@ function setPane(p) {
 }
 /** 렌더 설정(스타일 · 햇빛 · 노출 · 후처리)을 프로젝트에 저장 → 다시 열거나 다른 기기에서도 같게 */
 const RENDER_KEYS = ['ssao', 'ssaoRadius', 'fxaa', 'shadows', 'sunHour', 'sunPower', 'exposure', 'itemLights'];
-function saveRender() { if (!S.model) return; S.model.render = { style: engine.style, ...Object.fromEntries(RENDER_KEYS.map((k) => [k, engine.opt[k]])) }; lib2.autosave(S.model); }
+function saveRender() { if (!S.model) return; S.model.render = { style: engine.style, ...Object.fromEntries(RENDER_KEYS.map((k) => [k, engine.opt[k]])) }; S.dirty = true; lib2.autosave(S.model); }
 function loadRender() { const r = S.model && S.model.render; if (!r) return; for (const k of RENDER_KEYS) if (r[k] != null && r[k] !== engine.opt[k]) engine.setOption(k, r[k]); if (r.style && STYLES[r.style] && r.style !== engine.style) setStyle(r.style, true); }
 function setStyle(name, fromModel) {
   engine.setStyle(name); store.set('byr.style', name); plan.redraw(); if (!fromModel) saveRender();
@@ -207,7 +220,9 @@ const ACT = {
   planImg: async () => { if (S.pane === '3d') { setPane('split'); await new Promise((r) => setTimeout(r, 120)); } const cv = $('#plan canvas') || plan.cv, c = document.createElement('canvas'); c.width = cv.width; c.height = cv.height; const g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(cv, 0, 0);
     const b = Uint8Array.from(atob(c.toDataURL('image/jpeg', 0.92).split(',')[1]), (x) => x.charCodeAt(0)); if (await saveFile({ title: 'JPEG 이미지', defaultName: safeName() + '-평면도.jpg', extensions: ['jpg'], data: b })) toast('평면도를 JPEG 로 저장했어요'); },
   open: async () => handleFiles(await openFiles({ title: 'BYR 프로젝트', extensions: ['json'] })),
-  save: async () => { const p = await saveFile({ title: 'BYR 프로젝트', defaultName: safeName() + '.byr.json', extensions: ['json'], data: JSON.stringify(S.model) }); if (p) toast('저장했어요'); },
+  save: () => saveNow(),
+  saveCloud: () => saveCloud(),
+  saveFile: async () => { const p = await saveFile({ title: 'BYR 프로젝트', defaultName: safeName() + '.byr.json', extensions: ['json'], data: JSON.stringify(S.model) }); if (p) toast('파일로 내보냈어요'); },
   legacy: async () => handleFiles(await openFiles({ title: '기존 앱 JSON', extensions: ['json'], multi: false })),
   sample: async () => {
     const k = await ask('샘플 매장', '페리카나 매뉴얼(2025.01) 기준으로 주방 규칙 · 네온 · 시트 · 우드 패널까지 넣은 매장을 만들어요. 만든 뒤 자유롭게 고쳐도 돼요.', [{ label: '취소', value: false }, { label: '예전 앱 샘플', value: 'old' }, { label: '배달 매장 5×8m', value: 'pel_delivery' }, { label: '홀 매장 8×15m', value: 'pel_hall', kind: 'pri' }]);
@@ -473,8 +488,7 @@ async function exportRoom(r) {
   m.levels = [{ ...JSON.parse(JSON.stringify({ ...L, bg: null })), id: 'L1', name: L.name, walls, openings: opens, rooms: [r], items: L.items.filter((it) => inside(it.x, it.y)), lines: (L.lines || []).filter((l) => l.pts.some((q) => inside(q[0], q[1], 200))), dims: (L.dims || []).filter((d) => inside(d.x1, d.y1, 300) && inside(d.x2, d.y2, 300)), sketches: (L.sketches || []).filter((k) => k.pts.some((q) => inside(q[0], q[1]))), soffits: (L.soffits || []).filter((o) => o.pts && o.pts.every((q) => inside(q[0], q[1], 200))) }].map((x) => JSON.parse(JSON.stringify(x)));
   m.comments = (S.model.comments || []).filter((c) => (c.lv ?? 0) === S.model.activeLevel && inside(c.x, c.y)).map((c) => ({ ...c, lv: 0 }));
   if (S.model.assets) { const keys = new Set(m.levels[0].items.filter((i) => i.asset).map((i) => i.asset.key)); m.assets = Object.fromEntries(Object.entries(S.model.assets).filter(([k]) => keys.has(k))); }
-  await lib2.saveLocal(m); await lib2.saveLocal(S.model); // 지금 프로젝트를 마지막으로 열린 것으로 유지
-  if (cloud.session()) lib2.scheduleSync(1500);
+  await lib2.saveLocal(m); // 지금 프로젝트는 [저장] 할 때만
   toast(`"${m.name}" 을 내 프로젝트에 보관했어요 (기물 ${m.levels[0].items.length} · 벽 ${walls.length})`, 6000);
   S.panel = 'library'; renderProps();
 }
@@ -1116,7 +1130,7 @@ function renderBg(body) {
   $('#propsTitle').textContent = '배경 · 밑그림';
   body.innerHTML = `<div class="sec">배경 (상권 조감도)</div>
     <div class="chips">${ENVTYPES.filter(([k]) => (k !== 'map' || E.map) && (k !== 'site' || E.site)).map(([k, n]) => `<button data-env="${k}" aria-pressed="${E.type === k}">${n}</button>`).join('')}</div>
-    ${E.site ? '<div class="btns"><button class="btn pri" id="siteOpen">상권 3D 패널 (색 · 범례 · 상가 고르기)</button></div>' : '<p class="hint">주소로 실제 주변(반경 500m)을 세우려면 홈 → 주소로 상가 찾기</p>'}
+    ${E.site ? `<div class="sec">상권 배경</div>${E.type === 'site' ? siteLayersHtml(E) : ''}<div class="btns"><button class="btn pri" id="siteOpen">상권 3D 패널 (범례 · 상가 고르기)</button></div>` : '<p class="hint">주소로 실제 주변(반경 500m)을 세우려면 홈 → 주소로 상가 찾기</p>'}
     ${mapSecHtml(E)}
     <label class="fld">매장 정면<select id="envFront"><option value="auto">자동 (출입문 쪽)</option><option value="N">도면 위쪽</option><option value="E">도면 오른쪽</option><option value="S">도면 아래쪽</option><option value="W">도면 왼쪽</option></select></label>
     <div class="row2"><span class="hint">배경 레벨 ${lv} / 5 · 낮출수록 건물이 적고 낮아져요</span><button class="btn" data-elv="-1" aria-label="배경 줄이기">▼</button><button class="btn" data-elv="1" aria-label="배경 늘리기">▲</button></div>
@@ -1128,7 +1142,7 @@ function renderBg(body) {
     <div class="sec">도면 밑그림 (사진 · 스캔을 깔고 따라 그리기)</div>
     <div class="btns"><button class="btn" id="bgPick">${bg ? '밑그림 바꾸기' : '도면 이미지 고르기'}</button>${bg ? '<button class="btn danger" id="bgDel">밑그림 지우기</button>' : ''}</div>
     ${bg ? `<div class="row">${num('이미지 가로 mm', 'wmm', bg.wmm)}${num('X', 'x', bg.x || 0)}${num('Y', 'y', bg.y || 0)}</div><label class="fld">불투명도<input type="range" id="bgO" min="0.1" max="1" step="0.05" value="${bg.opacity ?? 0.5}"></label>` : '<p class="hint">손그림 · PDF 캡처 · 사진을 깔고 2D "벽 그리기" 로 따라 그리면 돼요. 도면의 긴 벽 하나 길이를 보고 "이미지 가로 mm" 로 축척을 맞추세요.</p>'}`;
-  bindMapSec(body, E); const so = $('#siteOpen', body); if (so) so.onclick = () => { if (E.type !== 'site') { E.type = 'site'; applyEnv(); commit(); } S.panel = 'site'; renderProps(); };
+  bindMapSec(body, E); if (E.site && E.type === 'site') bindSiteLayers(body, E, () => { applyEnv(); commit(); renderProps(); }); const so = $('#siteOpen', body); if (so) so.onclick = () => { if (E.type !== 'site') { E.type = 'site'; applyEnv(); commit(); } S.panel = 'site'; renderProps(); };
   $('#envFront').value = E.front || 'auto';
   const re = () => { applyEnv(); commit(); };
   $$('[data-env]', body).forEach((b) => (b.onclick = () => { E.type = b.dataset.env; re(); if (E.type !== 'none') { if (S.pane === '2d') setPane('split'); envBird(); } renderProps(); }));
@@ -1273,15 +1287,15 @@ async function renderLibrary(body) {
   $$('[data-lb]', body).forEach((b) => (b.onclick = async () => { const a = b.dataset.lb;
     if (a === 'new') return ACT.new();
     if (a === 'login') return ACT.account();
-    if (a === 'sync') { b.disabled = true; $('#libMsg').textContent = '동기화 중…'; try { const r = await lib2.syncNow(); $('#libMsg').textContent = `올림 ${r.up} · 받음 ${r.down} · 지움 ${r.del}${r.conflict ? ` · 충돌 사본 ${r.conflict}` : ''}`; await reloadIfChanged(r); } catch (e) { $('#libMsg').textContent = '동기화 실패: ' + (e.message || e); } b.disabled = false; listLib(); } }));
+    if (a === 'sync') { b.disabled = true; $('#libMsg').textContent = '계정에서 받는 중…'; try { const r = await lib2.syncNow(); $('#libMsg').textContent = `받음 ${r.down}${r.skip && r.skip.length ? ` · 이 기기에서 고친 ${r.skip.length}개는 건너뜀` : ''}`; await reloadIfChanged(r); } catch (e) { $('#libMsg').textContent = '동기화 실패: ' + (e.message || e); } b.disabled = false; listLib(); } }));
   listLib();
 }
 async function listLib() {
   const el = $('#libList'); if (!el) return; const list = await lib2.listLocal().catch(() => []);
   el.innerHTML = list.length ? list.map((p) => `<div class="prow ${p.id === S.model.id ? 'on' : ''}"><button data-open="${p.id}"><b>${esc(p.name)}</b><small>${new Date(p.updated).toLocaleString('ko-KR')} · ${(p.size / 1024).toFixed(0)}KB${p.other ? ' · 다른 계정 작업 (이 계정에 안 올림)' : cloud.session() ? (p.dirty ? ' · 올릴 예정' : ' · 동기화됨') : ''}</small></button><button class="ib" data-dup="${p.id}" title="복제" aria-label="복제"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V4h12"/></svg></button><button class="ib" data-rm="${p.id}" title="지우기" aria-label="지우기"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg></button></div>`).join('') : '<p class="hint">저장된 프로젝트가 없어요</p>';
-  $$('[data-open]', el).forEach((b) => (b.onclick = async () => { const m = await lib2.loadLocal(b.dataset.open); if (m) { await setModel(m); toast(`"${m.name}" 을 열었어요`); } }));
-  $$('[data-dup]', el).forEach((b) => (b.onclick = async () => { const m = await lib2.loadLocal(b.dataset.dup); if (!m) return; m.id = uid('p'); m.name += ' (사본)'; await lib2.saveLocal(m); await lib2.saveLocal(S.model); listLib(); }));
-  $$('[data-rm]', el).forEach((b) => { let armed = false; b.onclick = async () => { if (!armed) { armed = true; b.classList.add('danger'); b.title = '한 번 더 누르면 지워요'; toast('한 번 더 누르면 지워요'); setTimeout(() => { armed = false; b.classList.remove('danger'); }, 3000); return; } const id = b.dataset.rm; await lib2.removeLocal(id); if (id === S.model.id) await setModel(emptyProject()); if (cloud.session()) lib2.scheduleSync(800); listLib(); }; });
+  $$('[data-open]', el).forEach((b) => (b.onclick = async () => { const m = await lib2.loadLocal(b.dataset.open); if (m) { if (!(await leaveOk(m.id))) return; await setModel(m); toast(`"${m.name}" 을 열었어요`); } }));
+  $$('[data-dup]', el).forEach((b) => (b.onclick = async () => { const m = await lib2.loadLocal(b.dataset.dup); if (!m) return; m.id = uid('p'); m.name += ' (사본)'; await lib2.saveLocal(m); listLib(); }));
+  $$('[data-rm]', el).forEach((b) => { let armed = false; b.onclick = async () => { if (!armed) { armed = true; b.classList.add('danger'); b.title = '한 번 더 누르면 지워요'; toast('한 번 더 누르면 지워요'); setTimeout(() => { armed = false; b.classList.remove('danger'); }, 3000); return; } const id = b.dataset.rm; await lib2.removeEverywhere(id).catch(() => {}); if (id === S.model.id) { S.dirty = false; await setModel(emptyProject()); } listLib(); }; });
 }
 /** 동기화로 지금 열린 프로젝트가 바뀌었으면 다시 연다 */
 async function reloadIfChanged(r) { if (r && r.changed && r.changed.includes(S.model.id)) { const m = await lib2.loadLocal(S.model.id); if (m) { await setModel(m, false); toast('다른 기기에서 고친 내용을 받아 왔어요'); } else { await setModel(emptyProject()); toast('다른 기기에서 지운 프로젝트예요'); } } }
@@ -1771,9 +1785,9 @@ async function checkUpdate(force) {
 }
 const IS_APP = () => !!(window.byr || (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()));
 async function quitApp() {
-  if (!(await ask('BYR2 를 종료할까요?', '작업은 이 기기에 자동 저장돼 있어요. 다시 켜면 이어서 할 수 있어요.', [{ label: '취소', value: false }, { label: '종료', value: true, kind: 'danger' }]))) return;
+  if (!(await ask('BYR2 를 종료할까요?', '저장한 작업은 다시 켜면 이어서 할 수 있어요.', [{ label: '취소', value: false }, { label: '종료', value: true, kind: 'danger' }]))) return;
   if (!(await lib2.flush())) { const c = await ask('이 기기에 저장하지 못했어요', '지금 닫으면 마지막 고친 내용이 사라질 수 있어요. 프로젝트 파일로 백업해 두세요.', [{ label: '파일로 백업', value: 'bk', kind: 'pri' }, { label: '그냥 종료', value: 'q', kind: 'danger' }, { label: '취소', value: false }]); if (!c) return; if (c === 'bk') { await ACT.save(); return; } }
-  if (cloud.session()) await lib2.syncNow().catch(() => {});
+  if (S.dirty) { const a = await ask('저장하지 않은 변경이 있어요', '저장하고 종료할까요? (저장 안 해도 다음에 열 때 복구할 수 있어요)', [{ label: '취소', value: 'x' }, { label: '저장 안 함', value: 'no' }, { label: '저장', value: 'yes', kind: 'pri' }]); if (a === 'x' || !a) return; if (a === 'yes') await saveNow(true); }
   if (window.byr && window.byr.quit) window.byr.quit(); else if (window.Capacitor && window.Capacitor.Plugins.App) window.Capacitor.Plugins.App.exitApp(); else toast('브라우저 탭을 닫으면 돼요 · 작업은 저장돼 있어요');
 }
 /** 뒤로 가기 (안드로이드 뒤로 단추 · Esc): 열린 것부터 하나씩 닫고, 마지막엔 홈 → 종료 확인 */
@@ -1867,7 +1881,7 @@ async function siteBuild(r, log) {
     const V = SITE.vworld(); if (V.dkey && site.buildings.length) { try { await SITE.enrichLedger(site, V.dkey, step); } catch (e) { log('⛔ 건축물대장: ' + siteErr(e)); } }
     if (!site.buildings.length && !site.roads.length) throw new Error('이 범위에서 받은 자료가 없어요');
     site.title = r.title; const m = emptyProject(`상권 · ${r.title}`.slice(0, 40)); const L = m.levels[0]; L.walls = []; L.rooms = []; L.openings = [];
-    m.env = { ...(m.env || {}), type: 'site', site, siteColor: 'use', hk: 1, siteMap: SITE.vworld().key ? 'hyb' : 'none' }; closeHome(); await setModel(m); S.siteSel = site.hit >= 0 ? site.hit : null; siteBird(); siteFit2d(); S.panel = 'site'; S.propsOpen = true; renderProps();
+    m.env = { ...(m.env || {}), type: 'site', site, siteColor: 'use', hk: 1, siteMap: SITE.vworld().key ? 'sat' : 'none', siteRoads: true, siteZones: false }; closeHome(); await setModel(m); S.siteSel = site.hit >= 0 ? site.hit : null; siteBird(); siteFit2d(); S.panel = 'site'; S.propsOpen = true; renderProps();
     toast('상권을 세웠어요 · 건물을 누르면 정보 · 도면 시작', 3500);
   } catch (e) { console.error(e); log('⛔ ' + siteErr(e)); } finally { clearInterval(iv); cur = ''; if (live) live.hidden = true; SF.busy = false; $$('#homeBody button').forEach((b) => (b.disabled = false)); }
 }
@@ -1890,6 +1904,24 @@ function sitePick2d(p) { const E = siteE(); if (!E) return null; const ax = E.si
 function siteBounds2d() { const E = siteE(); if (!E) return null; const R = E.site.R * 1000, ax = (E.siteAx || 0) * 1000, ay = (E.siteAy || 0) * 1000; return [-R - ax, -R - ay, R - ax, R - ay]; }
 function siteFit2d() { setTimeout(() => plan.fit(), 60); }
 
+/** 상권 배경 겹: 바닥(위성 · 지도 · 없음) · 3D 도로 · 건물 색 · 용도지역 · 나무 · 높이 — 상권 패널과 배경 탭에서 같이 씀 */
+function siteLayersHtml(E) {
+  const St = E.site, vk = !!SITE.vworld().key, MAPS2 = [['sat', '위성'], ['base', '일반지도'], ['gray', '회색 지도'], ['hyb', '위성 + 지명'], ['none', '없음 (깨끗한 바닥)']];
+  return `<div class="fld">바닥 <small>브이월드</small><div class="seg2">${MAPS2.map(([k, n]) => `<button data-sm="${k}" aria-pressed="${(E.siteMap || 'none') === k}" ${k !== 'none' && !vk ? 'disabled title="브이월드 키가 있어야 해요"' : ''}>${n}</button>`).join('')}</div></div>
+    <div class="fld">건물 색<div class="seg2">${[['white', '흰 매스'], ['use', '용도'], ['floors', '층수']].map(([k, n]) => `<button data-sc="${k}" aria-pressed="${(E.siteColor === 'zone' ? 'white' : E.siteColor || 'use') === k}">${n}</button>`).join('')}</div></div>
+    <label class="tog">3D 도로 (실제 도로선으로 그림)<input type="checkbox" id="siR" ${E.siteRoads !== false ? 'checked' : ''}></label>
+    <label class="tog">용도지역 색 깔기<input type="checkbox" id="siZ" ${E.siteZones || E.siteColor === 'zone' ? 'checked' : ''} ${St.zones.length ? '' : 'disabled'}></label>
+    <label class="tog">가로수 · 나무<input type="checkbox" id="siT" ${E.siteTrees !== false ? 'checked' : ''}></label>
+    <label class="fld">높이 과장 <b>${(E.hk ?? 1).toFixed(1)}×</b><input type="range" id="siH" min="0.5" max="3" step="0.1" value="${E.hk ?? 1}"></label>`;
+}
+function bindSiteLayers(body, E, re) {
+  $$('[data-sm]', body).forEach((x) => (x.onclick = () => { E.siteMap = x.dataset.sm; re(); plan.redraw(); }));
+  $$('[data-sc]', body).forEach((x) => (x.onclick = () => { if (E.siteColor === 'zone') E.siteZones = true; E.siteColor = x.dataset.sc; re(); }));
+  $('#siR', body).onchange = (e) => { E.siteRoads = e.target.checked; re(); };
+  $('#siZ', body).onchange = (e) => { E.siteZones = e.target.checked; if (!e.target.checked && E.siteColor === 'zone') E.siteColor = 'white'; re(); };
+  $('#siT', body).onchange = (e) => { E.siteTrees = e.target.checked; re(); };
+  $('#siH', body).onchange = (e) => { E.hk = +e.target.value; re(); };
+}
 /** 상권 패널: 색 · 높이 · 범례 · 고른 건물 정보 · 도면 시작 */
 function renderSite(body) {
   const E = envOf(S.model), St = E.site; $('#propsTitle').textContent = '상권 3D';
@@ -1898,19 +1930,13 @@ function renderSite(body) {
   body.innerHTML = `<p class="hint">${esc(St.title || '')} · 반경 ${St.R}m · 건물 ${St.buildings.length} · ${esc(St.src.join(' · '))} (${esc(St.at || '')})</p>
     ${b ? `<div class="hsec sitesel"><b>${esc(b.name || '이름 없는 건물')}</b><small>${S.siteSel === St.hit ? '📍 찾은 주소 · ' : ''}${esc(b.useNm || b.use)} · 지상 ${b.f ? b.f + '층' : '층수 모름 (' + SITE.siteFloors(b) + '층으로 표시)'}${b.h ? ` · 높이 ${b.h}m` : ''}${b.area ? ` · 연면적 ${b.area.toLocaleString()}㎡` : ''}${b.year ? ` · ${b.year}년 준공` : ''}${b.addr ? ' · ' + esc(b.addr) : ''}${b.ledger ? ' · 건축물대장' : ''}</small>
       <div class="btns"><button class="btn pri" id="siGo">${E.siteStore === S.siteSel ? '이 상가 도면으로 가기' : '이 건물(상가)로 도면 시작'}</button><button class="btn" id="siX">선택 해제</button></div></div>` : '<p class="hint">3D 에서 건물을 누르면 용도 · 층수가 나오고, 그 상가로 도면을 시작할 수 있어요.</p>'}
-    <div class="fld">바닥 지도 <small>브이월드</small><div class="seg2">${SITE.MAPS.map(([k, n]) => `<button data-sm="${k}" aria-pressed="${(E.siteMap || 'none') === k}" ${k !== 'none' && !SITE.vworld().key ? 'disabled title="브이월드 키가 있어야 해요"' : ''}>${n}</button>`).join('')}</div></div>
-    <div class="fld">색<div class="seg2">${[['use', '용도'], ['floors', '층수'], ['zone', '용도지역']].map(([k, n]) => `<button data-sc="${k}" aria-pressed="${(E.siteColor || 'use') === k}" ${k === 'zone' && !St.zones.length ? 'disabled title="브이월드 키가 있어야 해요"' : ''}>${n}</button>`).join('')}</div></div>
-    <label class="fld">높이 과장 <b>${(E.hk ?? 1).toFixed(1)}×</b><input type="range" id="siH" min="0.5" max="3" step="0.1" value="${E.hk ?? 1}"></label>
-    <label class="tog">가로수 · 나무<input type="checkbox" id="siT" ${E.siteTrees !== false ? 'checked' : ''}></label>
+    ${siteLayersHtml(E)}
     ${SITE.vworld().dkey ? `<div class="btns"><button class="btn" id="siLed">건축물대장 ${St.src.includes('건축물대장') ? '다시 ' : ''}받기 (높이 · 주용도)</button></div>` : ''}
     <div class="btns"><button class="btn" id="siBird">전체 보기</button><button class="btn" id="siWalk">도로 둘러보기 (걷기)</button></div>
-    <div class="legend">${(E.siteColor || 'use') === 'use' ? SITE.USES.filter(([n]) => cnt[n]).map(([n, c]) => `<span><i style="background:${c}"></i>${n} ${cnt[n]}</span>`).join('') : (E.siteColor === 'floors' ? [['1~2층', '#d6e3f2'], ['3~4층', '#a9c4e6'], ['5~7층', '#7aa0d4'], ['8~14층', '#4f78b8'], ['15층+', '#2f4f8f']] : [...new Set(St.zones.map((z) => z.name))].slice(0, 12).map((n) => [n || '기타', SITE.zoneColor(n)])).map(([n, c]) => `<span><i style="background:${c}"></i>${esc(n)}</span>`).join('')}</div>`;
+    <div class="legend">${E.siteColor === 'white' ? '' : (E.siteColor || 'use') === 'use' ? SITE.USES.filter(([n]) => cnt[n]).map(([n, c]) => `<span><i style="background:${c}"></i>${n} ${cnt[n]}</span>`).join('') : (E.siteColor === 'floors' ? [['1~2층', '#d6e3f2'], ['3~4층', '#a9c4e6'], ['5~7층', '#7aa0d4'], ['8~14층', '#4f78b8'], ['15층+', '#2f4f8f']] : [...new Set(St.zones.map((z) => z.name))].slice(0, 12).map((n) => [n || '기타', SITE.zoneColor(n)])).map(([n, c]) => `<span><i style="background:${c}"></i>${esc(n)}</span>`).join('')}</div>`;
   const re = () => { applyEnv(); commit(); engine.siteMark(S.siteSel); renderProps(); };
-  $$('[data-sc]', body).forEach((x) => (x.onclick = () => { E.siteColor = x.dataset.sc; re(); }));
-  $$('[data-sm]', body).forEach((x) => (x.onclick = () => { E.siteMap = x.dataset.sm; re(); plan.redraw(); }));
+  bindSiteLayers(body, E, re);
   const led = $('#siLed', body); if (led) led.onclick = async () => { led.disabled = true; led.textContent = '건축물대장 받는 중…'; try { St.src = St.src.filter((x) => x !== '건축물대장'); const n = await SITE.enrichLedger(St, SITE.vworld().dkey, (m) => (led.textContent = m)); toast(`건물 ${n}개에 건축물대장을 붙였어요`); } catch (e) { toast('건축물대장 실패 · ' + siteErr(e), 4000); } re(); };
-  $('#siH', body).onchange = (e) => { E.hk = +e.target.value; re(); };
-  $('#siT', body).onchange = (e) => { E.siteTrees = e.target.checked; re(); };
   $('#siBird', body).onclick = () => { if (E.siteStore != null) { const R = St.R; engine.controls.target.set(0, 0, 0); engine.camera.position.set(R * 0.3, R * 0.5, R * 0.85); engine.controls.update(); engine.invalidate(true); } else siteBird(); };
   $('#siWalk', body).onclick = () => { setPane('3d'); engine.walker.start(); toast('W A S D · 화살표로 이동 · Shift 빠르게 · 끌어서 둘러보기 · Esc 끝', 4000); };
   const x = $('#siX', body); if (x) x.onclick = () => { S.siteSel = null; engine.siteMark(null); renderProps(); };
@@ -1923,7 +1949,7 @@ async function siteStart(i) {
   if (E.siteStore != null || L.walls.length) { if (!(await ask('다른 상가로 도면을 시작할까요?', '지금 그린 벽 · 기물은 그대로 두고 새 상가 외곽으로 벽을 다시 세워요. (되돌리기 가능)'))) return; }
   const cx = b.p.reduce((a, q) => a + q[0], 0) / b.p.length, cy = b.p.reduce((a, q) => a + q[1], 0) / b.p.length, P = b.p.map(([x, y]) => [Math.round((x - cx) * 1000), Math.round((y - cy) * 1000)]);
   const T = S.model.wallT || 150; L.walls = P.map((q, k) => { const r = P[(k + 1) % P.length]; return { id: uid('w'), x1: q[0], y1: q[1], x2: r[0], y2: r[1], t: T, h: L.ceilingH || 2700 }; }).filter((w) => Math.hypot(w.x2 - w.x1, w.y2 - w.y1) > 200);
-  L.rooms = [{ id: uid('r'), name: b.name || '매장', pts: P }]; L.openings = []; E.siteStore = i; E.siteAx = cx; E.siteAy = cy;
+  L.rooms = [{ id: uid('r'), name: b.name || '매장', pts: P }]; L.openings = []; E.siteStore = i; E.siteAx = cx; E.siteAy = cy; if (SITE.vworld().key) E.siteMap = 'sat'; E.siteRoads = true; E.siteZones = false; E.siteColor = 'white'; /* 작업용: 위성 + 실제 도로선 + 흰 매스만 */
   if (/^상권 · /.test(S.model.name) && b.name) S.model.name = `${b.name} (${St.title || ''})`.slice(0, 40);
   engine.setLevel(L); applyEnv(); commit(); S.siteSel = i; engine.siteMark(null); plan.fit && plan.fit(); setPane('split'); engine.view('iso'); renderProps();
   toast('상가 외곽으로 벽을 세웠어요 · 문 · 기물을 넣어 도면을 이어 가세요 (지상 1층 외곽 기준)', 4500);
@@ -2024,11 +2050,12 @@ async function renderHome() {
       <button data-h="asset">${SV(HI.model)}3D 모델 가져오기</button>
     </div>
     <section class="hsec"><div class="row2"><b>내 프로젝트 · ${list.length}개</b>${list.length > 6 ? '<button class="btn" data-h="library">전체 · 정리</button>' : ''}</div>
+      ${list.some((p) => / \(충돌 사본\)/.test(p.name)) ? `<div class="btns"><button class="btn danger" data-h="clean">충돌 사본 ${list.filter((p) => / \(충돌 사본\)/.test(p.name)).length}개 모두 지우기</button></div>` : ''}
       <div class="hgrid">${list.slice(0, S.homeAll ? 200 : 8).map((p) => `<div class="hp ${cur && p.id === cur.id ? 'on' : ''}"><button class="hpm" data-op="${p.id}"><b>${esc(p.name)}</b><small>${new Date(p.updated).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${s ? (p.dirty ? ' · 올릴 예정' : ' · 동기화됨') : ''}${cur && p.id === cur.id ? ' · 지금 열림' : ''}</small></button>
         <div class="hpa"><button class="go" data-op="${p.id}">작업하기</button><button data-ren="${p.id}">이름 수정</button><button class="del" data-del="${p.id}">삭제</button></div></div>`).join('') || '<p class="hint">아직 저장된 프로젝트가 없어요</p>'}</div>${list.length > 8 && !S.homeAll ? '<button class="btn" data-h="all">모두 보기</button>' : ''}</section>
     <section class="hsec"><div class="row2"><b>계정 · 동기화</b><span class="stat ${s ? 'ok' : ''}"><i></i>${s ? '로그인됨' : '로그인 안 함'}</span></div>
-      <p class="hint">${s ? `${esc(s.email || '')} · PC · 폰에서 같은 계정으로 로그인하면 내 프로젝트가 자동으로 맞춰져요${last ? ` · 마지막 ${new Date(last).toLocaleString('ko-KR')}` : ''}` : '기존 BYR 앱과 같은 이메일 · 비밀번호로 로그인하면, PC 에서 하던 작업을 폰에서 이어 하고 기존 앱 프로젝트도 불러올 수 있어요.'}</p>
-      <div class="btns">${s ? '<button class="btn pri" data-h="sync">지금 동기화</button><button class="btn" data-h="account">기존 앱 프로젝트</button><button class="btn" data-h="logout">로그아웃</button>' : '<button class="btn pri" data-h="login">로그인</button>'}</div><p class="hint" id="hMsg"></p></section>
+      <p class="hint">${s ? `${esc(s.email || '')} · [계정에 저장] 한 프로젝트만 계정에 올라가요 · 다른 기기에서는 [계정에서 받기]${last ? ` · 마지막 ${new Date(last).toLocaleString('ko-KR')}` : ''}` : '기존 BYR 앱과 같은 이메일 · 비밀번호로 로그인하면, PC 에서 하던 작업을 폰에서 이어 하고 기존 앱 프로젝트도 불러올 수 있어요.'}</p>
+      <div class="btns">${s ? '<button class="btn pri" data-h="sync">계정에서 받기</button><button class="btn" data-h="account">기존 앱 프로젝트</button><button class="btn" data-h="logout">로그아웃</button>' : '<button class="btn pri" data-h="login">로그인</button>'}</div><p class="hint" id="hMsg"></p></section>
 `;
   $('#homeBody').insertAdjacentHTML(S.aiOk ? 'beforeend' : 'afterbegin', homeAiHtml());
   bindHomeAi();
@@ -2038,15 +2065,16 @@ async function renderHome() {
     if (h === 'site') return renderSiteFind();
     if (h === 'all') { S.homeAll = true; return renderHome(); }
     if (h === 'new') { closeHome(); return ACT.new(); }
-    if (h === 'sync') { $('#hMsg').textContent = '동기화 중…'; try { const r = await lib2.syncNow(); await reloadIfChanged(r); $('#hMsg').textContent = `올림 ${r.up} · 받음 ${r.down}${r.conflict ? ` · 충돌 사본 ${r.conflict}` : ''}`; setTimeout(renderHome, 1200); } catch (e) { $('#hMsg').textContent = '동기화 실패: ' + (e.message || e); } return; }
+    if (h === 'clean') { if (!(await ask('충돌 사본을 모두 지울까요?', '이름에 "(충돌 사본)" 이 붙은 프로젝트를 이 기기와 계정에서 지워요. 되돌릴 수 없어요.'))) return; const n = await lib2.cleanConflicts(); toast(`충돌 사본 ${n}개를 지웠어요`); return renderHome(); }
+    if (h === 'sync') { $('#hMsg').textContent = '계정에서 받는 중…'; try { const r = await lib2.syncNow(); await reloadIfChanged(r); $('#hMsg').textContent = `받음 ${r.down}${r.skip && r.skip.length ? ` · 이 기기에서 고친 ${r.skip.length}개는 건너뜀 (${r.skip.slice(0, 3).join(', ')})` : ''}`; setTimeout(renderHome, 1800); } catch (e) { $('#hMsg').textContent = '동기화 실패: ' + (e.message || e); } return; }
     if (h === 'logout') { if (await ask('로그아웃할까요?', '이 기기의 프로젝트는 그대로 남아요. 계정에서 받아 온 AI 키는 이 기기에서 지워져요.')) { cloud.logout(); renderHome(); } return; }
     closeHome(); const map = { open: 'open', legacy: 'legacy', account: 'account', login: 'account', asset: 'asset', sample: 'sample', library: 'library', ai: 'ai' }; await ACT[map[h]]();
   };
   $$('[data-h]', $('#homeBody')).forEach((b) => (b.onclick = () => act(b.dataset.h)));
-  $$('[data-ren]', $('#homeBody')).forEach((b) => (b.onclick = async () => { const id = b.dataset.ren, m = cur && cur.id === id ? cur : await lib2.loadLocal(id); if (!m) return; const nm = await askText('프로젝트 이름 수정', m.name); if (!nm || nm === m.name) return; m.name = nm; if (cur && cur.id === id) { commit(); $('#projName') && ($('#projName').textContent = nm); } else { await lib2.saveLocal(m); if (cur) await lib2.saveLocal(cur); if (s) lib2.scheduleSync(800); } renderHome(); }));
+  $$('[data-ren]', $('#homeBody')).forEach((b) => (b.onclick = async () => { const id = b.dataset.ren, m = cur && cur.id === id ? cur : await lib2.loadLocal(id); if (!m) return; const nm = await askText('프로젝트 이름 수정', m.name); if (!nm || nm === m.name) return; m.name = nm; if (cur && cur.id === id) { commit(); $('#projName') && ($('#projName').textContent = nm); await saveNow(true); } else { await lib2.saveLocal(m); } renderHome(); }));
   $$('[data-del]', $('#homeBody')).forEach((b) => (b.onclick = async () => { const id = b.dataset.del, it = list.find((q) => q.id === id); if (!(await ask('프로젝트를 삭제할까요?', `"${it ? it.name : ''}" 을 이 기기${s ? '와 계정' : ''}에서 지워요. 되돌릴 수 없어요.`, [{ label: '취소', value: false }, { label: '삭제', value: true, kind: 'danger' }]))) return;
-    await lib2.removeLocal(id); if (s) lib2.scheduleSync(500); if (cur && cur.id === id) { await setModel(emptyProject('새 프로젝트', 8000, 6000)); } toast('삭제했어요'); renderHome(); }));
-  $$('[data-op]', $('#homeBody')).forEach((b) => (b.onclick = async () => { if (cur && b.dataset.op === cur.id) return closeHome(); const m = await lib2.loadLocal(b.dataset.op); if (m) { closeHome(); await setModel(m); toast(`"${m.name}" 을 열었어요`); } }));
+    await lib2.removeEverywhere(id).catch((e) => toast('계정에서 지우지 못했어요 · ' + (e.message || e))); if (cur && cur.id === id) { S.dirty = false; await setModel(emptyProject('새 프로젝트', 8000, 6000)); } toast('삭제했어요'); renderHome(); }));
+  $$('[data-op]', $('#homeBody')).forEach((b) => (b.onclick = async () => { if (cur && b.dataset.op === cur.id) return closeHome(); const m = await lib2.loadLocal(b.dataset.op); if (m) { if (!(await leaveOk(m.id))) return; closeHome(); await setModel(m); toast(`"${m.name}" 을 열었어요`); } }));
 }
 
 async function boot() {
@@ -2056,7 +2084,7 @@ async function boot() {
   engine = new Engine($('#view'), { lib: S.lib, shapes: S.shapes, assets: S.assets, zOf: (it) => SL.itemZ(level(), it, S.lib) });
   try { bindUi(); } catch (e) { console.warn(e); }
   engine.mepHide = !!store.get('byr.mepHide', false); engine.onSite = (i) => { S.siteSel = i; engine.siteMark(i); S.panel = 'site'; S.propsOpen = true; plan.redraw(); renderProps(); }; SITE.setSiteRedraw(() => { engine.invalidate(true); plan.redraw(); }); window.addEventListener('byr-secrets-in', () => { toast('계정에 저장된 API 키를 받았어요', 2500); renderProps(); if (!$('#home').hidden && $('#homeBody')) { if ($('#sfQ')) renderSiteFind(); } }); engine.onLine = (id) => setSel({ kind: 'line', id });
-  lib2.onStatus(setSaveState);
+  lib2.onStatus(setSaveState); $('#btnSave').onclick = () => saveNow(); $('#btnSaveC').onclick = () => saveCloud(); $('#saveState').onclick = () => S.dirty && saveNow();
   engine.onSelect = (id) => { if (id) { S.sel = { kind: 'item', id }; S.propsOpen = true; S.panel = 'props'; } else if (S.sel && S.sel.kind === 'item') S.sel = null; plan && plan.select(S.sel, true); renderProps(); };
   engine.onChange = () => { commit(); renderProps(); };
   const drainMoved = (it) => { if (it && SL.isDrainItem(it, S.lib) && level().rooms.some((r) => r.slope && r.slope.item === it.id)) liveStructure(); else if (it && level().items.some((q) => q.onSlope)) engine.replaceItems(); };
@@ -2128,7 +2156,7 @@ async function boot() {
     if (typing) { if (e.key === 'Escape') ae.blur(); return; }
     if (ae && ae !== document.body && /INPUT|BUTTON|SELECT/.test(ae.tagName) && (mod || e.key === 'Escape' || e.key === 'Delete')) ae.blur();
     if (mod && k === 'z') { e.preventDefault(); if (engine.design.active) { (e.shiftKey ? engine.design.redo() : engine.design.undo()) || toast(e.shiftKey ? '다시 할 게 없어요' : '되돌릴 게 없어요', 1200); renderProps(); return; } e.shiftKey ? redo() : undo(); return; }
-    if (mod && k === 's') { e.preventDefault(); ACT.save(); return; }
+    if (mod && k === 's') { e.preventDefault(); if (e.shiftKey) saveCloud(); else saveNow(); return; }
     if (e.key === 'F1' || (mod && (e.key === '/' || e.code === 'Slash'))) { e.preventDefault(); showKeys(); return; }
     if (e.key === 'Escape' && escAll()) { e.preventDefault(); return; }
     if (engine.design.active) { /* 디자인 수정 중: 부품 단축키 */
@@ -2200,7 +2228,8 @@ async function boot() {
   if ($('#introVer')) $('#introVer').textContent = 'v' + APP_VERSION;
   const intro = $('#intro'), wait = Math.max(1200, 3000 - performance.now()); /* 로딩 화면: 처음부터 최소 3초 · 준비가 끝난 뒤에도 1.2초 더 */ setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
   // 계정 동기화: 켤 때 · 1분마다 · 앱으로 돌아올 때
-  const sync = () => { if (!cloud.session() || document.visibilityState === 'hidden') return; lib2.syncNow().then(reloadIfChanged).catch(() => {}); };
-  sync(); setInterval(sync, 60000); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
+  /* 2.1.32~: 프로젝트는 자동으로 주고받지 않는다 ([계정에 저장] · [계정에서 받기]). API 키만 켤 때 · 돌아올 때 맞춘다 */
+  const keys = () => { if (cloud.session() && document.visibilityState !== 'hidden') lib2.syncKeys().catch(() => {}); };
+  keys(); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keys(); });
 }
 boot().catch((e) => { console.error(e); const it = document.querySelector('#intro'); if (it) it.remove(); document.body.insertAdjacentHTML('beforeend', `<pre style="position:fixed;inset:auto 12px 12px 12px;background:#300;color:#fff;padding:12px;border-radius:8px;white-space:pre-wrap;z-index:99">시작하지 못했어요: ${esc(e.message || e)}</pre>`); });

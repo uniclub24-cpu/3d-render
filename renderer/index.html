@@ -13,7 +13,7 @@
 </head>
 <body>
 <!-- 인트로: 모듈을 읽는 동안 바로 보이도록 HTML 에 직접 -->
-<div id="intro" aria-label="BYR2"><span class="ver" id="introVer">v2.1.31</span><div class="logo" aria-hidden="true"></div><b class="word">BYR2</b><small class="sub">Build Your Restaurant</small><div class="credit">Created by Marcus Lee</div></div>
+<div id="intro" aria-label="BYR2"><span class="ver" id="introVer">v2.1.32</span><div class="logo" aria-hidden="true"></div><b class="word">BYR2</b><small class="sub">Build Your Restaurant</small><div class="credit">Created by Marcus Lee</div></div>
 <div id="app">
   <!-- 화면: 2D 도면 | 3D (분할 · 한쪽만) -->
   <main id="stage" class="psplit">
@@ -43,6 +43,8 @@
     <div class="title"><b id="projName">BYR2</b><small id="saveState" class="savest" aria-live="polite"></small></div>
     <select id="levelSel" aria-label="층" title="층 고르기" hidden></select>
     <div class="grow"></div>
+    <button class="ib" id="btnSave" aria-label="저장" title="저장 (Ctrl+S)"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/></svg></button>
+    <button class="ib wide" id="btnSaveC" aria-label="계정에 저장" title="계정에 저장 (Ctrl+Shift+S)"><svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 9a4.5 4.5 0 0 0 1 9z"/><path d="M12 15V10M9.5 12.5L12 10l2.5 2.5"/></svg></button>
     <button class="ib" id="btnUndo" aria-label="되돌리기" title="되돌리기"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
     <button class="ib" id="btnRedo" aria-label="다시 실행" title="다시 실행"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
     <div class="seg" role="group" aria-label="화면 나누기">
@@ -67,10 +69,12 @@
 
   <!-- 파일 메뉴 -->
   <div id="fileMenu" class="menu" role="menu" hidden>
-    <button role="menuitem" data-act="library">내 프로젝트 (자동 저장 · 동기화)</button>
+    <button role="menuitem" data-act="library">내 프로젝트</button>
     <button role="menuitem" data-act="new">새 프로젝트</button>
     <button role="menuitem" data-act="open">프로젝트 열기 (.byr.json)</button>
-    <button role="menuitem" data-act="save">프로젝트 저장</button>
+    <button role="menuitem" data-act="save">저장 (Ctrl+S)</button>
+    <button role="menuitem" data-act="saveCloud">계정에 저장 (Ctrl+Shift+S)</button>
+    <button role="menuitem" data-act="saveFile">파일로 내보내기 (.byr.json)</button>
     <hr>
     <button role="menuitem" data-act="legacy">기존 앱 작업물 가져오기 (JSON)</button>
     <button role="menuitem" data-act="account">기존 앱 계정에서 불러오기 (로그인)</button>

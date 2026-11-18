@@ -167,6 +167,7 @@ export class Engine {
     this.air.update(dt); this.sim.update(dt); if (this.onTick) this.onTick(dt); // 2D 만 볼 때도 시뮬레이션은 돈다
     if (!this.canvas.clientWidth) return; // 2D 만 볼 때는 3D 를 그리지 않는다
     if (this._fly) { const f = this._fly; f.t += dt * 1000; const k = Math.min(1, f.t / f.ms); f.step(k); if (k >= 1) { this._fly = null; f.done(true); } }
+    if (this.siteOn) { const d = this.camera.position.distanceTo(this.controls.target), n = Math.min(2, Math.max(0.05, d * 0.004)); if (Math.abs(this.persp.near - n) > n * 0.2) { this.persp.near = n; this.persp.updateProjectionMatrix(); } } /* 상권: 거리에 따라 near 조정 (바닥 겹침 줄무늬 방지) */
     if (this.orbitT && !this.walker.active) { const t = this.controls.target, p = this.camera.position, a = (-2 * Math.PI * dt) / this.orbitT, x = p.x - t.x, z = p.z - t.z; p.x = t.x + x * Math.cos(a) - z * Math.sin(a); p.z = t.z + x * Math.sin(a) + z * Math.cos(a); this.camera.lookAt(t); } /* 360° 한 바퀴 = orbitT 초 */
     if (this.walker.active) this.walker.update(dt); else { if (this.panKeys && this.panKeys.size) this._keyPan(dt); if (this.controls.update()) this._moveT = now; }
     const anim = this.recording || this.orbitT || this.air.on || (this.sim.on && this.sim.run) || this.walker.active || this._fly || this.controls.autoRotate || this.design.active || this.dragging;
@@ -368,7 +369,7 @@ export class Engine {
     this.envGroup = buildEnv(this.level, E, meta); applyStyleMaterials(this.envGroup, this.style); this.scene.add(this.envGroup);
     this.ground.visible = E.type === 'none' || E.type === 'basic'; this.controls.maxDistance = E.type === 'none' || E.type === 'basic' ? 70 : 260;
     const site = E.type === 'site' && !!E.site; this.siteOn = site; /* 상권(반경 500m): 멀리까지 보이게 */
-    this.persp.far = site ? 4000 : 160; this.persp.updateProjectionMatrix(); if (site) { this.controls.maxDistance = 1600; this.ground.visible = false; }
+    this.persp.far = site ? 4000 : 160; if (!site) this.persp.near = 0.1; this.persp.updateProjectionMatrix(); if (site) { this.controls.maxDistance = 1600; this.ground.visible = false; }
     this.ssaoPass.enabled = !site && this.opt.ssao && QUALITY[this.qual].ssao; this.invalidate(true);
   }
   /** 상권 건물 고르기 → 건물 번호 */

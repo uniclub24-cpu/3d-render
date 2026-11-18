@@ -150,11 +150,11 @@ const xLon = (x, z) => (x / 2 ** z) * 360 - 180, yLat = (y, z) => { const n = Ma
 const mapCache = new Map(); let redraw = () => {}; export const setSiteRedraw = (f) => (redraw = f);
 const blobImg = (u8, type) => new Promise((ok, bad) => { const url = URL.createObjectURL(new Blob([u8], { type })), im = new Image(); im.onload = () => { URL.revokeObjectURL(url); ok(im); }; im.onerror = () => { URL.revokeObjectURL(url); bad(new Error('tile')); }; im.src = url; });
 /** 반경을 덮는 타일을 이어 붙인 캔버스 + 범위(m, 중심 기준) · 같은 것은 다시 안 받음 */
-export function siteMap(site, kind) {
-  const V = vworld(); if (!kind || kind === 'none' || !V.key) return null; const mob = matchMedia('(pointer: coarse)').matches, maxT = mob ? 7 : 12;
-  const key = `${site.lon},${site.lat},${site.R},${kind},${mob}`; if (mapCache.has(key)) return mapCache.get(key);
-  const P = proj(site.lon, site.lat), D = site.R * 1.08; let z = 18; for (; z > 12; z--) { const tm = (40075016 * Math.cos((site.lat * Math.PI) / 180)) / 2 ** z; if ((2 * D) / tm + 1 <= maxT) break; }
-  const lon0 = site.lon - D / P.kx, lon1 = site.lon + D / P.kx, lat0 = site.lat + D / P.ky, lat1 = site.lat - D / P.ky, x0 = Math.floor(tX(lon0, z)), x1 = Math.floor(tX(lon1, z)), y0 = Math.floor(tY(lat0, z)), y1 = Math.floor(tY(lat1, z));
+export function siteMap(site, kind, near) {
+  const V = vworld(); if (!kind || kind === 'none' || !V.key) return null; const mob = matchMedia('(pointer: coarse)').matches, maxT = near ? (mob ? 6 : 9) : mob ? 7 : 12;
+  const key = `${site.lon},${site.lat},${site.R},${kind},${mob},${near ? near.join(',') : ''}`; if (mapCache.has(key)) return mapCache.get(key);
+  const P = proj(site.lon, site.lat), D = near ? near[2] : site.R * 1.08, cxl = near ? site.lon + near[0] / P.kx : site.lon, cyl = near ? site.lat - near[1] / P.ky : site.lat; let z = near ? 19 : 18; for (; z > 12; z--) { const tm = (40075016 * Math.cos((site.lat * Math.PI) / 180)) / 2 ** z; if ((2 * D) / tm + 1 <= maxT) break; }
+  const lon0 = cxl - D / P.kx, lon1 = cxl + D / P.kx, lat0 = cyl + D / P.ky, lat1 = cyl - D / P.ky, x0 = Math.floor(tX(lon0, z)), x1 = Math.floor(tX(lon1, z)), y0 = Math.floor(tY(lat0, z)), y1 = Math.floor(tY(lat1, z));
   const cv = document.createElement('canvas'); cv.width = (x1 - x0 + 1) * 256; cv.height = (y1 - y0 + 1) * 256; const g = cv.getContext('2d'); g.fillStyle = '#e9ebe6'; g.fillRect(0, 0, cv.width, cv.height);
   const nw = P.fwd(xLon(x0, z), yLat(y0, z)), se = P.fwd(xLon(x1 + 1, z), yLat(y1 + 1, z)), out = { cv, b: [nw[0], nw[1], se[0], se[1]], ver: 0, z, kind, err: 0 };
   const L = kind === 'base' ? [['Base', 'png']] : kind === 'gray' ? [['white', 'png']] : kind === 'sat' ? [['Satellite', 'jpeg']] : [['Satellite', 'jpeg'], ['Hybrid', 'png']];
@@ -175,19 +175,21 @@ export function buildSiteGroup(S, o = {}) {
   // 땅 (반경 원)
   const disc = new THREE.Mesh(new THREE.CircleGeometry(S.R * 1.04, 96), M('#eef0ee')); disc.rotation.x = -Math.PI / 2; disc.position.set(-ax, -0.06, -ay); disc.receiveShadow = true; g.add(disc);
   // 바닥 지도 (타일이 들어오면 다시 그림)
-  const MP = siteMap(S, o.map); if (MP) { const tex = new THREE.CanvasTexture(MP.cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; const [x0, y0, x1, y1] = MP.b, pl = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })); pl.rotation.x = -Math.PI / 2; pl.position.set((x0 + x1) / 2 - ax, -0.05, (y0 + y1) / 2 - ay); pl.userData.siteMap = MP; pl.onBeforeRender = () => { if (tex.userData.ver !== MP.ver) { tex.userData.ver = MP.ver; tex.needsUpdate = true; } }; g.add(pl); disc.visible = false; }
+  const plane = (MP, y, po) => { const tex = new THREE.CanvasTexture(MP.cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 16; tex.generateMipmaps = true; const [x0, y0, x1, y1] = MP.b, pl = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, polygonOffset: true, polygonOffsetFactor: po, polygonOffsetUnits: po })); pl.rotation.x = -Math.PI / 2; pl.position.set((x0 + x1) / 2 - ax, y, (y0 + y1) / 2 - ay); pl.userData.siteMap = MP; pl.onBeforeRender = () => { if (tex.userData.ver !== MP.ver) { tex.userData.ver = MP.ver; tex.needsUpdate = true; } }; g.add(pl); return pl; };
+  const MP = siteMap(S, o.map); if (MP) { plane(MP, -0.06, 8); disc.visible = false; if (o.skip != null || o.near) { const NP = siteMap(S, o.map, [ax, ay, o.nearR || 160]); if (NP) plane(NP, -0.05, 6); } } /* 상가 둘레는 더 촘촘한 타일 */
   const onMap = !!MP;
-  if (o.zones !== false && o.color === 'zone') for (const z of S.zones || []) { const m = flat(z.p, -0.04, zoneColor(z.name), { transparent: true, opacity: 0.75 }); if (m) g.add(m); }
+  if (o.zones) S.zones.forEach((z, k) => { const m = flat(z.p, -0.04, zoneColor(z.name), { transparent: true, opacity: onMap ? 0.45 : 0.75, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 4 - Math.min(3, k * 0.01), polygonOffsetUnits: 4 }); if (m) { m.renderOrder = 1; g.add(m); } });
   if (!onMap) for (const w of S.water || []) { const m = flat(w.p, -0.035, '#9cc8e8'); if (m) g.add(m); }
   if (!onMap) for (const gr of S.green || []) { const m = flat(gr.p, -0.03, '#cfe5c3'); if (m) g.add(m); }
   // 도로: 마디마다 띠
   const road = [], walk = [];
-  if (!onMap) for (const r of S.roads || []) { const P = r.p, w = r.w, foot = w < 3; for (let i = 1; i < P.length; i++) { const [x0, y0] = P[i - 1], [x1, y1] = P[i], L = Math.hypot(x1 - x0, y1 - y0); if (L < 0.2) continue; const bx = new THREE.BoxGeometry(L + (foot ? 0 : w * 0.5), 0.02, w); bx.rotateY(-Math.atan2(y1 - y0, x1 - x0)); bx.translate((x0 + x1) / 2 - ax, foot ? -0.012 : -0.02, (y0 + y1) / 2 - ay); (foot ? walk : road).push(bx.toNonIndexed()); } }
-  if (road.length) { const m = new THREE.Mesh(mergeGeometries(road), M('#5b5f66')); m.receiveShadow = true; g.add(m); } if (walk.length) g.add(new THREE.Mesh(mergeGeometries(walk), M('#d7d3cb')));
+  if (o.roads !== false) for (const r of S.roads || []) { const P = r.p, w = r.w, foot = w < 3; for (let i = 1; i < P.length; i++) { const [x0, y0] = P[i - 1], [x1, y1] = P[i], L = Math.hypot(x1 - x0, y1 - y0); if (L < 0.2) continue; const bx = new THREE.BoxGeometry(L + (foot ? 0 : w * 0.5), 0.02, w); bx.rotateY(-Math.atan2(y1 - y0, x1 - x0)); bx.translate((x0 + x1) / 2 - ax, foot ? -0.012 : -0.02, (y0 + y1) / 2 - ay); (foot ? walk : road).push(bx.toNonIndexed()); } }
+  const rm = (col, po) => M(col, onMap ? { transparent: true, opacity: 0.82, depthWrite: false, polygonOffset: true, polygonOffsetFactor: po, polygonOffsetUnits: po } : { polygonOffset: true, polygonOffsetFactor: po, polygonOffsetUnits: po });
+  if (road.length) { const m = new THREE.Mesh(mergeGeometries(road), rm('#4a4e55', 2)); m.receiveShadow = !onMap; m.renderOrder = 2; g.add(m); } if (walk.length) { const m = new THREE.Mesh(mergeGeometries(walk), rm('#d7d3cb', 3)); m.renderOrder = 2; g.add(m); }
   // 건물: 색마다 합치고, 삼각형 번호 → 건물 번호 표
   (S.buildings || []).forEach((b, i) => {
     if (o.skip != null && o.skip === i) return; const p = area(b.p) > 0 ? b.p : b.p.slice().reverse(); if (p.length < 3) return;
-    const fl = siteFloors(b), h = Math.max(2.8, (b.h || fl * H) * hk), col = i === S.hit ? '#ff2d2d' : o.color === 'floors' ? floorCol(fl) : o.color === 'zone' ? '#f4f5f7' : UCOL[b.use] || UCOL['기타'];
+    const fl = siteFloors(b), h = Math.max(2.8, (b.h || fl * H) * hk), col = i === S.hit ? '#ff2d2d' : o.color === 'floors' ? floorCol(fl) : o.color === 'white' || o.color === 'zone' ? '#f1f2f4' : UCOL[b.use] || UCOL['기타'];
     let geo; try { geo = new THREE.ExtrudeGeometry(new THREE.Shape(p.map(([x, z]) => new THREE.Vector2(x - ax, -(z - ay)))), { depth: h, bevelEnabled: false }); } catch { return; }
     geo.rotateX(-Math.PI / 2); geo = geo.toNonIndexed(); if (!byCol.has(col)) byCol.set(col, []); byCol.get(col).push([geo, i]);
   });
@@ -195,7 +197,7 @@ export function buildSiteGroup(S, o = {}) {
   // 나무
   if (o.trees !== false && (S.trees || []).length) { const tr = [], cr = []; for (const [x, y] of S.trees.slice(0, 1500)) { const t = new THREE.CylinderGeometry(0.12, 0.16, 2.4, 5); t.translate(x - ax, 1.2, y - ay); tr.push(t.toNonIndexed()); const c = new THREE.IcosahedronGeometry(1.5, 0); c.scale(1, 1.15, 1); c.translate(x - ax, 3.3, y - ay); cr.push(c.toNonIndexed()); } [tr, cr].forEach((L, k) => { L.forEach((q) => { q.deleteAttribute('uv'); }); const m = new THREE.Mesh(mergeGeometries(L), M(k ? '#5f9a52' : '#6b5040')); m.castShadow = true; g.add(m); }); }
   // 찾은 주소 핀
-  const hb = S.buildings && S.buildings[S.hit]; if (hb && o.skip !== S.hit) { const [cx, cy] = cen(hb.p), h = Math.max(2.8, (hb.h || siteFloors(hb) * H) * hk), pin = new THREE.Group(), red = M('#ff2d2d', { emissive: '#ff2d2d', emissiveIntensity: 0.35 });
+  const hb = S.buildings && S.buildings[S.hit]; if (hb && o.skip == null) { /* 도면 작업 중에는 핀을 안 세움 */ const [cx, cy] = cen(hb.p), h = Math.max(2.8, (hb.h || siteFloors(hb) * H) * hk), pin = new THREE.Group(), red = M('#ff2d2d', { emissive: '#ff2d2d', emissiveIntensity: 0.35 });
     const cone = new THREE.Mesh(new THREE.ConeGeometry(2.2, 6, 20), red); cone.rotation.x = Math.PI; cone.position.y = 3; const ball = new THREE.Mesh(new THREE.SphereGeometry(3.4, 20, 14), red); ball.position.y = 8; const dot = new THREE.Mesh(new THREE.SphereGeometry(1.3, 14, 10), M('#ffffff')); dot.position.set(0, 8, 2.9);
     pin.add(cone, ball, dot); pin.scale.setScalar(Math.max(1, S.R / 160)); pin.position.set(cx - ax, h + 1, cy - ay); pin.userData.pin = 1; g.add(pin); }
   g.userData.siteRoot = true; return g;
