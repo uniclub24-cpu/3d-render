@@ -79,7 +79,7 @@ app.whenReady().then(() => {
     try { const r = await net.fetch(u, { headers: { 'User-Agent': 'BYR2/' + app.getVersion() } }); return { ok: r.ok, status: r.status, text: await r.text() }; } catch (err) { return { ok: false, status: 0, text: String(err && err.message || err) }; }
   });
   ipcMain.handle('net:bin', async (e, url) => {
-    const u = String(url || ''); if (!/^https:\/\/(api\.vworld\.kr|xdworld\.vworld\.kr)\//.test(u)) return { ok: false, status: 0, text: 'blocked' };
+    const u = String(url || ''); if (!/^https:\/\/(api\.vworld\.kr|xdworld\.vworld\.kr|s3\.amazonaws\.com\/elevation-tiles-prod|elevation-tiles-prod\.s3\.amazonaws\.com)\//.test(u)) return { ok: false, status: 0, text: 'blocked' };
     try { const r = await net.fetch(u, { headers: { 'User-Agent': 'BYR2/' + app.getVersion() } }); return r.ok ? { ok: true, status: r.status, data: new Uint8Array(await r.arrayBuffer()) } : { ok: false, status: r.status, text: (await r.text()).slice(0, 200) }; } catch (err) { return { ok: false, status: 0, text: String(err && err.message || err) }; }
   });
   ipcMain.handle('app:info', () => ({ version: app.getVersion(), update: UPD }));

@@ -20,7 +20,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.33';
+export const APP_VERSION = '2.1.34';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1893,10 +1893,13 @@ function siteBird() { const E = envOf(S.model), R = (E.site && E.site.R) || 500,
 /* ---------- 상권 2D: 위성 · 지도 바닥 + 건물 외곽(용도 색) · 찾은 주소 · 고르기 ---------- */
 const siteE = () => { const E = envOf(S.model); return E.type === 'site' && E.site ? E : null; };
 function siteUnder(g, px1) {
-  const E = siteE(); if (!E || !site2d(E)) return; const St = E.site, ax = E.siteAx || 0, ay = E.siteAy || 0, K = 1000, M = SITE.siteMap(St, E.siteMap || 'none');
+  const E = siteE(); if (!E || !site2d(E)) return; const St = E.site, ax = E.siteAx || 0, ay = E.siteAy || 0, K = 1000, M = SITE.siteMap(St, E.siteMap2d || E.siteMap || 'none');
   g.save(); g.rotate(((E.siteRot || 0) * Math.PI) / 180); /* 작업 방향에 맞춰 상권도 같이 돈다 */
   if (M) { const [x0, y0, x1, y1] = M.b; g.drawImage(M.cv, (x0 - ax) * K, (y0 - ay) * K, (x1 - x0) * K, (y1 - y0) * K); }
   g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
+  if (!M) for (const [arr, col] of [[St.green, E.siteModel ? '#eef0ea' : '#d6ead0'], [St.water, E.siteModel ? '#dcd9f0' : '#b9d8ee']]) for (const w of arr || []) { g.beginPath(); w.p.forEach(([x, y], k) => (k ? g.lineTo((x - ax) * K, (y - ay) * K) : g.moveTo((x - ax) * K, (y - ay) * K))); g.closePath(); g.fillStyle = col; g.fill(); }
+  if (St.dem && E.siteTerrain !== false && (E.siteContour || 'auto') !== 'off') { const st = SITE.contourStep(St.dem, E.siteContour), key = st + ':' + St.dem.n + ':' + St.dem.base; let ct = CTC.get(St); if (!ct || ct.key !== key) CTC.set(St, (ct = { key, L: SITE.contours(St.dem, st) }));
+    for (const idx of [false, true]) { g.beginPath(); for (const [x1, y1, x2, y2, lv] of ct.L) { if ((Math.round(lv / st) % 5 === 0) !== idx) continue; g.moveTo((x1 - ax) * K, (y1 - ay) * K); g.lineTo((x2 - ax) * K, (y2 - ay) * K); } g.strokeStyle = M ? (idx ? 'rgba(255,255,255,.85)' : 'rgba(255,255,255,.55)') : idx ? '#6f7277' : '#a3a6ab'; g.lineWidth = (idx ? 1.4 : 0.7) * px1; g.stroke(); } }
   if (!M) { g.strokeStyle = '#c4c6cb'; for (const r of St.roads || []) { g.lineWidth = r.w * K; g.beginPath(); r.p.forEach(([x, y], k) => (k ? g.lineTo((x - ax) * K, (y - ay) * K) : g.moveTo((x - ax) * K, (y - ay) * K))); g.stroke(); } }
   St.buildings.forEach((b, i) => { if (i === E.siteStore) return; g.beginPath(); b.p.forEach(([x, y], k) => (k ? g.lineTo((x - ax) * K, (y - ay) * K) : g.moveTo((x - ax) * K, (y - ay) * K))); g.closePath();
     const hit = i === St.hit, sel = i === S.siteSel, col = hit ? '#ff2d2d' : (SITE.USES.find(([n]) => n === b.use) || [, '#c7cbd1'])[1];
@@ -1905,6 +1908,7 @@ function siteUnder(g, px1) {
     g.fillStyle = '#ff2d2d'; g.strokeStyle = '#fff'; g.lineWidth = 2 * px1; g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy - r * 2.2, r, Math.PI * 0.8, Math.PI * 0.2); g.closePath(); g.fill(); g.stroke(); g.fillStyle = '#fff'; g.beginPath(); g.arc(cx, cy - r * 2.2, r * 0.4, 0, 7); g.fill(); }
   g.restore(); g.restore();
 }
+const CTC = new WeakMap(); /* 등고선 계산 캐시 (저장 안 함) */
 const site2d = (E) => (E.site2d ?? E.siteStore == null); /* 도면 작업 중 2D 는 기본으로 배경 없음 */
 function sitePick2d(p) { const E = siteE(); if (!E || !site2d(E)) return null; const a = (-(E.siteRot || 0) * Math.PI) / 180, px = p.x * Math.cos(a) - p.y * Math.sin(a), py = p.x * Math.sin(a) + p.y * Math.cos(a), ax = E.siteAx || 0, ay = E.siteAy || 0, x = px / 1000 + ax, y = py / 1000 + ay; const i = E.site.buildings.findIndex((b, k) => k !== E.siteStore && SITE.inPoly(x, y, b.p)); return i >= 0 ? { kind: 'site', id: i } : null; }
 function siteBounds2d() { const E = siteE(); if (!E) return null; const R = E.site.R * 1000, ax = (E.siteAx || 0) * 1000, ay = (E.siteAy || 0) * 1000; return [-R - ax, -R - ay, R - ax, R - ay]; }
@@ -1913,7 +1917,10 @@ function siteFit2d() { setTimeout(() => plan.fit(), 60); }
 /** 상권 배경 겹: 바닥(위성 · 지도 · 없음) · 3D 도로 · 건물 색 · 용도지역 · 나무 · 높이 — 상권 패널과 배경 탭에서 같이 씀 */
 function siteLayersHtml(E) {
   const St = E.site, vk = !!SITE.vworld().key, MAPS2 = [['sat', '위성'], ['base', '일반지도'], ['gray', '회색 지도'], ['hyb', '위성 + 지명'], ['none', '없음 (깨끗한 바닥)']];
-  return `<div class="fld">바닥 <small>브이월드</small><div class="seg2">${MAPS2.map(([k, n]) => `<button data-sm="${k}" aria-pressed="${(E.siteMap || 'none') === k}" ${k !== 'none' && !vk ? 'disabled title="브이월드 키가 있어야 해요"' : ''}>${n}</button>`).join('')}</div></div>
+  const dm = St.dem;
+  return `<div class="fld">보기 방식<div class="seg2"><button data-sp="model" aria-pressed="${!!E.siteModel}">건축 모형</button><button data-sp="sat" aria-pressed="${!E.siteModel && E.siteMap === 'sat'}" ${vk ? '' : 'disabled'}>위성 사실</button><button data-sp="cmp" ${vk ? '' : 'disabled'}>대조 보기 (2D 위성 · 3D 모형)</button></div></div>
+    <div class="fld">지형 <small>${dm ? `${esc(dm.src)} · 높이 차 ${Math.round(dm.max - dm.min)}m` : '아직 없음'}</small>${dm ? `<label class="tog">지형 켜기<input type="checkbox" id="siTer" ${E.siteTerrain !== false ? 'checked' : ''}></label><label class="fld">지형 과장 <b>${(E.terrK ?? 1).toFixed(1)}×</b><input type="range" id="siTK" min="1" max="4" step="0.5" value="${E.terrK ?? 1}"></label><div class="seg2">${[['off', '등고선 끔'], ['auto', `자동 (${SITE.contourStep(dm, 'auto')}m)`], ['1', '1m'], ['2', '2m'], ['5', '5m'], ['10', '10m']].map(([k, n]) => `<button data-ct="${k}" aria-pressed="${(E.siteContour || 'auto') === k}">${n}</button>`).join('')}</div>` : '<div class="btns"><button class="btn" id="siDem">지형 · 등고선 받기 (키 없음)</button></div>'}</div>
+    <div class="fld">바닥 <small>브이월드</small><div class="seg2">${MAPS2.map(([k, n]) => `<button data-sm="${k}" aria-pressed="${(E.siteMap || 'none') === k}" ${k !== 'none' && !vk ? 'disabled title="브이월드 키가 있어야 해요"' : ''}>${n}</button>`).join('')}</div></div>
     <div class="fld">건물 색<div class="seg2">${[['white', '흰 매스'], ['use', '용도'], ['floors', '층수']].map(([k, n]) => `<button data-sc="${k}" aria-pressed="${(E.siteColor === 'zone' ? 'white' : E.siteColor || 'use') === k}">${n}</button>`).join('')}</div></div>
     <label class="tog">3D 도로 (실제 도로선으로 그림)<input type="checkbox" id="siR" ${E.siteRoads !== false ? 'checked' : ''}></label>
     <label class="tog">용도지역 색 깔기<input type="checkbox" id="siZ" ${E.siteZones || E.siteColor === 'zone' ? 'checked' : ''} ${St.zones.length ? '' : 'disabled'}></label>
@@ -1921,6 +1928,15 @@ function siteLayersHtml(E) {
     <label class="fld">높이 과장 <b>${(E.hk ?? 1).toFixed(1)}×</b><input type="range" id="siH" min="0.5" max="3" step="0.1" value="${E.hk ?? 1}"></label>`;
 }
 function bindSiteLayers(body, E, re) {
+  $$('[data-sp]', body).forEach((x) => (x.onclick = () => { const k = x.dataset.sp;
+    if (k === 'model') { E.siteModel = true; E.siteMap = 'none'; E.siteColor = 'white'; E.siteZones = false; delete E.siteMap2d; }
+    if (k === 'sat') { E.siteModel = false; E.siteMap = 'sat'; delete E.siteMap2d; }
+    if (k === 'cmp') { E.siteModel = true; E.siteMap = 'none'; E.siteColor = 'white'; E.siteZones = false; E.siteMap2d = 'sat'; E.site2d = true; setPane('split'); toast('왼쪽 2D = 브이월드 위성 · 오른쪽 3D = 건축 모형 · 건물 · 도로 · 지형이 맞는지 대조해 보세요', 4000); }
+    re(); plan.redraw(); }));
+  const dB = $('#siDem', body); if (dB) dB.onclick = async () => { dB.disabled = true; try { await SITE.loadDem(E.site, (m) => (dB.textContent = m)); E.siteTerrain = true; toast('지형 · 등고선을 받았어요'); } catch (e) { toast('지형 받기 실패 · ' + siteErr(e), 4000); } re(); plan.redraw(); };
+  const tr = $('#siTer', body); if (tr) tr.onchange = (e) => { E.siteTerrain = e.target.checked; re(); plan.redraw(); };
+  const tk = $('#siTK', body); if (tk) tk.onchange = (e) => { E.terrK = +e.target.value; re(); };
+  $$('[data-ct]', body).forEach((x) => (x.onclick = () => { E.siteContour = x.dataset.ct; re(); plan.redraw(); }));
   $$('[data-sm]', body).forEach((x) => (x.onclick = () => { E.siteMap = x.dataset.sm; re(); plan.redraw(); }));
   $$('[data-sc]', body).forEach((x) => (x.onclick = () => { if (E.siteColor === 'zone') E.siteZones = true; E.siteColor = x.dataset.sc; re(); }));
   $('#siR', body).onchange = (e) => { E.siteRoads = e.target.checked; re(); };
