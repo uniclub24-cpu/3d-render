@@ -66,6 +66,7 @@ export function material(tex, color, alpha) {
   const m = new THREE.MeshStandardMaterial({ color: new THREE.Color(color || '#b8bcc2'), ...p });
   if (key === 'steel') { m.roughnessMap = brushedRoughness(); m.roughnessMap.repeat.set(1, 6); }
   if (key === 'wood' || key === 'plywood') { m.map = woodGrain(); }
+  m.userData.kind = key; /* 블렌더 내보내기용 재질 종류 */
   if (m.transparent) m.depthWrite = false;
   if (p.envMapIntensity) { m.userData.reflect = true; if (ENV) m.envMap = ENV; }
   cache.set(k, m); return m;
@@ -77,5 +78,6 @@ export function floorMaterial(finish, color) {
   if (tex === 'tile') { m.map = tileTexture(color); m.map.repeat.set(1 / 0.6, 1 / 0.6); } // 600 각 타일
   else if (tex === 'wood') { m.color.set(color); m.map = woodGrain().clone(); m.map.needsUpdate = true; m.map.repeat.set(0.6, 4); }
   else m.color.set(color);
+  m.userData.kind = tex; m.userData.floor = 1;
   cache.set(k, m); return m;
 }

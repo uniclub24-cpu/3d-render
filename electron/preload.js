@@ -9,5 +9,8 @@ contextBridge.exposeInMainWorld('byr', {
   openUrl: (u) => ipcRenderer.invoke('open:url', u),
   netGet: (u) => ipcRenderer.invoke('net:get', u), // 공공데이터 · 지도 API
   netBin: (u) => ipcRenderer.invoke('net:bin', u), // 지도 타일
+  blenderFind: (p) => ipcRenderer.invoke('blender:find', p), blenderPick: () => ipcRenderer.invoke('blender:pick'), blenderRun: (job) => ipcRenderer.invoke('blender:run', job),
+  blenderCancel: () => ipcRenderer.invoke('blender:cancel'), blenderOpen: (dir, what) => ipcRenderer.invoke('blender:open', dir, what),
+  onBlenderLog: (fn) => { const h = (e, t) => fn(t); ipcRenderer.on('blender:log', h); return () => ipcRenderer.removeListener('blender:log', h); },
   onUpdate: (fn) => ipcRenderer.on('update', (e, m) => fn(m)),
 });

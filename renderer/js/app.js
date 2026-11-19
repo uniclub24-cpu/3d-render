@@ -9,6 +9,7 @@ import * as cloud from './cloud.js';
 import { airKind } from './air.js';
 import * as SITE from './site.js';
 import { CanvasRec, recType } from './rec.js';
+import * as BL from './blender.js';
 import * as lib2 from './store.js';
 import * as SL from './slope.js';
 import { ENVTYPES, ENVCOL, ENVLV, envOf, envFront } from './env.js';
@@ -20,7 +21,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.34';
+export const APP_VERSION = '2.1.35';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -594,6 +595,58 @@ function renderXray(body) {
   $$('[data-mh]', body).forEach((b) => (b.onclick = () => { const h = b.dataset.mh === '1'; setXray(null); engine.setMepHide(h); store.set('byr.mepHide', h); renderProps(); toast(h ? '설치물(배관 · 전선 · 콘센트 · 수전 위치 등)을 숨겼어요 · 발표에서도 안 보여요' : '설치물을 보여요'); }));
   $$('[data-lk]', body).forEach((b) => (b.onclick = () => { plan.lineKind = b.dataset.lk; setPlanTool('line'); const c = lineCat(LINEKINDS[b.dataset.lk]); if (engine.xray && c && engine.xray !== c) setXray(c); renderProps(); toast(`${LINEKINDS[b.dataset.lk].name} · 2D 에서 점을 차례로 누르세요`); }));
   $$('[data-k]', body).forEach((i) => (i.onchange = () => { LOPT[i.dataset.k] = Math.max(0, Math.round(+i.value || 0)); }));
+}
+
+/* ---------- 블렌더 실사 렌더 (발표 탭): 지금 시점 그대로 블렌더 Cycles 로 정지샷 ---------- */
+const BLS = { q: store.get('byr.blQ', 'normal'), sz: store.get('byr.blSz', 'fhd'), ai: store.get('byr.blAi', true), exe: store.get('byr.blExe', ''), found: null, busy: false, log: '' };
+const isPC = () => !!(window.byr && window.byr.blenderRun);
+async function blPop() {
+  let p = $('#blPop'); if (p) { if (!BLS.busy) p.remove(); return; } p = document.createElement('div'); p.id = 'blPop'; p.className = 'recpop blpop'; document.body.appendChild(p);
+  const draw = () => { const f = BLS.found, key = !!(cloud.aiKey && cloud.aiKey());
+    p.innerHTML = `<b>🎬 블렌더 실사 렌더</b><small>지금 보이는 시점 그대로, 블렌더(Cycles)가 재질 · 조명을 다시 짜서 정지샷을 만들어요</small>
+      ${isPC() ? `<div class="blst">${f === null ? '블렌더 찾는 중…' : f ? `✓ 블렌더 ${esc(f.version || '')} <small>${esc(f.path)}</small>` : '⚠ 이 PC 에서 블렌더를 찾지 못했어요'}</div>
+        <div class="btns">${f ? '' : '<button class="btn" data-bl="get">블렌더 받기 (무료)</button>'}<button class="btn" data-bl="pick">${f ? '다른 블렌더' : '직접 찾기 (blender.exe)'}</button></div>` : '<p class="hint">블렌더 렌더는 PC 앱에서 돼요. 여기서는 블렌더 작업 묶음(.zip)을 내보낼 수 있어요.</p>'}
+      <div class="fld">품질<div class="seg2">${Object.entries(BL.QUALITY).map(([k, q]) => `<button data-blq="${k}" aria-pressed="${BLS.q === k}">${q.name} <small>${q.samples}</small></button>`).join('')}</div></div>
+      <div class="fld">크기<div class="seg2">${Object.entries(BL.SIZES).map(([k, q]) => `<button data-bls="${k}" aria-pressed="${BLS.sz === k}">${q.name}</button>`).join('')}</div></div>
+      <label class="tog">AI 가 재질을 하나씩 고르기 (목재 · 스테인리스 · 타일 · 대리석 …)<input type="checkbox" id="blAi" ${BLS.ai && key ? 'checked' : ''} ${key ? '' : 'disabled'}></label>${key ? '' : '<p class="hint">AI 키가 있으면 기물 이름 · 색을 보고 재질을 골라요. 없으면 BYR 기본 재질로 렌더해요.</p>'}
+      <div class="ilive" id="blLive" hidden></div><pre class="ilog" id="blLog" ${BLS.log ? '' : 'hidden'}>${esc(BLS.log)}</pre>
+      <div class="btns"><button class="btn" data-bl="x">${BLS.busy ? '숨기기' : '닫기'}</button><button class="btn" data-bl="zip" ${BLS.busy ? 'disabled' : ''}>작업 묶음 (.zip)</button>${isPC() ? `<button class="btn ${BLS.busy ? 'danger' : 'pri'}" data-bl="${BLS.busy ? 'stop' : 'go'}" ${!BLS.busy && !f ? 'disabled' : ''}>${BLS.busy ? '■ 렌더 취소' : '렌더 시작'}</button>` : ''}</div>`;
+    $$('[data-blq]', p).forEach((b) => (b.onclick = () => { BLS.q = b.dataset.blq; store.set('byr.blQ', BLS.q); draw(); }));
+    $$('[data-bls]', p).forEach((b) => (b.onclick = () => { BLS.sz = b.dataset.bls; store.set('byr.blSz', BLS.sz); draw(); }));
+    const ai = $('#blAi', p); if (ai) ai.onchange = () => { BLS.ai = ai.checked; store.set('byr.blAi', BLS.ai); };
+    $$('[data-bl]', p).forEach((b) => (b.onclick = async () => { const a = b.dataset.bl;
+      if (a === 'x') return p.remove(); if (a === 'stop') return window.byr.blenderCancel();
+      if (a === 'get') return window.byr.openUrl ? window.byr.openUrl('https://www.blender.org/download/') : window.open('https://www.blender.org/download/', '_blank');
+      if (a === 'pick') { const r = await window.byr.blenderPick(); if (r) { BLS.found = r.version ? r : BLS.found; if (r.version) { BLS.exe = r.path; store.set('byr.blExe', r.path); } else toast('블렌더 실행 파일이 아니에요'); draw(); } return; }
+      if (a === 'zip') return blZip(); if (a === 'go') return blRun(draw); })); };
+  draw(); if (isPC() && BLS.found === null) { BLS.found = (await window.byr.blenderFind(BLS.exe || null).catch(() => null)) || false; if (BLS.found) { BLS.exe = BLS.found.path; store.set('byr.blExe', BLS.exe); } if ($('#blPop')) draw(); }
+}
+const blItemName = (id) => { const it = level().items.find((q) => q.id === id); return it ? it.name || (S.lib[it.type] && S.lib[it.type].name) || it.type : id; };
+const blAi = async (list) => { const r = await cloud.ask(BL.aiPrompt(list), { name: 'materials.txt', mime: 'text/plain', bytes: new TextEncoder().encode('재질 목록은 위 프롬프트에 있어요') }, 6000); return r && r.materials; };
+async function blRun(draw) {
+  if (BLS.busy) return; BLS.busy = true; BLS.log = ''; draw(); const t0 = Date.now(); let cur = '준비 중…', pct = 0;
+  const log = (t) => { BLS.log += (BLS.log ? '\n' : '') + t; const el = $('#blLog'); if (el) { el.hidden = false; el.textContent = BLS.log; el.scrollTop = 1e9; } };
+  const iv = setInterval(() => { const el = $('#blLive'); if (el) { el.hidden = false; el.innerHTML = `<span class="spin"></span><span>${esc(cur)}</span><b>${pct ? pct + '% · ' : ''}${Math.round((Date.now() - t0) / 1000)}초</b>`; } }, 500);
+  const off = window.byr.onBlenderLog((l) => { const m = l.match(/Sample (\d+)\/(\d+)/); if (m) { pct = Math.round((+m[1] / +m[2]) * 100); cur = `렌더 중 (샘플 ${m[1]}/${m[2]})`; return; } const s = l.match(/BYR:\s*(step|device|warn)\s*(.*)/); if (s) { cur = s[1] === 'device' ? `장치: ${s[2] === 'CPU' ? 'CPU (그래픽카드 못 씀 · 느림)' : s[2]}` : s[2]; log((s[1] === 'warn' ? '⚠ ' : '· ') + cur); } else if (/Error|Traceback|rror:/.test(l)) log('⛔ ' + l); });
+  try {
+    const job = await BL.blenderJob(engine, { quality: BLS.q, size: BLS.sz, itemName: blItemName, aiRefine: BLS.ai && cloud.aiKey && cloud.aiKey() ? blAi : null, onStep: (m) => { cur = m; log('· ' + m); } });
+    log(`· 재질 ${job.mats}개 · 조명 ${job.lights}개 · ${job.plan.render.w}×${job.plan.render.h} · 샘플 ${job.plan.render.samples}`); cur = '블렌더 실행 중…';
+    const r = await window.byr.blenderRun({ exe: BLS.exe || BLS.found.path, glb: job.glb, plan: job.plan });
+    if (!r.ok) { log('⛔ ' + r.error); toast('블렌더 렌더 실패 · ' + r.error, 5000); } else { log(`✓ 완료 · ${Math.round((Date.now() - t0) / 1000)}초`); blShow(r); }
+  } catch (e) { console.error(e); log('⛔ ' + (e.message || e)); } finally { clearInterval(iv); off(); BLS.busy = false; const el = $('#blLive'); if (el) el.hidden = true; if ($('#blPop')) draw(); }
+}
+function blShow(r) {
+  let m = $('#blRes'); if (m) m.remove(); m = document.createElement('div'); m.id = 'blRes'; m.className = 'blres'; const url = URL.createObjectURL(new Blob([r.png], { type: 'image/png' }));
+  m.innerHTML = `<div class="blres-in"><img src="${url}" alt="블렌더 렌더"><div class="btns"><button class="btn pri" data-br="save">PNG 저장</button><button class="btn" data-br="blend">블렌더에서 열기 (.blend)</button><button class="btn" data-br="dir">폴더 열기</button><button class="btn" data-br="x">닫기</button></div></div>`;
+  document.body.appendChild(m);
+  $$('[data-br]', m).forEach((b) => (b.onclick = async () => { const a = b.dataset.br; if (a === 'x') { URL.revokeObjectURL(url); return m.remove(); } if (a === 'blend' || a === 'dir') return window.byr.blenderOpen(r.dir, a === 'blend' ? 'blend' : 'dir');
+    const p = await saveFile({ title: '블렌더 렌더', defaultName: `${safeName()}_blender.png`, extensions: ['png'], data: r.png }); if (p) toast('저장했어요'); }));
+}
+async function blZip() {
+  try { toast('블렌더 작업 묶음을 만드는 중…'); const job = await BL.blenderJob(engine, { quality: BLS.q, size: BLS.sz, itemName: blItemName, aiRefine: BLS.ai && cloud.aiKey && cloud.aiKey() ? blAi : null });
+    const py = new Uint8Array(await (await fetch('blender/byr_render.py')).arrayBuffer()), readme = `BYR2 블렌더 실사 렌더 묶음\r\n\r\n1. 이 폴더를 풀어 둡니다.\r\n2. 명령창에서: blender -b --factory-startup -P byr_render.py -- "이 폴더 경로"\r\n3. 같은 폴더에 render.png 와 scene.blend 가 생겨요.\r\n`;
+    const z = SH.zip([{ name: 'scene.glb', data: new Uint8Array(job.glb) }, { name: 'plan.json', data: new TextEncoder().encode(JSON.stringify(job.plan, null, 1)) }, { name: 'byr_render.py', data: py }, { name: '읽어보기.txt', data: new TextEncoder().encode(readme) }]);
+    const p = await saveFile({ title: '블렌더 작업 묶음', defaultName: `${safeName()}_blender.zip`, extensions: ['zip'], data: z }); if (p) toast('내보냈어요'); } catch (e) { toast('내보내기 실패 · ' + (e.message || e), 4000); }
 }
 
 /* ---------- 녹화: 3D 화면(캔버스)만 MP4 로 · 도구 · 막대는 안 찍힘 ---------- */
@@ -1729,12 +1782,12 @@ const present = {
   build() {
     const b = (this.box = document.createElement('div')); b.className = 'pr-ui';
     b.innerHTML = `<div class="pr-top"><div class="pr-modes" role="group" aria-label="보기 모드"><button data-pm="free">자유 보기</button><button data-pm="mep">설치물 보기</button><button data-pm="light">조명 모드</button></div>
-      <div class="pr-views"><button data-pv="iso" title="비스듬히">◇</button><button data-pv="top" title="위에서">□</button><button data-pv="spin" title="360° 돌려 보기">⟳ 360°</button><button data-pv="rec" title="녹화 (MP4)" class="pr-recb">● 녹화</button></div><button class="pr-x" title="발표 끝내기 (Esc)">✕ 끝내기</button></div>
+      <div class="pr-views"><button data-pv="iso" title="비스듬히">◇</button><button data-pv="top" title="위에서">□</button><button data-pv="spin" title="360° 돌려 보기">⟳ 360°</button><button data-pv="rec" title="녹화 (MP4)" class="pr-recb">● 녹화</button><button data-pv="blender" title="블렌더로 실사 렌더 (정지샷)">🎬 블렌더 실사</button></div><button class="pr-x" title="발표 끝내기 (Esc)">✕ 끝내기</button></div>
       <div class="pr-side" hidden></div>
       <div class="pr-styles" role="group" aria-label="스타일 필터">${Object.entries(STYLES).map(([k, st]) => `<button data-ps="${k}" title="${esc(st.hint)}" aria-pressed="${engine.style === k}">${esc(st.name)}</button>`).join('')}</div>`;
     document.body.appendChild(b);
     $$('[data-pm]', b).forEach((x) => (x.onclick = () => this.set(x.dataset.pm)));
-    $$('[data-pv]', b).forEach((x) => (x.onclick = () => { if (x.dataset.pv === 'rec') return recPop(); if (x.dataset.pv === 'spin') { engine.setSpin(!engine.controls.autoRotate); x.setAttribute('aria-pressed', String(engine.controls.autoRotate)); } else engine.view(x.dataset.pv); }));
+    $$('[data-pv]', b).forEach((x) => (x.onclick = () => { if (x.dataset.pv === 'rec') return recPop(); if (x.dataset.pv === 'blender') return blPop(); if (x.dataset.pv === 'spin') { engine.setSpin(!engine.controls.autoRotate); x.setAttribute('aria-pressed', String(engine.controls.autoRotate)); } else engine.view(x.dataset.pv); }));
     $$('[data-ps]', b).forEach((x) => (x.onclick = () => { engine.setStyle(x.dataset.ps); $$('[data-ps]', b).forEach((y) => y.setAttribute('aria-pressed', String(y === x))); this.set(this.mode); })); /* 발표 중 스타일은 프로젝트에 저장하지 않음 */
     $('.pr-x', b).onclick = () => this.exit();
   },

@@ -417,3 +417,8 @@ body.catdrag #drawer { opacity: .25; pointer-events: none; transition: opacity .
 .recbar span { opacity: .7; }
 @keyframes recblink { 50% { opacity: .25; } }
 .pr-recb { color: #ff5a4f !important; }
+.blpop { width: min(460px, calc(100vw - 24px)); max-height: calc(100vh - 140px); overflow: auto; }
+.blpop .blst { font-size: 13px; } .blpop .blst small { display: block; color: var(--muted); word-break: break-all; }
+.blres { position: fixed; inset: 0; z-index: 95; background: rgba(0,0,0,.78); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.blres-in { max-width: min(1400px, 96vw); display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.blres-in img { max-width: 100%; max-height: calc(100vh - 120px); border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }

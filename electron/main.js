@@ -3,6 +3,8 @@ const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } = require('e
 const path = require('path');
 const fs = require('fs/promises');
 const { pathToFileURL } = require('url');
+const { spawn, execFile } = require('child_process');
+const fss = require('fs');
 
 const ROOT = path.join(__dirname, '..', 'renderer');
 
@@ -82,8 +84,38 @@ app.whenReady().then(() => {
     const u = String(url || ''); if (!/^https:\/\/(api\.vworld\.kr|xdworld\.vworld\.kr|s3\.amazonaws\.com\/elevation-tiles-prod|elevation-tiles-prod\.s3\.amazonaws\.com)\//.test(u)) return { ok: false, status: 0, text: 'blocked' };
     try { const r = await net.fetch(u, { headers: { 'User-Agent': 'BYR2/' + app.getVersion() } }); return r.ok ? { ok: true, status: r.status, data: new Uint8Array(await r.arrayBuffer()) } : { ok: false, status: r.status, text: (await r.text()).slice(0, 200) }; } catch (err) { return { ok: false, status: 0, text: String(err && err.message || err) }; }
   });
+  /* ---------- 블렌더 실사 렌더: 이 PC 의 블렌더를 화면 없이 실행 → render.png + scene.blend ---------- */
+  const REND = () => path.join(app.getPath('userData'), 'blender-renders');
+  const verOf = (exe) => new Promise((ok) => execFile(exe, ['--version'], { timeout: 30000, windowsHide: true }, (err, out) => { const m = String(out || '').match(/Blender\s+(\d+\.\d+(\.\d+)?)/); ok(err && !m ? null : m ? m[1] : null); }));
+  async function findBlender() {
+    const C = []; const add = (p) => { if (p && fss.existsSync(p)) C.push(p); };
+    if (process.platform === 'win32') { for (const base of [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], 'C:\\Program Files', 'D:\\Program Files'].filter(Boolean)) { const bf = path.join(base, 'Blender Foundation'); try { for (const d of fss.readdirSync(bf).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))) add(path.join(bf, d, 'blender.exe')); } catch {} add(path.join(base, 'Steam', 'steamapps', 'common', 'Blender', 'blender.exe')); }
+      try { const la = path.join(process.env.LOCALAPPDATA || '', 'Programs'); for (const d of fss.readdirSync(la)) if (/blender/i.test(d)) add(path.join(la, d, 'blender.exe')); } catch {} }
+    else if (process.platform === 'darwin') add('/Applications/Blender.app/Contents/MacOS/Blender');
+    else { add('/usr/bin/blender'); add('/snap/bin/blender'); add('/usr/local/bin/blender'); }
+    for (const exe of C) { const v = await verOf(exe); if (v) return { path: exe, version: v }; }
+    const v = await verOf(process.platform === 'win32' ? 'blender.exe' : 'blender'); return v ? { path: process.platform === 'win32' ? 'blender.exe' : 'blender', version: v } : null;
+  }
+  ipcMain.handle('blender:find', async (e, custom) => { if (custom) { const v = await verOf(custom); if (v) return { path: custom, version: v }; } return findBlender(); });
+  ipcMain.handle('blender:pick', async (e) => { const w = BrowserWindow.fromWebContents(e.sender), r = await dialog.showOpenDialog(w, { title: '블렌더 실행 파일 (blender.exe)', properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'Blender', extensions: ['exe'] }] : [] }); if (r.canceled || !r.filePaths[0]) return null; const v = await verOf(r.filePaths[0]); return v ? { path: r.filePaths[0], version: v } : { path: r.filePaths[0], version: null }; });
+  let job = null;
+  ipcMain.handle('blender:run', async (e, { exe, glb, plan }) => {
+    if (job) return { ok: false, error: '이미 렌더 중이에요' }; const v = await verOf(exe); if (!v) return { ok: false, error: '블렌더를 실행할 수 없어요' };
+    const dir = path.join(REND(), new Date().toISOString().replace(/[:.]/g, '-')); await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'scene.glb'), Buffer.from(glb)); await fs.writeFile(path.join(dir, 'plan.json'), JSON.stringify(plan)); await fs.writeFile(path.join(dir, 'byr_render.py'), await fs.readFile(path.join(ROOT, 'blender', 'byr_render.py')));
+    const send = (t) => { try { e.sender.send('blender:log', t); } catch {} };
+    return new Promise((ok) => {
+      const ch = spawn(exe, ['-b', '--factory-startup', '-P', path.join(dir, 'byr_render.py'), '--', dir], { windowsHide: true }); job = ch; let tail = '', errT = '';
+      const onData = (b) => { tail += b.toString(); const L = tail.split(/\r?\n/); tail = L.pop(); for (const l of L) if (/BYR:|Sample \d+\/\d+|Error|Traceback|rror:/.test(l)) send(l.slice(0, 300)); };
+      ch.stdout.on('data', onData); ch.stderr.on('data', (b) => { errT = (errT + b.toString()).slice(-2000); onData(b); });
+      ch.on('close', async (code) => { job = null; const png = path.join(dir, 'render.png'); if (fss.existsSync(png)) ok({ ok: true, dir, png: new Uint8Array(await fs.readFile(png)), version: v }); else ok({ ok: false, dir, error: code === null ? '취소했어요' : `블렌더가 끝났지만 그림이 없어요 (코드 ${code}) ${errT.slice(-300)}` }); });
+      ch.on('error', (err) => { job = null; ok({ ok: false, error: String(err && err.message || err) }); });
+    });
+  });
+  ipcMain.handle('blender:cancel', () => { if (job) { try { job.kill(); } catch {} } return true; });
+  ipcMain.handle('blender:open', (e, dir, what) => { const d = path.resolve(String(dir || '')); if (!d.startsWith(REND())) return false; shell.openPath(what === 'blend' ? path.join(d, 'scene.blend') : d); return true; });
   ipcMain.handle('app:info', () => ({ version: app.getVersion(), update: UPD }));
-  ipcMain.handle('open:url', (e, url) => { if (/^https:\/\/github\.com\/uniclub24-cpu\/3d-render\//.test(String(url))) shell.openExternal(url); }); /* 업데이트 받기 링크만 */
+  ipcMain.handle('open:url', (e, url) => { if (/^https:\/\/(github\.com\/uniclub24-cpu\/3d-render\/|www\.blender\.org\/download\/)/.test(String(url))) shell.openExternal(url); }); /* 업데이트 받기 · 블렌더 받기 링크만 */
   ipcMain.handle('app:quit', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { w.__quit = true; w.close(); } });
   ipcMain.handle('file:open', async (e, opt = {}) => {
     const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
