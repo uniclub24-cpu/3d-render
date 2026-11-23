@@ -100,10 +100,12 @@ export class Sketch3D {
     const g = new THREE.TubeGeometry(curve, seg, c.r, 6, false); if (c.mesh.geometry) c.mesh.geometry.dispose(); c.mesh.geometry = g; c.mesh.position.set(0, 0, 0);
     if (!c.caps) { c.caps = [0, 1].map(() => new THREE.Mesh(new THREE.SphereGeometry(c.r, 10, 8), c.mat)); c.caps.forEach((m) => c.mesh.add(m)); }
     c.caps[0].position.copy(c.pts[0]); c.caps[1].position.copy(c.pts[c.pts.length - 1]);
+    /* 벽 · 기물 뒤로 가려진 부분도 흐리게 보이게 (선이 끊겨 보이지 않도록) */
+    if (!c.ghost) { c.gmat = new THREE.MeshBasicMaterial({ color: c.mat.color, transparent: true, opacity: 0.35, depthTest: false, depthWrite: false, toneMapped: false }); c.ghost = new THREE.Mesh(g, c.gmat); c.ghost.renderOrder = 6; c.mesh.add(c.ghost); } else c.ghost.geometry = g;
   }
   _end() { if (this.cur) { this.strokes.push(this.cur); this.cur = null; } }
   _cancel() { if (!this.cur) return; this._drop(this.cur); this.cur = null; this.pid = null; }
-  _drop(s) { this.group.remove(s.mesh); s.mesh.traverse((o) => o.geometry && o.geometry.dispose()); s.mat.dispose(); this.e.invalidate(false); }
+  _drop(s) { this.group.remove(s.mesh); s.mesh.traverse((o) => o.geometry && o.geometry.dispose()); s.mat.dispose(); if (s.gmat) s.gmat.dispose(); this.e.invalidate(false); }
   /* ---------- 지우기 ---------- */
   _erase(ev) {
     const r = this.e.canvas.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top, v = new THREE.Vector3(), cam = this.e.camera, R = ev.pointerType === 'touch' ? 22 : 14;
