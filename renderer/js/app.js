@@ -21,7 +21,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.35';
+export const APP_VERSION = '2.1.36';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1814,7 +1814,10 @@ function askText(title, value = '') {
   i.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#dlgB').lastElementChild.click(); } };
   return p.then((ok) => (ok ? (i.value || '').trim().slice(0, 60) : null));
 }
+/* 로딩 화면 걷기 — 켤 때 묻는 창(저장 안 한 변경 등)이 로딩 화면 뒤에 숨어 멈춘 것처럼 보이던 문제 (2.1.36) */
+function dropIntro(fast) { const it = document.querySelector('#intro'); if (!it || it.dataset.out) return; it.dataset.out = 1; if (fast) { it.remove(); return; } it.classList.add('out'); setTimeout(() => it.remove(), 600); }
 function ask(title, msg, buttons = [{ label: '취소', value: false }, { label: '확인', value: true, kind: 'pri' }]) {
+  dropIntro(true);
   return new Promise((ok) => {
     const d = $('#dlg'); $('#dlgT').textContent = title; $('#dlgM').textContent = msg || '';
     $('#dlgB').innerHTML = buttons.map((b, i) => `<button class="btn ${b.kind || ''}" data-i="${i}">${esc(b.label)}</button>`).join('');
@@ -2331,12 +2334,13 @@ async function boot() {
   window.addEventListener('drop', async (e) => { const it = e.dataTransfer && e.dataTransfer.getData('application/x-byr-item'); if (it) { e.preventDefault(); depth = 0; drop.hidden = true; dropItem(e, it); return; } e.preventDefault(); depth = 0; drop.hidden = true; const fs = await Promise.all([...e.dataTransfer.files].map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) }))); handleFiles(fs); });
 
   // 마지막으로 작업하던 프로젝트를 연다 (자동 저장)
+  setTimeout(() => dropIntro(), 12000); /* 안전장치: 무엇이 오래 걸려도 12초 뒤엔 로딩 화면을 걷는다 */
   let first = null; try { const id = lib2.lastId(); first = id && (await lib2.loadLocal(id)); } catch (e) { console.warn(e); }
   await setModel(first || emptyProject());
   window.__goBack = goBack; window.BYR = { S, engine, plan, mkItem, emptyProject, setModel, level, commit, uid, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
   initLang(); checkUpdate(); showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
   if ($('#introVer')) $('#introVer').textContent = 'v' + APP_VERSION;
-  const intro = $('#intro'), wait = Math.max(1200, 3000 - performance.now()); /* 로딩 화면: 처음부터 최소 3초 · 준비가 끝난 뒤에도 1.2초 더 */ setTimeout(() => { intro.classList.add('out'); setTimeout(() => intro.remove(), 600); }, wait);
+  const wait = Math.max(1200, 3000 - performance.now()); /* 로딩 화면: 처음부터 최소 3초 · 준비가 끝난 뒤에도 1.2초 더 */ setTimeout(() => dropIntro(), wait);
   // 계정 동기화: 켤 때 · 1분마다 · 앱으로 돌아올 때
   /* 2.1.32~: 프로젝트는 자동으로 주고받지 않는다 ([계정에 저장] · [계정에서 받기]). API 키만 켤 때 · 돌아올 때 맞춘다 */
   const keys = () => { if (cloud.session() && document.visibilityState !== 'hidden') lib2.syncKeys().catch(() => {}); };
