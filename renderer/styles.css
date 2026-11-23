@@ -422,3 +422,17 @@ body.catdrag #drawer { opacity: .25; pointer-events: none; transition: opacity .
 .blres { position: fixed; inset: 0; z-index: 95; background: rgba(0,0,0,.78); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .blres-in { max-width: min(1400px, 96vw); display: flex; flex-direction: column; gap: 10px; align-items: center; }
 .blres-in img { max-width: 100%; max-height: calc(100vh - 120px); border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+/* 3D 펜 (2.1.37) */
+#sk3 { position: fixed; z-index: 16; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(14px); }
+#sk3 .ib { width: 34px; height: 34px; border-radius: 10px; }
+#sk3 .ib svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#sk3 .ib[aria-pressed="true"] { background: var(--accent, #2f7df6); color: #fff; }
+#sk3 .sk-more { display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 4px; border-top: 1px solid var(--line); margin-top: 2px; }
+#sk3 .sk-more[hidden] { display: none; }
+#sk3 .sk-cols, #sk3 .sk-sz { display: grid; grid-template-columns: 1fr; gap: 4px; }
+#sk3 [data-skc] { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); background: var(--c); padding: 0; cursor: pointer; }
+#sk3 [data-skc][aria-pressed="true"] { outline: 2px solid var(--accent, #2f7df6); outline-offset: 1px; }
+#sk3 [data-sks] { width: 26px; height: 18px; border: 0; background: none; display: grid; place-items: center; cursor: pointer; border-radius: 6px; color: inherit; padding: 0; }
+#sk3 [data-sks][aria-pressed="true"] { background: var(--line); }
+#sk3 [data-sks] i { display: block; width: 16px; border-radius: 4px; background: currentColor; }
+#sk3 [data-sks] i.s { height: 2px; } #sk3 [data-sks] i.m { height: 4px; } #sk3 [data-sks] i.l { height: 7px; }

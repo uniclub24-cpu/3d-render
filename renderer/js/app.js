@@ -10,6 +10,8 @@ import { airKind } from './air.js';
 import * as SITE from './site.js';
 import { CanvasRec, recType } from './rec.js';
 import * as BL from './blender.js';
+import { Sketch3D } from './sketch3d.js';
+let sketch = null;
 import * as lib2 from './store.js';
 import * as SL from './slope.js';
 import { ENVTYPES, ENVCOL, ENVLV, envOf, envFront } from './env.js';
@@ -21,7 +23,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.36';
+export const APP_VERSION = '2.1.37';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -69,6 +71,7 @@ async function setModel(model, fit = true) {
   S.aiPrev = null; if (typeof plan !== 'undefined' && plan) plan.preview = null; S.multi = []; S.tucked = null;
   if (S.model && S.model !== model) await lib2.flush();
   if (engine.sim.on) { engine.sim.stop(); plan.simA = null; syncSimBtn(); } if (engine.air.on) toggleAir(); if (engine.xray) setXray(null);
+  if (sketch) sketch.clear();
   S.model = migrate(model, S.lib); S.undo.length = S.redo.length = S.um.length = S.rm.length = 0; S.last = snap(); S.lastC = cnts(); setTimeout(syncPins); setFocus(null);
   await restoreAssets(); S.sel = null; engine.setLevel(level()); applyEnv(); loadRender(); syncCeilBtn(); if (fit) { engine.view('iso'); plan.fit(); } plan.select(null, true); syncBar(); renderProps();
   S.dirty = false; try { const had = await lib2.getRec(S.model.id); if (!had || had.deleted) { await lib2.saveProject(S.model); } else setSaveState(had.synced && had.synced === had.updated ? '계정에 저장됨' : '저장됨'); } catch (e) { console.warn(e); } refreshBad();
@@ -2195,6 +2198,7 @@ async function boot() {
   const [lib, shapes] = await Promise.all([fetch('./data/legacy-lib.json').then((r) => r.json()), fetch('./data/legacy-shapes.json').then((r) => r.json())]);
   S.lib = lib.items; S.shapes = shapes; loadMyLib();
   engine = new Engine($('#view'), { lib: S.lib, shapes: S.shapes, assets: S.assets, zOf: (it) => SL.itemZ(level(), it, S.lib) });
+  sketch = new Sketch3D(engine, { toast }); /* 3D 펜 (화면 왼쪽 작은 아이콘) */
   try { bindUi(); } catch (e) { console.warn(e); }
   engine.mepHide = !!store.get('byr.mepHide', false); engine.onSite = (i) => { S.siteSel = i; engine.siteMark(i); S.panel = 'site'; S.propsOpen = true; plan.redraw(); renderProps(); }; SITE.setSiteRedraw(() => { engine.invalidate(true); plan.redraw(); }); window.addEventListener('byr-secrets-in', () => { toast('계정에 저장된 API 키를 받았어요', 2500); renderProps(); if (!$('#home').hidden && $('#homeBody')) { if ($('#sfQ')) renderSiteFind(); } }); engine.onLine = (id) => setSel({ kind: 'line', id });
   lib2.onStatus(setSaveState); $('#btnSave').onclick = () => saveNow(); $('#btnSaveC').onclick = () => saveCloud(); $('#saveState').onclick = () => S.dirty && saveNow();
