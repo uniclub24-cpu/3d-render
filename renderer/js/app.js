@@ -24,7 +24,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.40';
+export const APP_VERSION = '2.1.41';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1749,12 +1749,12 @@ const LGROUPS = [['sign', '간판 (불 들어오는)'], ['triple', '3구 매입�
 const present = {
   on: false, mode: 'free', prev: null, op: 0.25, master: 0.2,
   enter() {
-    if (this.on) return; if (engine.walk && engine.walk.on) engine.walk.stop?.(); if (engine.xray) setXray(null);
+    if (this.on) return; if (engine.walker && engine.walker.active) engine.walker.stop(); /* 걷기 중이면 먼저 끝냄 (이름 오타로 안 끝나던 문제) */ if (engine.xray) setXray(null);
     this.prev = { pane: S.pane, style: engine.style, props: S.propsOpen }; this.on = true; S.propsOpen = false; $('#props') && ($('#props').hidden = true);
     document.body.classList.add('presenting'); setPane('3d'); this.build(); this.set('free'); toast('발표 모드 · Esc 로 나가요', 2500);
   },
   exit() {
-    if (!this.on) return; this.on = false; engine.setSpin(false); engine.setPresent(null); this.box && this.box.remove(); this.box = null; document.body.classList.remove('presenting');
+    if (!this.on) return; this.on = false; engine.setSpin(false); if (engine.walker.active) engine.walker.stop(); engine.controls.enabled = true; engine.setPresent(null); this.box && this.box.remove(); this.box = null; document.body.classList.remove('presenting');
     const p = this.prev || {}; if (p.style && p.style !== engine.style) setStyle(p.style, true); else engine.setStyle(engine.style); setPane(p.pane || '3d'); engine.invalidate(true);
   },
   set(m) {
@@ -2348,7 +2348,7 @@ async function boot() {
   setTimeout(() => dropIntro(), 12000); /* 안전장치: 무엇이 오래 걸려도 12초 뒤엔 로딩 화면을 걷는다 */
   let first = null; try { const id = lib2.lastId(); first = id && (await lib2.loadLocal(id)); } catch (e) { console.warn(e); }
   await setModel(first || emptyProject());
-  window.__goBack = goBack; window.BYR = { S, engine, plan, mkItem, emptyProject, setModel, level, commit, uid, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
+  window.__goBack = goBack; window.BYR = { S, engine, present, plan, mkItem, emptyProject, setModel, level, commit, uid, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
   initLang(); checkUpdate(); showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
   if ($('#introVer')) $('#introVer').textContent = 'v' + APP_VERSION;
   const wait = Math.max(1200, 3000 - performance.now()); /* 로딩 화면: 처음부터 최소 3초 · 준비가 끝난 뒤에도 1.2초 더 */ setTimeout(() => dropIntro(), wait);
