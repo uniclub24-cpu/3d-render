@@ -8,6 +8,7 @@ import { Plan2D, KINDS, fitOpening } from './plan2d.js';
 import * as cloud from './cloud.js';
 import { airKind } from './air.js';
 import * as SITE from './site.js';
+import { openMarket } from './market.js';
 import { CanvasRec, recType } from './rec.js';
 import * as BL from './blender.js';
 import { Sketch3D } from './sketch3d.js';
@@ -23,7 +24,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.38';
+export const APP_VERSION = '2.1.39';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1875,7 +1876,7 @@ async function goBack() { if (present.on) return present.exit();
 
 /* ---------- 홈 (대시보드) ---------- */
 const HI = {
-  site: '<path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>', cont: '<path d="M8 5l11 7-11 7z"/>', new: '<path d="M12 5v14M5 12h14"/>', open: '<path d="M4 6h6l2 2h8v11H4z"/>', legacy: '<path d="M4 4h12l4 4v12H4z"/><path d="M8 13h8M8 17h5"/>',
+  market: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/><path d="M11 7.5v3.5l2.3 1.6"/>', site: '<path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>', cont: '<path d="M8 5l11 7-11 7z"/>', new: '<path d="M12 5v14M5 12h14"/>', open: '<path d="M4 6h6l2 2h8v11H4z"/>', legacy: '<path d="M4 4h12l4 4v12H4z"/><path d="M8 13h8M8 17h5"/>',
   cloud: '<path d="M7 18a4 4 0 0 1-.5-8 6 6 0 0 1 11.5 1.5A3.5 3.5 0 0 1 17.5 18z"/>', sample: '<path d="M3 21h18M5 21V9l7-5 7 5v12"/><path d="M9 21v-6h6v6"/>', model: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5"/>', ai: '<path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4z"/>',
 };
 function showHome() { $('#home').hidden = false; renderHome(); }
@@ -2157,6 +2158,7 @@ async function renderHome() {
   $('#homeVer').textContent = `BYR Next ${APP_VERSION} · ${IS_APP() ? (window.byr ? 'PC' : '모바일') : '웹'}`;
   $('#homeBody').innerHTML = `
     <button class="hcont" data-h="cont">${SV(HI.cont)}<div><b>이어서 작업</b><small>${esc(cur ? cur.name : '')} · ${cur ? `벽 ${cur.levels[cur.activeLevel].walls.length} · 기물 ${cur.levels[cur.activeLevel].items.length}` : ''}</small></div></button>
+    <button class="hmarket" data-h="market">${SV(HI.market)}<div><b>상권분석</b><small>주소 · 우편번호로 상가를 찾고, 반경 1km 지도에 하려는 업종의 경쟁사(치킨 · 고깃집 · 호프 …)를 핀으로 · 개업일 · 영업 여부 · 보고서</small></div><em>열기</em></button>
     <div class="hacts">
       <button data-h="import" class="hbig">${SV(HI.ai)}<span><b>자료로 매장 만들기</b><small>도면 · 3D 렌더 · 전열도를 올리면 BYR 매장으로</small></span></button>
       <button data-h="site" class="hbig">${SV(HI.site)}<span><b>주소로 상가 찾기 · 상권 3D</b><small>주소를 넣으면 반경 500m 건물 · 도로 · 용도지역을 세우고, 상가를 골라 도면 시작</small></span></button>
@@ -2179,6 +2181,7 @@ async function renderHome() {
     if (h === 'cont') return closeHome();
     if (h === 'import') return renderImport();
     if (h === 'site') return renderSiteFind();
+    if (h === 'market') return openMarket({ toast, saveFile, open3d: (r) => { showHome(); SF.q = r.title; SF.res = [r]; renderSiteFind(); const b = $('[data-sr="0"]'); if (b) b.click(); } });
     if (h === 'all') { S.homeAll = true; return renderHome(); }
     if (h === 'new') { closeHome(); return ACT.new(); }
     if (h === 'clean') { if (!(await ask('충돌 사본을 모두 지울까요?', '이름에 "(충돌 사본)" 이 붙은 프로젝트를 이 기기와 계정에서 지워요. 되돌릴 수 없어요.'))) return; const n = await lib2.cleanConflicts(); toast(`충돌 사본 ${n}개를 지웠어요`); return renderHome(); }
