@@ -230,7 +230,7 @@ export class MarketMap {
   hideTip() { if (this.tip) this.tip.hidden = true; }
   draw() {
     const g = this.g, W = this.W, H = this.H, d = this.dpr || 1; if (!g) return; g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, W, H); g.fillStyle = '#d9dbde'; g.fillRect(0, 0, W, H);
-    const S = this.site; if (!S) { g.fillStyle = '#7d838c'; g.font = '600 15px system-ui, sans-serif'; g.textAlign = 'center'; g.fillText('주소를 찾으면 반경 1km 상권 지도가 그려져요', W / 2, H / 2); return; }
+    const S = this.site; if (!S) { g.fillStyle = '#7d838c'; g.font = '600 15px system-ui, sans-serif'; g.textAlign = 'center'; g.fillText('기록을 열거나 새 주소를 찾으면 반경 1km 상권 지도가 그려져요', W / 2, H / 2); return; }
     const s = this.s, T = (x, y) => this.w2s(x, y), [ox, oy] = T(0, 0), Rp = R_MAX * s, vis = this.vr * 1.6;
     const path = (P, close) => { g.beginPath(); for (let k = 0; k < P.length; k++) { const [x, y] = T(P[k][0], P[k][1]); k ? g.lineTo(x, y) : g.moveTo(x, y); } if (close) g.closePath(); };
     const bx0 = this.c[0] - vis - 30, bx1 = this.c[0] + vis + 30, by0 = this.c[1] - vis - 30, by1 = this.c[1] + vis + 30, bb = (o) => o._bb || (o._bb = o.p.reduce((b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)], [1e9, 1e9, -1e9, -1e9]));
@@ -298,33 +298,52 @@ export function tipHtml(s) {
   return `<b>${esc(s.b ? s.b.n : s.nm)}</b>${s.b ? `<small>${esc(s.nm)} ${esc(s.br)}</small>` : s.br ? `<small>${esc(s.br)}</small>` : ''}<span>${esc(s.sn || s.mn)} · ${Math.round(s.d)}m${s.flr ? ` · ${esc(s.flr)}층` : ''}</span><span>${st}</span><span class="g" style="--c:${G[groupOf(s)].c}">${esc(groupOf(s))}</span>`;
 }
 
-/* ======================= 5. 화면 ======================= */
+/* ======================= 5. 상권 기록 (IndexedDB: 다시 찾지 않고 바로 열기) ======================= */
+let mdbp = null;
+const mdb = () => (mdbp ||= new Promise((ok, no) => { const r = indexedDB.open('byr-market', 1); r.onupgradeneeded = () => { r.result.createObjectStore('meta', { keyPath: 'id' }); r.result.createObjectStore('data', { keyPath: 'id' }); }; r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }));
+async function mtx(stores, mode, fn) { const d = await mdb(); return new Promise((ok, no) => { const t = d.transaction(stores, mode); let out; Promise.resolve(fn(t)).then((v) => (out = v)); t.oncomplete = () => ok(out); t.onerror = () => no(t.error); t.onabort = () => no(t.error); }); }
+const rq = (r) => new Promise((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+const r1 = (v) => Math.round(v * 10) / 10, rp = (P) => P.map(([x, y]) => [r1(x), r1(y)]);
+export async function recList() { try { return (await mtx(['meta'], 'readonly', (t) => rq(t.objectStore('meta').getAll()))).sort((a, b) => b.at - a.at); } catch { return []; } }
+async function recPut(meta, data) { await mtx(['meta', 'data'], 'readwrite', (t) => { t.objectStore('meta').put(meta); if (data) t.objectStore('data').put(data); }); }
+async function recGet(id) { return mtx(['meta', 'data'], 'readonly', (t) => { const a = rq(t.objectStore('meta').get(id)), b = rq(t.objectStore('data').get(id)); return Promise.all([a, b]).then(([meta, data]) => ({ meta, data })); }); }
+async function recDel(id) { await mtx(['meta', 'data'], 'readwrite', (t) => { t.objectStore('meta').delete(id); t.objectStore('data').delete(id); }); }
+const recId = (r) => `${(+r.lon).toFixed(5)},${(+r.lat).toFixed(5)}`;
+function packSite(S) { return { lon: S.lon, lat: S.lat, R: S.R, hit: S.hit, hitName: S.hitName, src: S.src, at: S.at, buildings: S.buildings.map((b) => ({ p: rp(b.p), name: b.name || '', f: b.f || null })), roads: S.roads.map((r) => ({ p: rp(r.p), w: r.w, k: r.k, name: r.name || '' })), water: S.water.map((w) => ({ p: rp(w.p), big: w.big || 0 })), rivers: (S.rivers || []).map((r) => ({ p: rp(r.p), w: r.w, name: r.name || '' })), green: S.green.map((g) => ({ p: rp(g.p) })) }; }
+const packStore = (s) => { const { b, d, pm, ...o } = s; o.x = r1(o.x); o.y = r1(o.y); return o; };
+let metaT = 0;
+function saveMeta() { if (!ST.recId) return; clearTimeout(metaT); metaT = setTimeout(() => { const L = ST.list, n = (r) => L.filter((s) => s.d <= r).length; recPut({ ...ST.recMeta, sel: ST.sel.slice(), free: ST.free, hit: ST.site.hit, hitName: ST.site.hitName, cats: curCats().map((c) => c.k).join(' + '), n: [n(300), n(500), n(1000)], viewed: Date.now() }).catch(() => {}); }, 600); }
+
+/* ======================= 6. 화면 ======================= */
 const ST = { q: '', res: [], place: null, site: null, all: [], stdr: '', sel: ['치킨집'], free: '', list: [], log: '', busy: false, showAll: false, perm: '', stopPerm: false, keyOpen: false, map: null, ctx: null, zip: '' };
 const LSSEL = 'byr.marketSel';
 try { window.__byrMarket = ST; } catch {} /* 점검용 */
 const log = (t) => { ST.log += (ST.log ? '\n' : '') + t; const el = $('#mkLog'); if (el) { el.hidden = false; el.textContent = ST.log; el.scrollTop = 1e9; } };
 const live = (t) => { const el = $('#mkLive'); if (el) { el.hidden = !t; el.innerHTML = t ? `<span class="spin"></span><span>${esc(t)}</span>` : ''; } };
 /** ctx: { toast, saveFile, open3d(place) } */
-export function openMarket(ctx) {
-  ST.ctx = ctx; try { const v = JSON.parse(localStorage.getItem(LSSEL) || 'null'); if (Array.isArray(v) && v.length) ST.sel = v; } catch {}
+export function openMarket(ctx, openId) {
+  ST.ctx = ctx; if (!ST.busy) { ST.site = null; ST.place = null; ST.res = []; ST.log = ''; ST.stopPerm = true; if (ST.map) ST.map.set(null); } try { const v = JSON.parse(localStorage.getItem(LSSEL) || 'null'); if (Array.isArray(v) && v.length) ST.sel = v; } catch {}
   const sec = $('#market'); sec.hidden = false;
   if (!ST.map) { ST.map = new MarketMap($('#mkCv'), $('#mkTip')); ST.map.onZoom = (vr) => { const z = $('#mkZv'); if (z) z.textContent = vr >= 999 ? '1km' : Math.round(vr) + 'm'; }; ST.map.onPick = pickBuilding; ST.map.onPin = (s) => { const li = $(`[data-mk-s="${s.id}"]`); if (li) { $$('.mkli.on').forEach((x) => x.classList.remove('on')); li.classList.add('on'); li.scrollIntoView({ block: 'nearest' }); } };
-    $('#mkBack').onclick = () => { sec.hidden = true; ST.stopPerm = true; };
+    $('#mkBack').onclick = () => { if (ST.site && !ST.busy) { ST.site = null; ST.place = null; ST.stopPerm = true; ST.res = []; ST.log = ''; ST.map.set(null); ST.map.setPins([], []); ST.map.hideTip(); renderPanel(); return; } sec.hidden = true; ST.stopPerm = true; ST.ctx.onClose && ST.ctx.onClose(); };
     $('#mkZin').onclick = () => ST.map.zoomBy(1 / 1.4); $('#mkZout').onclick = () => ST.map.zoomBy(1.4);
     $('#mkZ300').onclick = () => { ST.map.c = [...ST.map.o]; ST.map.zoomTo(V_DEF); }; $('#mkZ1k').onclick = () => ST.map.zoomTo(R_MAX); }
-  renderPanel(); requestAnimationFrame(() => ST.map.resize());
+  renderPanel(); requestAnimationFrame(() => ST.map.resize()); if (openId) openRec(openId);
 }
 const V = () => SITE.vworld();
 function renderPanel() {
   const P = $('#mkPanel'), v = V(), has = !!ST.site;
-  P.innerHTML = `
-    <section class="mks"><b>1. 상가 주소 찾기</b>
+  $('#mkBack').textContent = has ? '‹ 상권 목록' : '‹ 홈';
+  P.innerHTML = `${has ? `<section class="mks mkcur"><div class="mkrow2"><b>📍 ${esc(ST.place ? ST.place.title : '')}</b><small class="hint">${ST.recMeta ? `저장 ${new Date(ST.recMeta.at).toLocaleDateString('ko-KR')}` : ''}</small></div>
+      <div class="btns"><button class="btn" data-mk="list">‹ 상권 목록</button><button class="btn" data-mk="reload">최신 자료로 다시 받기</button></div></section>` : ''}
+    <section class="mks" ${has ? 'hidden' : ''}><b>${has ? '' : '새 상권 찾기'}</b>
       <div class="mkrow"><input id="mkQ" value="${esc(ST.q)}" placeholder="도로명 · 지번 · 건물 이름 (예: 강남대로 396)" autocomplete="off"><button class="btn pri" data-mk="find">찾기</button></div>
       <div class="btns"><button class="btn" data-mk="zip">우편번호 찾기</button>${ST.zip ? `<small class="hint">우편번호 ${esc(ST.zip)}</small>` : ''}</div>
       <div id="mkZip" hidden><div class="mkzipbar"><small>우편번호 · 도로명 · 지번 · 건물명으로 찾아요</small><button class="btn" data-mk="zipx">닫기</button></div><div id="mkZipIn"></div></div>
       <div class="sfres">${ST.res.map((r, i) => `<button class="sfr ${ST.place === r ? 'on' : ''}" data-mk-r="${i}"><b>${esc(r.title)}</b><small>${esc(r.sub || '')}</small></button>`).join('')}</div>
     </section>
-    ${has ? `<section class="mks"><b>2. 하려는 업종</b>
+    ${has ? '' : '<section class="mks" id="mkRecs"><b>내 상권 기록</b><p class="hint">불러오는 중…</p></section>'}
+    ${has ? `<section class="mks"><b>하려는 업종</b>
       <div class="chips mkchips">${CATS.map((c) => `<button data-mk-c="${esc(c.k)}" aria-pressed="${ST.sel.includes(c.k)}">${esc(c.k)}</button>`).join('')}</div>
       <div class="mkrow"><input id="mkFree" value="${esc(ST.free)}" placeholder="직접 입력 (예: 닭발, 우동, 이자카야)" autocomplete="off"><button class="btn" data-mk="free">적용</button></div>
       ${CATS.filter((c) => ST.sel.includes(c.k) && c.note).map((c) => `<p class="hint">· ${esc(c.k)}: ${esc(c.note)}</p>`).join('')}
@@ -343,7 +362,7 @@ function renderPanel() {
         ${areaNeedHtml()}
       </div></section>
     <section class="mks"><div class="ilive" id="mkLive" hidden></div><pre class="ilog" id="mkLog" ${ST.log ? '' : 'hidden'}>${esc(ST.log)}</pre></section>`;
-  bindPanel(P); if (has) refresh(false);
+  bindPanel(P); if (has) refresh(false); else renderRecs();
 }
 function areaNeedHtml() {
   const need = [...new Set(ST.list.filter((s) => s.pm && s.pm.need).map((s) => s.pm.need))], have = jget(LSC, {});
@@ -361,6 +380,8 @@ function bindPanel(P) {
 }
 async function act(a, b) {
   if (a === 'find') return find();
+  if (a === 'list') return $('#mkBack').click();
+  if (a === 'reload') { if (ST.place && await ST.ctx.ask('최신 자료로 다시 받을까요?', '지도 · 상가정보를 공공데이터에서 새로 받아 이 기록을 바꿔요 (1~2분).')) return load(ST.place); return; }
   if (a === 'zip') return openZip();
   if (a === 'zipx') { $('#mkZip').hidden = true; return; }
   if (a === 'free') { ST.free = $('#mkFree').value.trim(); return refresh(true); }
@@ -407,8 +428,29 @@ async function load(r) {
     const P = SITE.proj(r.lon, r.lat); ST.site = site; ST.all = st ? st.stores.map((s) => { const n = normStore(s, P); n.b = brandOf(n.nm); return n; }).filter((s) => Number.isFinite(s.x)) : []; ST.stdr = st ? st.stdr : '';
     if (st) log(`✓ 상가정보 음식점 ${ST.all.length}곳${ST.stdr ? ` (${ST.stdr.slice(0, 4)}.${ST.stdr.slice(4, 6)} 기준)` : ''}`);
     const B = site.buildings[site.hit], o = B ? cenOf(B.p) : [0, 0]; ST.map.vr = V_DEF; ST.map.c = [...o]; ST.map.set(site, o); ST.map.onZoom(V_DEF);
+    const id = recId(r), old = (await recList()).find((m) => m.id === id); ST.recId = id; ST.recMeta = { id, title: (old && old.renamed && old.title) || r.title, renamed: old && old.renamed, sub: r.sub || '', lon: r.lon, lat: r.lat, at: Date.now(), stdr: ST.stdr, zip: ST.zip || '', nStores: ST.all.length, nBld: site.buildings.length };
+    ST.place = { ...r, title: ST.recMeta.title };
+    try { await recPut({ ...ST.recMeta, sel: ST.sel.slice(), free: ST.free, hit: site.hit, hitName: site.hitName }, { id, site: packSite(site), stores: ST.all.map(packStore) }); log('✓ 상권 기록에 저장했어요 · 다음엔 목록에서 바로 열려요'); } catch (e) { log('기록 저장 실패 (' + (e.message || e) + ')'); }
   } catch (e) { console.error(e); log('⛔ ' + errTxt(e)); }
   finally { clearInterval(iv); live(''); ST.busy = false; renderPanel(); if (ST.site) runPermits(); }
+}
+async function openRec(id) {
+  if (ST.busy) return; live('기록 여는 중…');
+  try { const { meta, data } = await recGet(id); if (!meta || !data) throw new Error('기록을 찾지 못했어요');
+    const S = { ...data.site, zones: [], trees: [], rivers: data.site.rivers || [] }; S.hit = meta.hit ?? S.hit; S.hitName = meta.hitName || S.hitName;
+    ST.site = S; ST.all = data.stores.map((s) => ({ ...s, b: brandOf(s.nm) })); ST.stdr = meta.stdr || ''; ST.recId = id; ST.recMeta = meta; ST.place = { title: meta.title, sub: meta.sub, lon: meta.lon, lat: meta.lat }; ST.list = []; ST.log = '';
+    if (meta.sel) ST.sel = meta.sel.slice(); ST.free = meta.free || '';
+    const B = S.buildings[S.hit], o = B ? cenOf(B.p) : [0, 0]; ST.map.vr = V_DEF; ST.map.c = [...o]; ST.map.set(S, o); ST.map.onZoom(V_DEF);
+    await recPut({ ...meta, viewed: Date.now() });
+  } catch (e) { log('⛔ ' + (e.message || e)); }
+  live(''); renderPanel(); if (ST.site) runPermits();
+}
+async function renderRecs() {
+  const el = $('#mkRecs'); if (!el) return; const L = await recList(); if (!$('#mkRecs')) return;
+  el.innerHTML = `<div class="mkrow2"><b>내 상권 기록 · ${L.length}곳</b><small class="hint">한 번 찾은 상권은 다시 받지 않고 바로 열려요</small></div>` + (L.length ? `<div class="mkrecs">${L.map((m) => `<div class="mkrec"><button class="mkrecm" data-rec="${esc(m.id)}"><b>${esc(m.title)}</b><small>${esc(m.cats || '')}${m.n ? ` · 300m ${m.n[0]} · 500m ${m.n[1]} · 1km ${m.n[2]}곳` : ''}</small><small>${new Date(m.at).toLocaleDateString('ko-KR')} 받음${m.stdr ? ` · 상가정보 ${m.stdr.slice(0, 4)}.${m.stdr.slice(4, 6)}` : ''}</small></button><div class="hpa"><button class="go" data-rec="${esc(m.id)}">열기</button><button data-recn="${esc(m.id)}">이름</button><button class="del" data-recx="${esc(m.id)}">삭제</button></div></div>`).join('')}</div>` : '<p class="hint">아직 기록이 없어요 · 위에서 주소를 찾으면 자동으로 쌓여요</p>');
+  $$('[data-rec]', el).forEach((b) => (b.onclick = () => openRec(b.dataset.rec)));
+  $$('[data-recn]', el).forEach((b) => (b.onclick = async () => { const m = L.find((x) => x.id === b.dataset.recn), nm = m && (await ST.ctx.askText('상권 이름', m.title)); if (nm && nm !== m.title) { await recPut({ ...m, title: nm, renamed: 1 }); renderRecs(); } }));
+  $$('[data-recx]', el).forEach((b) => (b.onclick = async () => { const m = L.find((x) => x.id === b.dataset.recx); if (m && (await ST.ctx.ask('상권 기록을 지울까요?', `"${m.title}" 기록을 이 기기에서 지워요.`))) { await recDel(m.id); renderRecs(); } }));
 }
 function pickBuilding(i) { const S = ST.site; if (!S || i === S.hit) return; S.hit = i; S.hitName = S.buildings[i].name || '고른 상가'; const o = cenOf(S.buildings[i].p); ST.map.o = o; ST.map.center(...o); ST.ctx.toast('이 건물을 내 상가로 바꿨어요 · 거리를 다시 쟀어요'); refresh(true); }
 function curCats() { return [...CATS.filter((c) => ST.sel.includes(c.k)), ...(ST.free ? [freeCat(ST.free)] : [])].filter(Boolean); }
@@ -418,7 +460,7 @@ function refresh(perm) {
   const pr = new Map(ST.list.map((s) => [s.id, s.pm]));
   ST.list = ST.all.filter((s) => s.d <= R_MAX && inAny(s)).sort((a, b) => a.d - b.d); for (const s of ST.list) if (!s.pm && pr.get(s.id)) s.pm = pr.get(s.id);
   const ids = new Set(ST.list.map((s) => s.id)); ST.map.setPins(ST.list, ST.showAll ? ST.all.filter((s) => !ids.has(s.id) && !NOT_MEAL.includes(s.sc)) : []);
-  renderSum(cats); renderList(); if (perm !== false) runPermits();
+  renderSum(cats); renderList(); saveMeta(); if (perm !== false) runPermits();
 }
 function renderSum(cats) {
   const el = $('#mkSum'); if (!el) return; const L = ST.list, n = (r) => L.filter((s) => s.d <= r).length, by = {}, gs = {};
