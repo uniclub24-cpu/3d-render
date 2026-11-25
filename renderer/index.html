@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' blob: data: https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://zxehyxjjiruxgqkthotn.supabase.co https://api.github.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://t1.kakaocdn.net https://t1.daumcdn.net; frame-src https://postcode.map.daum.net https://postcode.map.kakao.com http://postcode.map.daum.net; connect-src 'self' blob: data: https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://zxehyxjjiruxgqkthotn.supabase.co https://api.github.com">
 <title>BYR2</title>
 <link rel="stylesheet" href="./styles.css">
 <!-- Three.js 는 전부 로컬(vendor)에서 읽는다. CDN 없음 -->
@@ -13,7 +13,7 @@
 </head>
 <body>
 <!-- 인트로: 모듈을 읽는 동안 바로 보이도록 HTML 에 직접 -->
-<div id="intro" aria-label="BYR2"><span class="ver" id="introVer">v2.1.39</span><div class="logo" aria-hidden="true"></div><b class="word">BYR2</b><small class="sub">Build Your Restaurant</small><div class="credit">Created by Marcus Lee</div></div>
+<div id="intro" aria-label="BYR2"><span class="ver" id="introVer">v2.1.42</span><div class="logo" aria-hidden="true"></div><b class="word">BYR2</b><small class="sub">Build Your Restaurant</small><div class="credit">Created by Marcus Lee</div></div>
 <div id="app">
   <!-- 화면: 2D 도면 | 3D (분할 · 한쪽만) -->
   <main id="stage" class="psplit">
@@ -132,6 +132,18 @@
       <header class="hhead"><span class="logo sm" aria-hidden="true"></span><div><b>BYR2</b><small id="homeVer"></small></div><div class="grow"></div><button class="ib" id="homeClose" aria-label="홈 닫기" title="작업 화면으로"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
       <div id="homeBody"></div>
       <footer class="credit">Created by Marcus Lee</footer>
+    </div>
+  </section>
+
+  <!-- 상권분석: 주소 → 반경 1km 원형 지도 + 업종별 경쟁사 -->
+  <section id="market" aria-label="상권분석" hidden>
+    <header class="mkh"><button class="btn" id="mkBack">‹ 홈</button><b>상권분석</b><small>반경 1km · 소상공인시장진흥공단 상가정보 · 행정안전부 인허가</small></header>
+    <div class="mkb">
+      <aside id="mkPanel" class="mkp"></aside>
+      <main class="mkm"><canvas id="mkCv"></canvas><div id="mkTip" class="mktip" hidden></div>
+        <div class="mkz"><button class="ib" id="mkZout" aria-label="넓게 (최대 1km)">−</button><b id="mkZv">300m</b><button class="ib" id="mkZin" aria-label="가까이">+</button><span class="sep"></span><button class="btn" id="mkZ300">300m</button><button class="btn" id="mkZ1k">1km</button></div>
+        <div class="mklg"><span style="--c:#ffd21a"><i class="sq"></i>내 상가</span><span style="--c:#e60012"><i></i>자사</span><span style="--c:#1d3f9a"><i></i>메이저</span><span style="--c:#f07f13"><i></i>중견</span><span style="--c:#7a49cf"><i></i>브랜드</span><span style="--c:#5f6875"><i></i>개인</span><span style="--c:#9aa0a8"><i></i>인허가 폐업</span></div>
+      </main>
     </div>
   </section>
 

@@ -8,6 +8,7 @@ import { Plan2D, KINDS, fitOpening } from './plan2d.js';
 import * as cloud from './cloud.js';
 import { airKind } from './air.js';
 import * as SITE from './site.js';
+import { openMarket, recList as marketRecs } from './market.js';
 import { CanvasRec, recType } from './rec.js';
 import * as BL from './blender.js';
 import { Sketch3D } from './sketch3d.js';
@@ -25,7 +26,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.39';
+export const APP_VERSION = '2.1.42';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1751,12 +1752,12 @@ const LGROUPS = [['sign', '간판 (불 들어오는)'], ['triple', '3구 매입�
 const present = {
   on: false, mode: 'free', prev: null, op: 0.25, master: 0.2,
   enter() {
-    if (this.on) return; if (engine.walk && engine.walk.on) engine.walk.stop?.(); if (engine.xray) setXray(null);
+    if (this.on) return; if (engine.walker && engine.walker.active) engine.walker.stop(); /* 걷기 중이면 먼저 끝냄 (이름 오타로 안 끝나던 문제) */ if (engine.xray) setXray(null);
     this.prev = { pane: S.pane, style: engine.style, props: S.propsOpen }; this.on = true; S.propsOpen = false; $('#props') && ($('#props').hidden = true);
     document.body.classList.add('presenting'); setPane('3d'); this.build(); this.set('free'); toast('발표 모드 · Esc 로 나가요', 2500);
   },
   exit() {
-    if (!this.on) return; this.on = false; engine.setSpin(false); engine.setPresent(null); this.box && this.box.remove(); this.box = null; document.body.classList.remove('presenting');
+    if (!this.on) return; this.on = false; engine.setSpin(false); if (engine.walker.active) engine.walker.stop(); engine.controls.enabled = true; engine.setPresent(null); this.box && this.box.remove(); this.box = null; document.body.classList.remove('presenting');
     const p = this.prev || {}; if (p.style && p.style !== engine.style) setStyle(p.style, true); else engine.setStyle(engine.style); setPane(p.pane || '3d'); engine.invalidate(true);
   },
   set(m) {
@@ -1878,7 +1879,7 @@ async function goBack() { if (present.on) return present.exit();
 
 /* ---------- 홈 (대시보드) ---------- */
 const HI = {
-  site: '<path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>', cont: '<path d="M8 5l11 7-11 7z"/>', new: '<path d="M12 5v14M5 12h14"/>', open: '<path d="M4 6h6l2 2h8v11H4z"/>', legacy: '<path d="M4 4h12l4 4v12H4z"/><path d="M8 13h8M8 17h5"/>',
+  market: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/><path d="M11 7.5v3.5l2.3 1.6"/>', site: '<path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>', cont: '<path d="M8 5l11 7-11 7z"/>', new: '<path d="M12 5v14M5 12h14"/>', open: '<path d="M4 6h6l2 2h8v11H4z"/>', legacy: '<path d="M4 4h12l4 4v12H4z"/><path d="M8 13h8M8 17h5"/>',
   cloud: '<path d="M7 18a4 4 0 0 1-.5-8 6 6 0 0 1 11.5 1.5A3.5 3.5 0 0 1 17.5 18z"/>', sample: '<path d="M3 21h18M5 21V9l7-5 7 5v12"/><path d="M9 21v-6h6v6"/>', model: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5"/>', ai: '<path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4z"/>',
 };
 function showHome() { $('#home').hidden = false; renderHome(); }
@@ -2154,12 +2155,17 @@ function bindHomeAi() {
     catch (er) { if (typed && old) cloud.setAiKey(old, pv); store.set('byr.aiOk', { ok: false, key: k.slice(-6), msg: '⛔ ' + er.message, at: Date.now() }); R(`⛔ ${er.message}${er.detail ? '\n→ ' + er.detail : ''}${typed && old ? '\n(새 키가 안 돼서 예전 키로 되돌렸어요)' : ''}`, 'bad'); }
     e.target.disabled = false; };
 }
+const MKCTX = () => ({ toast, saveFile, ask, askText, onClose: () => { if (!$('#home').hidden) renderHome(); }, open3d: (r) => { showHome(); SF.q = r.title; SF.res = [r]; renderSiteFind(); const b = $('[data-sr="0"]'); if (b) b.click(); } });
+async function homeMarketRecs() { const el = $('#hMkRec'); if (!el) return; const L = await marketRecs(); if (!L.length) { el.hidden = true; return; } el.hidden = false;
+  el.innerHTML = `<small>최근 상권</small>${L.slice(0, 6).map((m) => `<button data-mkr="${esc(m.id)}" title="${esc(m.cats || '')}"><b>${esc(m.title)}</b>${m.n ? `<span>${esc((m.cats || '').split(' + ')[0])} 1km ${m.n[2]}</span>` : ''}</button>`).join('')}${L.length > 6 ? `<button data-mkr=""><b>전체 ${L.length}곳</b></button>` : ''}`;
+  $$('[data-mkr]', el).forEach((b) => (b.onclick = () => openMarket(MKCTX(), b.dataset.mkr || undefined))); }
 async function renderHome() {
   { const ok = store.get('byr.aiOk', null), k = cloud.aiKey(); S.aiOk = !!(ok && ok.ok && k && ok.key === k.slice(-6)); }
   const s = cloud.session(), pv = cloud.aiProvider(), key = cloud.aiKey(), last = lib2.lastSync(), list = await lib2.listLocal().catch(() => []), cur = S.model;
   $('#homeVer').textContent = `BYR Next ${APP_VERSION} · ${IS_APP() ? (window.byr ? 'PC' : '모바일') : '웹'}`;
   $('#homeBody').innerHTML = `
     <button class="hcont" data-h="cont">${SV(HI.cont)}<div><b>이어서 작업</b><small>${esc(cur ? cur.name : '')} · ${cur ? `벽 ${cur.levels[cur.activeLevel].walls.length} · 기물 ${cur.levels[cur.activeLevel].items.length}` : ''}</small></div></button>
+    <button class="hmarket" data-h="market">${SV(HI.market)}<div><b>상권분석</b><small>주소 · 우편번호로 상가를 찾고, 반경 1km 지도에 하려는 업종의 경쟁사(치킨 · 고깃집 · 호프 …)를 핀으로 · 개업일 · 영업 여부 · 보고서</small></div><em>열기</em></button><div class="hmrec" id="hMkRec"></div>
     <div class="hacts">
       <button data-h="import" class="hbig">${SV(HI.ai)}<span><b>자료로 매장 만들기</b><small>도면 · 3D 렌더 · 전열도를 올리면 BYR 매장으로</small></span></button>
       <button data-h="site" class="hbig">${SV(HI.site)}<span><b>주소로 상가 찾기 · 상권 3D</b><small>주소를 넣으면 반경 500m 건물 · 도로 · 용도지역을 세우고, 상가를 골라 도면 시작</small></span></button>
@@ -2176,12 +2182,13 @@ async function renderHome() {
       <p class="hint">${s ? `${esc(s.email || '')} · [계정에 저장] 한 프로젝트만 계정에 올라가요 · 다른 기기에서는 [계정에서 받기]${last ? ` · 마지막 ${new Date(last).toLocaleString('ko-KR')}` : ''}` : '기존 BYR 앱과 같은 이메일 · 비밀번호로 로그인하면, PC 에서 하던 작업을 폰에서 이어 하고 기존 앱 프로젝트도 불러올 수 있어요.'}</p>
       <div class="btns">${s ? '<button class="btn pri" data-h="sync">계정에서 받기</button><button class="btn" data-h="account">기존 앱 프로젝트</button><button class="btn" data-h="logout">로그아웃</button>' : '<button class="btn pri" data-h="login">로그인</button>'}</div><p class="hint" id="hMsg"></p></section>
 `;
-  $('#homeBody').insertAdjacentHTML(S.aiOk ? 'beforeend' : 'afterbegin', homeAiHtml());
+  $('#homeBody').insertAdjacentHTML(S.aiOk ? 'beforeend' : 'afterbegin', homeAiHtml()); homeMarketRecs();
   bindHomeAi();
   const act = async (h) => {
     if (h === 'cont') return closeHome();
     if (h === 'import') return renderImport();
     if (h === 'site') return renderSiteFind();
+    if (h === 'market') return openMarket(MKCTX());
     if (h === 'all') { S.homeAll = true; return renderHome(); }
     if (h === 'new') { closeHome(); return ACT.new(); }
     if (h === 'clean') { if (!(await ask('충돌 사본을 모두 지울까요?', '이름에 "(충돌 사본)" 이 붙은 프로젝트를 이 기기와 계정에서 지워요. 되돌릴 수 없어요.'))) return; const n = await lib2.cleanConflicts(); toast(`충돌 사본 ${n}개를 지웠어요`); return renderHome(); }
@@ -2345,7 +2352,7 @@ async function boot() {
   setTimeout(() => dropIntro(), 12000); /* 안전장치: 무엇이 오래 걸려도 12초 뒤엔 로딩 화면을 걷는다 */
   let first = null; try { const id = lib2.lastId(); first = id && (await lib2.loadLocal(id)); } catch (e) { console.warn(e); }
   await setModel(first || emptyProject());
-  window.__goBack = goBack; window.BYR = { S, engine, plan, mkItem, emptyProject, setModel, level, commit, uid, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
+  window.__goBack = goBack; window.BYR = { S, engine, present, plan, mkItem, emptyProject, setModel, level, commit, uid, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
   initLang(); checkUpdate(); showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
   if ($('#introVer')) $('#introVer').textContent = 'v' + APP_VERSION;
   const wait = Math.max(1200, 3000 - performance.now()); /* 로딩 화면: 처음부터 최소 3초 · 준비가 끝난 뒤에도 1.2초 더 */ setTimeout(() => dropIntro(), wait);
