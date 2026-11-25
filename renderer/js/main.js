@@ -160,7 +160,7 @@ export class Engine {
   }
   /** 화면 오른쪽을 패널이 가릴 때 장면 가운데를 왼쪽으로 옮긴다 (px) */
   setShift(px) { this.shift = px || 0; this._applyShift(); }
-  _applyShift() { const el = this.canvas, w = el.clientWidth, h = el.clientHeight; if (!w) return; for (const c of [this.persp, this.ortho]) { if (this.shift) c.setViewOffset(w, h, this.shift, 0, w, h); else c.clearViewOffset(); } }
+  _applyShift() { const el = this.canvas, w = el.clientWidth, h = el.clientHeight; if (!w) return; if (this.secView && this.secView.on) { this.secView.apply(); return; } for (const c of [this.persp, this.ortho]) { if (this.shift) c.setViewOffset(w, h, this.shift, 0, w, h); else c.clearViewOffset(); } }
   _fitOrtho() { const o = this.ortho, s = this.orthoSize || 8, a = this.aspect || 1; o.left = -s * a; o.right = s * a; o.top = s; o.bottom = -s; o.updateProjectionMatrix(); }
   _frame() {
     const now = performance.now(), dt = Math.min(0.1, ((now - (this._t || now)) / 1000)); this._t = now;
@@ -169,7 +169,7 @@ export class Engine {
     if (this._fly) { const f = this._fly; f.t += dt * 1000; const k = Math.min(1, f.t / f.ms); f.step(k); if (k >= 1) { this._fly = null; f.done(true); } }
     if (this.siteOn) { const d = this.camera.position.distanceTo(this.controls.target), n = Math.min(2, Math.max(0.05, d * 0.004)); if (Math.abs(this.persp.near - n) > n * 0.2) { this.persp.near = n; this.persp.updateProjectionMatrix(); } } /* 상권: 거리에 따라 near 조정 (바닥 겹침 줄무늬 방지) */
     if (this.orbitT && !this.walker.active) { const t = this.controls.target, p = this.camera.position, a = (-2 * Math.PI * dt) / this.orbitT, x = p.x - t.x, z = p.z - t.z; p.x = t.x + x * Math.cos(a) - z * Math.sin(a); p.z = t.z + x * Math.sin(a) + z * Math.cos(a); this.camera.lookAt(t); } /* 360° 한 바퀴 = orbitT 초 */
-    if (this.walker.active) this.walker.update(dt); else { if (this.panKeys && this.panKeys.size) this._keyPan(dt); if (this.controls.update()) this._moveT = now; }
+    if (this.walker.active) this.walker.update(dt); else if (this.secView && this.secView.on) this.secView.tick(dt, this.panKeys); /* 단면 투시: 소실점 고정 · 창만 이동 */ else { if (this.panKeys && this.panKeys.size) this._keyPan(dt); if (this.controls.update()) this._moveT = now; }
     const anim = this.recording || this.orbitT || this.air.on || (this.sim.on && this.sim.run) || this.walker.active || this._fly || this.controls.autoRotate || this.design.active || this.dragging;
     const moving = anim || now - this._moveT < 220;
     if (!anim && !this._need && !(this._wasMoving && !moving) && now - this._lastR < 2000) return; /* 아무것도 안 바뀌면 그리지 않음 (멈춘 화면은 GPU 를 쉬게) */
@@ -188,7 +188,7 @@ export class Engine {
   snapshotAt(W, H, type = 'image/png') {
     const r = this.renderer, pr = r.getPixelRatio(), sh = this.shift; this.shift = 0;
     try { r.setPixelRatio(1); r.setSize(W, H, false); this.composer.setPixelRatio && this.composer.setPixelRatio(1); this.composer.setSize(W, H); this.ssaoPass.setSize(W, H); this.stylePass.setSize(W, H); this.fxaaPass.material.uniforms.resolution.value.set(1 / W, 1 / H);
-      this.persp.aspect = W / H; this.persp.clearViewOffset(); this.persp.updateProjectionMatrix(); this.aspect = W / H; this._fitOrtho(); this.ortho.clearViewOffset(); this.composer.render(); return this.canvas.toDataURL(type, 0.92); }
+      this.persp.aspect = W / H; this.persp.clearViewOffset(); this.persp.updateProjectionMatrix(); if (this.secView && this.secView.on) this.secView.apply(W, H); this.aspect = W / H; this._fitOrtho(); this.ortho.clearViewOffset(); this.composer.render(); return this.canvas.toDataURL(type, 0.92); }
     finally { r.setPixelRatio(pr); this.composer.setPixelRatio && this.composer.setPixelRatio(pr); this.shift = sh; this.resize(); }
   }
   /* ---------- 단면 보기 (기존 앱 v12): h = 높이에서 자르기 · x / z = 세로로 자르기 ---------- */

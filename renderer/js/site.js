@@ -80,33 +80,30 @@ async function vwLayer(data, box, V, step, max = 6) {
   return out;
 }
 /** lon/lat 중심 반경 R(m) → 그리기 자료 */
-/** opt: { dem: false (지형 생략), zones: false (용도지역 생략), pages: 건물 최대 쪽수(1쪽 1000동), bigWater: 강 · 호수 면(여러 선 relation)까지 } */
-export async function loadSite(lon, lat, R = 500, step = () => {}, opt = {}) {
+export async function loadSite(lon, lat, R = 500, step = () => {}) {
   const P = proj(lon, lat), V = vworld(), dLon = (R * 1.05) / P.kx, dLat = (R * 1.05) / P.ky, box = [lon - dLon, lat - dLat, lon + dLon, lat + dLat].map((v) => +v.toFixed(7));
-  const inR = (pts) => pts.some(([x, y]) => x * x + y * y <= R * R), lineInR = (pts) => inR(pts) || pts.some((q, k) => { if (!k) return false; const p = pts[k - 1], dx = q[0] - p[0], dy = q[1] - p[1], L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, -(p[0] * dx + p[1] * dy) / L2)); return Math.hypot(p[0] + dx * t, p[1] + dy * t) <= R; }), site = { lon, lat, R, buildings: [], zones: [], roads: [], green: [], water: [], rivers: [], trees: [], src: [], at: new Date().toISOString().slice(0, 10) };
+  const inR = (pts) => pts.some(([x, y]) => x * x + y * y <= R * R), site = { lon, lat, R, buildings: [], zones: [], roads: [], green: [], water: [], trees: [], src: [], at: new Date().toISOString().slice(0, 10) };
   const ring = (c) => { const p = c.map(([a, b]) => P.fwd(a, b)); if (p.length > 2 && p[0][0] === p[p.length - 1][0] && p[0][1] === p[p.length - 1][1]) p.pop(); return p; };
   // 1) 브이월드: 건물 · 용도지역
   if (V.key) {
-    step('브이월드 건물 정보 받는 중…'); const fs = await vwLayer('LT_C_SPBD', box, V, step, opt.pages || 6);
+    step('브이월드 건물 정보 받는 중…'); const fs = await vwLayer('LT_C_SPBD', box, V, step);
     if (fs[0]) { const pr = fs[0].properties || {}; site.raw = Object.fromEntries(Object.entries(pr).slice(0, 30).map(([k, v]) => [k, String(v).slice(0, 24)])); step('건물 필드: ' + Object.entries(site.raw).map(([k, v]) => k + '=' + v).join(', ')); }
     for (const f of fs) { const pr = f.properties || {}, fl = +pick(pr, /gro_flo|grnd_?flr|flo_co|^flr/i) || 0, code = pick(pr, /bdtyp|prpos_code|use_cd|bld_use/i), nm = pick(pr, /buld_nm|bld_nm|bdnm/i), un = pick(pr, /prpos|usage|use_nm|bdtyp_nm/i);
       for (const c of ringsOf(f.geometry)) { const p = ring(c); if (p.length >= 3 && inR(p)) site.buildings.push({ p, f: fl || null, use: useOf(code, un || nm), name: nm || '', addr: pick(pr, /rd_nm|road|addr|rn_nm/i) || '', code: code || '', pnu: pnuOf(pr) }); } }
     site.src.push('브이월드 도로명주소건물');
-    if (opt.zones !== false) step('용도지역 받는 중…');
-    if (opt.zones !== false) for (const L of ['LT_C_UQ111', 'LT_C_UQ112', 'LT_C_UQ113', 'LT_C_UQ114']) { try { const zs = await vwLayer(L, box, V, null, 2); for (const f of zs) { const pr = f.properties || {}, n = pick(pr, /uname|prpos_area|^name$|dgm_nm/i) || Object.values(pr).find((v) => typeof v === 'string' && /지역$|지구$/.test(v)) || ''; for (const c of ringsOf(f.geometry)) { const p = ring(c); if (p.length >= 3) site.zones.push({ p, name: n }); } } } catch (e) { if (L === 'LT_C_UQ111') step('용도지역은 건너뜀 (' + (e.code || '') + ')'); } }
+    step('용도지역 받는 중…');
+    for (const L of ['LT_C_UQ111', 'LT_C_UQ112', 'LT_C_UQ113', 'LT_C_UQ114']) { try { const zs = await vwLayer(L, box, V, null, 2); for (const f of zs) { const pr = f.properties || {}, n = pick(pr, /uname|prpos_area|^name$|dgm_nm/i) || Object.values(pr).find((v) => typeof v === 'string' && /지역$|지구$/.test(v)) || ''; for (const c of ringsOf(f.geometry)) { const p = ring(c); if (p.length >= 3) site.zones.push({ p, name: n }); } } } catch (e) { if (L === 'LT_C_UQ111') step('용도지역은 건너뜀 (' + (e.code || '') + ')'); } }
     if (site.zones.length) site.src.push('브이월드 용도지역');
   }
   // 2) OpenStreetMap: 도로 · 녹지 · 물 · 나무 (+ 키가 없으면 건물)
   step('도로 · 녹지 받는 중 (OpenStreetMap)…');
-  const around = `(around:${Math.round(R * 1.05)},${lat},${lon})`, q = `[out:json][timeout:60];(way["highway"]${around};way["leisure"~"park|garden|playground|pitch"]${around};way["landuse"~"grass|forest|recreation_ground|meadow"]${around};way["natural"~"water|wood"]${around};way["waterway"~"river|stream|canal|riverbank"]${around};${opt.bigWater ? `relation["natural"="water"]${around};relation["waterway"="riverbank"]${around};` : ''}node["natural"="tree"]${around};${V.key ? '' : `way["building"]${around};`});out geom;`;
+  const around = `(around:${Math.round(R * 1.05)},${lat},${lon})`, q = `[out:json][timeout:60];(way["highway"]${around};way["leisure"~"park|garden|playground|pitch"]${around};way["landuse"~"grass|forest|recreation_ground|meadow"]${around};way["natural"~"water|wood"]${around};node["natural"="tree"]${around};${V.key ? '' : `way["building"]${around};`});out geom;`;
   let osm = null; for (const host of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) { try { osm = await getJson(host + '?data=' + encodeURIComponent(q)); break; } catch (e) { step('도로 서버 다시 시도…'); } }
   const RW = { motorway: 24, trunk: 22, primary: 20, secondary: 16, tertiary: 12, unclassified: 8, residential: 7, living_street: 6, service: 5, pedestrian: 5, footway: 2.2, path: 2, cycleway: 2.5, steps: 2 };
   for (const el of (osm && osm.elements) || []) {
     const t = el.tags || {};
     if (el.type === 'node' && t.natural === 'tree') { const p = P.fwd(el.lon, el.lat); if (p[0] ** 2 + p[1] ** 2 <= R * R) site.trees.push(p); continue; }
-    if (el.type === 'relation') { for (const rg of joinRings((el.members || []).filter((m) => m.type === 'way' && m.role !== 'inner' && m.geometry).map((m) => m.geometry.map((g) => P.fwd(g.lon, g.lat))))) if (rg.length > 2) site.water.push({ p: rg, big: 1 }); continue; } /* 강 · 호수 (여러 선으로 된 면) */
-    if (!el.geometry) continue; const pts = el.geometry.map((g) => P.fwd(g.lon, g.lat)); if (!((t.highway || t.waterway) ? lineInR(pts) : inR(pts))) continue;
-    if (t.waterway) { if (t.waterway === 'riverbank') site.water.push({ p: pts.slice(0, -1) }); else site.rivers.push({ p: pts, w: t.waterway === 'river' ? 14 : t.waterway === 'canal' ? 8 : 4, name: t.name || '' }); continue; }
+    if (!el.geometry) continue; const pts = el.geometry.map((g) => P.fwd(g.lon, g.lat)); if (!inR(pts)) continue;
     if (t.highway) { const base = t.highway.replace(/_link$/, ''); if (!(base in RW)) continue; const w = t.lanes ? Math.max(5, +t.lanes * 3.2 + 1) : t.width ? +t.width || RW[base] : RW[base]; site.roads.push({ p: pts, w, k: base, name: t.name || '' }); }
     else if (t.building) { const p = pts.slice(0, -1); if (p.length >= 3) site.buildings.push({ p, f: +t['building:levels'] || null, use: useOf('', `${t.building} ${t.shop || ''} ${t.amenity || ''} ${t.office || ''}`), name: t.name || '', addr: t['addr:street'] || '' }); }
     else if (t.natural === 'water') site.water.push({ p: pts.slice(0, -1) });
@@ -115,7 +112,7 @@ export async function loadSite(lon, lat, R = 500, step = () => {}, opt = {}) {
   if (osm) site.src.push('OpenStreetMap');
   // 도로가 비면 브이월드 도로(도로명주소 도로)로 대신
   if (!site.roads.length && V.key) { step('도로를 브이월드에서 받는 중…'); try { const rs = await vwLayer('LT_L_SPRD', box, V, null, 3); for (const f of rs) { const pr = f.properties || {}, g = f.geometry || {}, lines = g.type === 'LineString' ? [g.coordinates] : g.type === 'MultiLineString' ? g.coordinates : []; const w = +pick(pr, /road_bt|rd_bt|width|rbp_cn|^bt$/i) || 8; for (const c of lines) { const pts = c.map(([a, b]) => P.fwd(a, b)); if (inR(pts)) site.roads.push({ p: pts, w: Math.max(3, w), k: 'vworld', name: pick(pr, /rn$|rd_nm|road_nm|rn_nm/i) || '' }); } } if (site.roads.length) site.src.push('브이월드 도로'); else step('브이월드 도로도 비었어요'); } catch (e) { step('브이월드 도로 실패 (' + (e.code || e.message) + ')'); } }
-  if (opt.dem !== false) try { await loadDem(site, step); } catch (e) { step('지형은 건너뜀 (' + (e.code || e.message) + ')'); }
+  try { await loadDem(site, step); } catch (e) { step('지형은 건너뜀 (' + (e.code || e.message) + ')'); }
   // 찾은 주소 건물 (중심점이 들어 있는 건물 → 없으면 30m 안 가장 가까운 건물)
   site.hit = site.buildings.findIndex((b) => inPoly(0, 0, b.p)); if (site.hit < 0) { let best = 30, k = -1; site.buildings.forEach((b, i) => { const c = cen(b.p), d = Math.hypot(c[0], c[1]); if (d < best) { best = d; k = i; } }); site.hit = k; }
   if (!V.key) site.src.push('건물: OpenStreetMap (층수가 비어 있으면 3층으로)');
@@ -123,12 +120,6 @@ export async function loadSite(lon, lat, R = 500, step = () => {}, opt = {}) {
   return site;
 }
 
-/** 끝점이 맞닿는 선들을 이어 닫힌 고리로 (OSM 여러 선 면) */
-function joinRings(lines) {
-  const out = [], L = lines.map((l) => l.slice()), same = (a, b) => Math.abs(a[0] - b[0]) < 0.05 && Math.abs(a[1] - b[1]) < 0.05;
-  while (L.length) { let r = L.shift(); for (let guard = 0; guard < 500 && !same(r[0], r[r.length - 1]); guard++) { const k = L.findIndex((l) => same(l[0], r[r.length - 1]) || same(l[l.length - 1], r[r.length - 1])); if (k < 0) break; const l = L.splice(k, 1)[0]; r = r.concat(same(l[0], r[r.length - 1]) ? l.slice(1) : l.reverse().slice(1)); } if (same(r[0], r[r.length - 1])) r.pop(); out.push(r); }
-  return out;
-}
 /* ---------- 건축물대장 (공공데이터포털 건축HUB 표제부): 높이 · 층수 · 주용도 · 연면적 · 사용승인 ---------- */
 const pnuOf = (pr) => { for (const v of Object.values(pr || {})) { const s = String(v); if (/^\d{19}$/.test(s)) return s; } return null; };
 export function inPoly(x, y, P) { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, yi] = P[i], [xj, yj] = P[j]; if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; }

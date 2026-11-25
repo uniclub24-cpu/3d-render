@@ -9,7 +9,7 @@ const MM = 0.001, R = 260; // 몸 반지름 mm
 export class Walker {
   constructor(engine) { this.e = engine; this.active = false; this.eye = 1600; this.through = false; this.keys = new Set(); this.stick = { x: 0, y: 0 }; this._bind(); }
   start() {
-    const e = this.e, L = e.level; if (!L || this.active) return; /* 걷는 중에 다시 누르면 무시 (걷기 시점이 '원래 시점'으로 저장되던 문제) */
+    const e = this.e, L = e.level; if (!L) return;
     this.saved = { cam: e.camera, pos: e.camera.position.clone(), tgt: e.controls.target.clone(), zoom: e.camera.zoom };
     if (e.camera.isOrthographicCamera) e._useCamera(e.persp);
     const t = e.controls.target, d = e.camera.position.clone().sub(t); this.yaw = Math.atan2(d.x, d.z); this.pitch = 0;
@@ -19,9 +19,7 @@ export class Walker {
   }
   stop() {
     if (!this.active) return; const e = this.e; this.active = false; this.ui(false); e.persp.fov = this.fov || 45; e.persp.updateProjectionMatrix();
-    if (this.saved) { if (this.saved.cam !== e.camera) e._useCamera(this.saved.cam); e.camera.position.copy(this.saved.pos); e.controls.target.copy(this.saved.tgt); if (this.saved.zoom) { e.camera.zoom = this.saved.zoom; e.camera.updateProjectionMatrix(); } this.saved = null; }
-    /* 안전장치: 기준점이 눈앞에 붙어 있으면 (이동 · 확대 · 돌리기가 느려짐) 앞으로 6m 띄운다 */
-    { const c = e.camera, t = e.controls.target, d = c.position.distanceTo(t); if (d < 1.5) { const dir = t.clone().sub(c.position); if (dir.lengthSq() < 1e-6) c.getWorldDirection(dir); dir.normalize(); t.copy(c.position).addScaledVector(dir, 6); } }
+    if (this.saved) { if (this.saved.cam !== e.camera) e._useCamera(this.saved.cam); e.camera.position.copy(this.saved.pos); e.controls.target.copy(this.saved.tgt); }
     e.controls.enabled = true; e.controls.update(); this.keys.clear(); this.stick = { x: 0, y: 0 }; if (this.onStop) this.onStop();
   }
   ui(on) { const el = document.querySelector('#walkUI'); if (el) el.hidden = !on; const n = document.querySelector('#walkThrough'); if (n) n.setAttribute('aria-pressed', String(this.through)); }
