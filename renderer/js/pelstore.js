@@ -97,7 +97,7 @@ export function pelStore(kind, { emptyProject, mkItem, uid, kids = null, theme =
       const wR = wall(xw, Y(YK), xw, D, { name: '룸 | 홀 벽' });
       const gK = wall(0, Y(YK), xw, Y(YK), { color: C.MT01, t: 60, pz: 'glass', name: '키즈룸 | 룸 강화유리 벽' });
       /* 강화유리 벽: 거의 통째로 유리 + 유리문 */
-      const gl = (w, door, dw = 900) => { const Lw = len(w), a = door - dw / 2 - 40, b = door + dw / 2 + 40; op(w, door, 'door1', dw, 2400, 0, { frame: C.MT01, tint: '#d8eef6', name: '강화유리 문' });
+      const gl = (w, door, dw = 900) => { const Lw = len(w), a = door - dw / 2 - 40, b = door + dw / 2 + 40; op(w, door, 'door1', dw, 2400, 0, { frame: C.MT01, tint: '#d8eef6', glassLeaf: true, name: '강화유리 문' });
         if (a > 500) op(w, a / 2 + 30, 'full', Math.round(a - 80), 2600, 0, { frame: C.MT01, tint: '#d8eef6', fw: 30, name: '강화유리' }); if (Lw - b > 500) op(w, (b + Lw) / 2 - 30, 'full', Math.round(Lw - b - 80), 2600, 0, { frame: C.MT01, tint: '#d8eef6', fw: 30, name: '강화유리' }); };
       gl(gH, 700); gl(gK, len(gK) - 800);
       op(wR, 900, 'door1', 900, 2100, 0, { frame: C.LPM01, name: '룸 출입문' });

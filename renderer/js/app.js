@@ -16,7 +16,7 @@ import { SectionView } from './section3d.js';
 import { initUiMove, regrip, resetUiMove, toggleClean } from './uimove.js';
 import * as DUAL from './dual.js';
 import { pelStore } from './pelstore.js';
-import { kidsItems, placeKids, KID_THEMES } from './kids.js';
+import { kidsZone, KID_THEMES } from './kids.js';
 let secView = null;
 let sketch = null;
 import * as lib2 from './store.js';
@@ -30,7 +30,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.45';
+export const APP_VERSION = '2.1.46';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -752,24 +752,29 @@ async function makeManual(k) {
   const M = pelStore(kind, { emptyProject, mkItem, uid, kids }); if (!(await setModel(M))) return; setPane('split'); engine.view('iso'); plan.fit();
   toast(`${M.name} · 기물 ${level().items.length}개 · 조명 · 재질은 매뉴얼 스펙대로`, 4500);
 }
-/* ---------- 키즈룸 넣기 (ㄱ자 · 일자 · 2단 + 미끄럼틀) ---------- */
+/* ---------- 키즈룸 넣기 (직영점 참고): 벽으로 막힌 키즈룸 + 강화유리 벽 · 유리문 + 붙은 룸 ---------- */
 async function kidsDialog() {
-  let c = { form: 'L', len: 5.4, flip: false, theme: 'brown' }; try { c = { ...c, ...(JSON.parse(localStorage.getItem('byr.kids')) || {}) }; } catch {}
-  const w0 = selWall(); const p = ask('키즈룸 넣기', '', [{ label: '취소', value: false }, { label: '넣기', value: 'ok', kind: 'pri' }]);
-  $('#dlgM').innerHTML = `<p class="hint" style="margin:0 0 8px">직영점처럼 2단 파이프 프레임 · 위층 쿠션 발판 · 미끄럼틀 · 웨이브 롤러 · 볼풀 · X 롤러 · 링 터널 · 타공 오르기 · 샌드백을 한 번에 놓아요. ${w0 ? '<b>고른 벽</b>을 따라 놓아요.' : '벽을 먼저 고르면 그 벽을 따라, 아니면 가장 긴 벽을 따라 놓아요.'}</p>
-    <div class="fld">형태<div class="seg2" role="group"><button data-kf="L" aria-pressed="${c.form === 'L'}">ㄱ자 (미끄럼틀 날개)</button><button data-kf="I" aria-pressed="${c.form === 'I'}">일자</button></div></div>
-    <label class="fld">길이 (m · 벽을 따라)<input id="kdLen" type="number" min="3.6" max="12" step="0.1" value="${c.len}"></label>
-    <label class="tog">미끄럼틀을 반대쪽 끝으로<input type="checkbox" id="kdFlip" ${c.flip ? 'checked' : ''}></label>
-    <label class="fld">색<select id="kdTh">${Object.entries(KID_THEMES).map(([k, v]) => `<option value="${k}" ${c.theme === k ? 'selected' : ''}>${v.name}</option>`).join('')}</select></label>`;
+  let c = { form: 'L', theme: 'brown', lk: 5.0, dk: 4.6, room: true, lr: 4.0, end: false }; try { c = { ...c, ...(JSON.parse(localStorage.getItem('byr.kids2')) || {}) }; } catch {}
+  const w0 = selWall(); const p = ask('키즈룸 넣기 (직영점 구성)', '', [{ label: '취소', value: false }, { label: '넣기', value: 'ok', kind: 'pri' }]);
+  $('#dlgM').innerHTML = `<p class="hint" style="margin:0 0 8px">${w0 ? '<b>고른 벽</b>' : '가장 긴 바깥벽'} 안쪽을 따라 <b>벽으로 막힌 키즈룸</b>(홀 쪽 강화유리 벽 · 유리문, 우드 월 패널 · 레드 띠장)과 <b>붙은 룸</b>(키즈룸 쪽 강화유리 · 홀 쪽 벽 · 문 · 단체 테이블)을 만들고, 키즈룸 안에 2단 놀이 구조물(미끄럼틀 · 웨이브 · 볼풀 …)을 놓아요. 홀 매장용이에요.</p>
+    <div class="fld">놀이 구조물 형태<div class="seg2" role="group"><button data-kf="L" aria-pressed="${c.form === 'L'}">ㄱ자 (미끄럼틀 날개)</button><button data-kf="I" aria-pressed="${c.form === 'I'}">일자</button></div></div>
+    <div class="row" style="gap:8px"><label class="fld" style="flex:1">키즈룸 길이 (m · 벽 따라)<input id="kdLk" type="number" min="4" max="12" step="0.1" value="${c.lk}"></label><label class="fld" style="flex:1">깊이 (m)<input id="kdDk" type="number" min="4" max="8" step="0.1" value="${c.dk}"></label></div>
+    <label class="tog">붙은 룸 만들기<input type="checkbox" id="kdRoom" ${c.room ? 'checked' : ''}></label>
+    <label class="fld">룸 길이 (m)<input id="kdLr" type="number" min="2.5" max="10" step="0.1" value="${c.lr}"></label>
+    <label class="tog">벽 끝 쪽에 붙이기 (반대 모서리)<input type="checkbox" id="kdEnd" ${c.end ? 'checked' : ''}></label>
+    <label class="fld">놀이 구조물 색<select id="kdTh">${Object.entries(KID_THEMES).map(([k, v]) => `<option value="${k}" ${c.theme === k ? 'selected' : ''}>${v.name}</option>`).join('')}</select></label>`;
   $$('[data-kf]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); c.form = b.dataset.kf; $$('[data-kf]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); }));
   if ((await p) !== 'ok') return;
-  c.len = Math.min(12, Math.max(3.6, +$('#kdLen').value || 5.4)); c.flip = $('#kdFlip').checked; c.theme = $('#kdTh').value; try { localStorage.setItem('byr.kids', JSON.stringify(c)); } catch {}
+  const num = (id, a, b, d) => Math.min(b, Math.max(a, +$(id).value || d));
+  c.lk = num('#kdLk', 4, 12, 5); c.dk = num('#kdDk', 4, 8, 4.6); c.room = $('#kdRoom').checked; c.lr = num('#kdLr', 2.5, 10, 4); c.end = $('#kdEnd').checked; c.theme = $('#kdTh').value; try { localStorage.setItem('byr.kids2', JSON.stringify(c)); } catch {}
   const L = level(), w = w0 || L.walls.slice().filter((q) => !q.pz).sort((a, b) => Math.hypot(b.x2 - b.x1, b.y2 - b.y1) - Math.hypot(a.x2 - a.x1, a.y2 - a.y1))[0]; if (!w) return toast('벽이 없어요 · 벽을 먼저 그려 주세요');
-  const wl = Math.hypot(w.x2 - w.x1, w.y2 - w.y1), ux = (w.x2 - w.x1) / wl, uy = (w.y2 - w.y1) / wl, b = levelBox(), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+  const wl = Math.hypot(w.x2 - w.x1, w.y2 - w.y1), ux = (w.x2 - w.x1) / wl, uy = (w.y2 - w.y1) / wl, b = levelBox(), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, t2 = (w.t || 150) / 2;
   let nx = -uy, ny = ux; if (nx * (cx - (w.x1 + w.x2) / 2) + ny * (cy - (w.y1 + w.y2) / 2) < 0) { nx = -nx; ny = -ny; }
-  const res = kidsItems({ form: c.form, len: Math.round(c.len * 1000), flip: c.flip, theme: c.theme }), off = Math.max(0, (wl - res.len) / 2), t2 = (w.t || 150) / 2;
-  const its = placeKids(res, { ax: w.x1, ay: w.y1, ux, uy, nx, ny, off, gap: t2 + 30 }, mkItem); L.items.push(...its);
-  engine.setLevel(L); applyEnv(); commit(); toast(`키즈룸 (${c.form === 'L' ? 'ㄱ자' : '일자'} · ${c.len}m) · 기물 ${its.length}개 · 박스 선택으로 한꺼번에 옮길 수 있어요`, 4500);
+  const need = (c.lk + (c.room ? c.lr : 0)) * 1000; if (need > wl - 100) toast(`벽 길이(${(wl / 1000).toFixed(1)}m)보다 길어요 · 길이를 줄이거나 긴 벽을 고르세요`, 4000);
+  const z = kidsZone({ form: c.form, theme: c.theme, Lk: c.lk * 1000, Dk: c.dk * 1000, room: c.room, Lr: c.lr * 1000, atEnd: c.end }, { ax: w.x1 + nx * t2, ay: w.y1 + ny * t2, ux, uy, nx, ny, wallLen: wl }, { mkItem, uid });
+  L.walls.push(...z.walls); L.openings.push(...z.openings); L.items.push(...z.items); (L.rooms ||= []).push(...z.rooms);
+  engine.setLevel(L); applyEnv(); plan && plan.redraw && plan.redraw(); commit();
+  toast(`키즈룸 ${c.lk}×${c.dk}m${c.room ? ` + 룸 ${c.lr}m` : ''} · 강화유리 벽 · 유리문 · 놀이 구조물 ${c.form === 'L' ? 'ㄱ자' : '일자'}`, 4500);
 }
 /** 페리카나 샘플 매장: 사각 매장 → 자동 배치(주방 규칙) → 매뉴얼 사인 · 시트 · 조형물 */
 async function makeSample(kind) {
@@ -1704,7 +1709,7 @@ const DOCK = [
   { act: 'cmt', g: 'check', label: '댓글', icon: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>' },
   { act: 'check', g: 'check', label: '점검', icon: '<path d="M9 11l2.5 2.5L16 9"/><rect x="4" y="3.5" width="16" height="17" rx="2"/>' },
   { act: 'quote', g: 'check', label: '견적', icon: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>' },
-  { act: 'kids', g: 'plan', label: '키즈 놀이기구', icon: '<path d="M3 20V8h7v12M3 14h7"/><path d="M10 8l9 10h2"/><circle cx="16" cy="6" r="2"/>' },
+  { act: 'kids', g: 'plan', label: '키즈룸', icon: '<path d="M3 20V8h7v12M3 14h7"/><path d="M10 8l9 10h2"/><circle cx="16" cy="6" r="2"/>' },
   { act: 'auto', g: 'plan', label: '자동 배치', icon: '<rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M3.5 10h17M10 10v10.5"/><path d="M14 14h3v3h-3z"/>' },
   { id: 'dkSim', act: 'sim', g: 'check', label: '동선', icon: '<circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h6a3 3 0 0 0 0-6h-2a3 3 0 0 1 0-6h6" stroke-dasharray="2.5 2"/>' },
 ];

@@ -317,8 +317,9 @@ export function buildWalls(level) {
         const nd = Math.max(1, Math.round(o.div || 1)), mw = Math.max(0.02, f * 0.7); for (let k = 1; k < nd; k++) { const x = gx0 + ((gx1 - gx0) * k) / nd; frame.push(boxAt(x - mw / 2, x + mw / 2, gy0, gy1, -0.025, 0.025)); } /* 통창 세로 나눔 */
         if (o.hdiv && o.hdiv > 0) { const y = Math.min(gy1 - 0.05, q.y0 + o.hdiv * MM); if (y > gy0 + 0.05) frame.push(boxAt(gx0, gx1, y - mw / 2, y + mw / 2, -0.025, 0.025)); } /* 가로 띠 (欄間) */
       }
-      if (ty === 'door1') leaf.push(boxAt(gx0, gx1, gy0, gy1, -0.02, 0.02));
-      if (ty === 'door2') leaf.push(boxAt(gx0, (gx0 + gx1) / 2 - 0.004, gy0, gy1, -0.02, 0.02), boxAt((gx0 + gx1) / 2 + 0.004, gx1, gy0, gy1, -0.02, 0.02));
+      if (ty === 'door1') (o.glassLeaf ? glass : leaf).push(boxAt(gx0, gx1, gy0, gy1, -0.012, 0.012)); /* glassLeaf = 강화유리 문 */
+      if (o.glassLeaf && (ty === 'door1' || ty === 'door2')) steel.push(boxAt(gx1 - 0.09, gx1 - 0.07, (gy0 + gy1) / 2 - 0.35, (gy0 + gy1) / 2 + 0.35, -0.06, 0.06)); /* 손잡이 */
+      if (ty === 'door2') (o.glassLeaf ? glass : leaf).push(boxAt(gx0, (gx0 + gx1) / 2 - 0.004, gy0, gy1, -0.02, 0.02), boxAt((gx0 + gx1) / 2 + 0.004, gx1, gy0, gy1, -0.02, 0.02));
       if ((ty === 'pass' || ty === 'slidepass') && o.shelf !== 0) { const sd = (o.shelf ?? 180) * MM, sa = o.shelfSide || 'both'; steel.push(boxAt(q.a - 0.03, q.b + 0.03, q.y0 - (o.shelfT ?? 30) * MM, q.y0, sa === 'b' ? -t / 2 : -t / 2 - sd, sa === 'a' ? t / 2 : t / 2 + sd)); } // 배식 선반 (깊이 · 쪽 · 두께 · 색)
       u = q.b;
     }
