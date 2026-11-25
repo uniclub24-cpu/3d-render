@@ -107,6 +107,13 @@ function signTex(S, w, h, text) {
     const tw = g.measureText(T || '페리카나').width, kx = W / 2 - tw * 0.12, ky = cy - fs * 0.62, k = fs * 0.22; /* 왕관 (둘째 글자 위) */
     neon(() => { g.beginPath(); g.moveTo(kx - k, ky + k * 0.6); g.lineTo(kx - k, ky - k * 0.2); g.lineTo(kx - k * 0.5, ky + k * 0.2); g.lineTo(kx, ky - k * 0.5); g.lineTo(kx + k * 0.5, ky + k * 0.2); g.lineTo(kx + k, ky - k * 0.2); g.lineTo(kx + k, ky + k * 0.6); g.closePath(); g.stroke(); }); }
   else if (S.kind === 'vneon') { g.fillStyle = '#9aa0a6'; g.fillRect(0, 0, W, H); for (const y of [0.18, 0.5, 0.82]) { g.fillStyle = '#d4141c'; g.fillRect(0, H * y, W, H * 0.012); } g.save(); g.translate(W / 2, H / 2); g.rotate(Math.PI / 2); g.font = font(W * 0.42); g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = '#3cf0b0'; g.shadowBlur = W * 0.08; g.fillStyle = '#7ff5c8'; g.fillText(T || '페리카나', 0, 0); g.restore(); }
+  else if (S.kind === 'flex') { /* LED 플렉스(파나플렉스) 간판: 매뉴얼 02 메인간판 — 바탕 · 가운데 로고 · 양옆 띠 · TAKE OUT · TEL */
+    const bg = S.color || '#ffffff', fg = S.fg || '#c8141c', T2 = T || '페리카나'; g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    g.strokeStyle = S.edge || '#9aa0a6'; g.lineWidth = Math.max(4, H * 0.05); g.strokeRect(g.lineWidth / 2, g.lineWidth / 2, W - g.lineWidth, H - g.lineWidth);
+    const fs = Math.min(H * 0.5, (W * 0.34) / Math.max(2, [...T2].length) * 1.7); g.font = `italic 900 ${fs}px "Pretendard","Noto Sans KR","Malgun Gothic",sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = fg; g.fillText(T2, W / 2, H * 0.53);
+    const tw = g.measureText(T2).width, bh = H * 0.06, gap = W * 0.025; g.fillRect(W * 0.035, H * 0.5, W / 2 - tw / 2 - gap - W * 0.035, bh); g.fillRect(W / 2 + tw / 2 + gap, H * 0.5, W / 2 - tw / 2 - gap - W * 0.035, bh);
+    const kx = W / 2 - tw * 0.1, ky = H * 0.53 - fs * 0.62, k = fs * 0.2; g.beginPath(); g.moveTo(kx - k, ky + k * 0.6); g.lineTo(kx - k, ky - k * 0.2); g.lineTo(kx - k * 0.5, ky + k * 0.2); g.lineTo(kx, ky - k * 0.5); g.lineTo(kx + k * 0.5, ky + k * 0.2); g.lineTo(kx + k, ky - k * 0.2); g.lineTo(kx + k, ky + k * 0.6); g.closePath(); g.fill();
+    g.font = font(H * 0.08, 700); g.textAlign = 'left'; g.fillStyle = S.sub || fg; g.fillText(S.left ?? 'TAKE OUT', W * 0.04, H * 0.8); g.textAlign = 'right'; g.fillText(S.right ?? 'TEL 000-0000', W * 0.96, H * 0.8); }
   else if (S.kind === 'ledpanel') { /* LED 백패널: 어두운 판 + 빛나는 글자(후광) + 테두리 LED 띠 */
     g.fillStyle = S.panel || '#18191c'; g.fillRect(0, 0, W, H); const fg = S.fg || '#ffffff', n = Math.max(1, [...(T || '페리카나')].length), fs = Math.min(H * 0.6, (W * 0.86) / (n * 0.95));
     g.font = font(fs); g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = fg; g.shadowBlur = fs * 0.3; g.fillStyle = fg; g.fillText(T || '페리카나', W / 2, H * 0.54); g.shadowBlur = fs * 0.08; g.fillText(T || '페리카나', W / 2, H * 0.54);
@@ -119,8 +126,8 @@ function signTex(S, w, h, text) {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; signCache.set(key, t); return t;
 }
 /** 불이 들어오는 간판 종류 (끄려면 it.signOff) */
-export const LITSIGN = new Set(['signred', 'neon', 'neonred', 'vneon', 'menu', 'ledpanel', 'channel']);
-export const signLit = (S, it = {}) => !it.signOff && (!!S.glow || LITSIGN.has(S.kind) || !!(it.light && it.light.on));
+export const LITSIGN = new Set(['flex', 'signred', 'neon', 'neonred', 'vneon', 'menu', 'ledpanel', 'channel']);
+export const signLit = (S, it = {}) => !it.signOff && (S.kind === 'flex' && it.light ? !!it.light.on : !!S.glow || LITSIGN.has(S.kind) || !!(it.light && it.light.on)); /* LED 플렉스: '불 켜기'로 켜고 끔 */
 /** 3D 돌출 글자 (채널 간판): 글자마다 따로 된 입체. 글자 모양 판을 깊이만큼 촘촘히 겹쳐 옆면을 만들고, 앞면이 빛난다 */
 const chCache = new Map();
 function chMask(ch, bold) {
@@ -145,12 +152,12 @@ export function channelSign(it, S) {
 }
 function signFace(S, w, h, text, it = {}) {
   const map = signTex(S, w, h, text), glow = signLit(S, it), transparent = ['neon', 'neonred', 'window', 'glass'].includes(S.kind);
-  const m = new THREE.MeshStandardMaterial({ map, transparent, alphaTest: S.kind === 'window' ? 0.05 : 0, ...(S.kind === 'neonred' ? { blending: THREE.AdditiveBlending, depthWrite: false } : {}), roughness: 0.5, emissive: glow ? new THREE.Color('#ffffff') : new THREE.Color('#000000'), emissiveMap: glow ? map : null, emissiveIntensity: glow ? (S.kind === 'signred' || S.kind === 'menu' ? 0.75 : 1) : 0, depthWrite: !transparent || S.kind === 'neon' });
+  const m = new THREE.MeshStandardMaterial({ map, transparent, alphaTest: S.kind === 'window' ? 0.05 : 0, ...(S.kind === 'neonred' ? { blending: THREE.AdditiveBlending, depthWrite: false } : {}), roughness: 0.5, emissive: glow ? new THREE.Color('#ffffff') : new THREE.Color('#000000'), emissiveMap: glow ? map : null, emissiveIntensity: glow ? (S.kind === 'signred' || S.kind === 'menu' ? 0.75 : 1) * (S.kind === 'flex' && it.light && it.light.power != null ? Math.max(0.15, Math.min(2.2, it.light.power)) : 1) : 0, depthWrite: !transparent || S.kind === 'neon' });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w * MM, h * MM), m); mesh.renderOrder = 2; return mesh;
 }
 /* ---------- 손으로 만든 모양 (놀이방 · 테라스 · 경사로 · 어닝 · 조명) ----------
  * lib 의 shape 이름으로 고른다. 기준점: 바닥 가운데, x = 폭(w), z = 깊이(d, 앞 +z), y = 높이 */
-const PROC = new Set(['pipeframe', 'wedge', 'slide', 'wave', 'pool', 'xroll', 'bag', 'ring', 'perf', 'deck', 'turf', 'fence', 'awning', 'light3', 'strip', 'postlamp']);
+const PROC = new Set(['pipeframe', 'wedge', 'slide', 'wave', 'pool', 'xroll', 'bag', 'ring', 'perf', 'deck', 'turf', 'fence', 'awning', 'light3', 'strip', 'postlamp', 'disc', 'flat', 'downR', 'linear', 'cone', 'bulb', 'spot', 'bracket']);
 const KBROWN = '#b5866a', KCREAM = '#efe6dc';
 function pm(color, opt = {}) { const m = material('plain', color); return opt.emissive ? Object.assign(m.clone(), { emissive: new THREE.Color(opt.emissive), emissiveIntensity: opt.ei ?? 1 }) : m; }
 function mk(geo, mat, x = 0, y = 0, z = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; return m; }
@@ -188,6 +195,37 @@ function procShape(shape, it, L) {
   } else if (shape === 'fence') { /* 철제 펜스: 기둥 1.2m 안팎 · 위아래 난간 · 세로살 */
     const mat = pm(col), n = Math.max(1, Math.round(it.w / 1200)), posts = []; for (let i = 0; i <= n; i++) { const x = -W / 2 + (W * i) / n; posts.push(x); g.add(mk(new THREE.BoxGeometry(0.06, H, 0.06), mat, x, H / 2, 0)); }
     g.add(mk(new THREE.BoxGeometry(W, 0.04, 0.05), mat, 0, H - 0.02, 0)); g.add(mk(new THREE.BoxGeometry(W, 0.04, 0.05), mat, 0, 0.1, 0)); const bars = Math.round(it.w / 120); for (let i = 1; i < bars; i++) g.add(mk(new THREE.BoxGeometry(0.016, H - 0.14, 0.016), mat, -W / 2 + (W * i) / bars, H / 2 + 0.04, 0));
+  } else if (shape === 'disc') { /* 원형 직부등: 금속 테 + 우윳빛 확산판 (아래로 볼록) */
+    const R = Math.min(W, D) / 2, lc = it.light && it.light.color || (L && L.lightColor) || '#fff1dc';
+    g.add(mk(new THREE.CylinderGeometry(R, R * 0.96, H * 0.45, 40), pm(col), 0, H * 0.775, 0));
+    const dome = mk(new THREE.SphereGeometry(R * 0.93, 40, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), pm('#fffaf0', { emissive: lc, ei: 1.1 }), 0, H * 0.55, 0); dome.scale.y = Math.max(0.12, (H * 0.55) / (R * 0.93)); g.add(dome);
+    const ring = mk(new THREE.TorusGeometry(R * 0.95, Math.min(0.008, H * 0.12), 8, 40), pm('#9aa0a6'), 0, H * 0.55, 0); ring.rotation.x = Math.PI / 2; g.add(ring);
+  } else if (shape === 'flat') { /* 평판 · 라인 LED: 얇은 테 + 빛나는 아래 면 */
+    const lc = it.light && it.light.color || (L && L.lightColor) || '#f4f6ff', b = Math.min(0.018, Math.min(W, D) * 0.08);
+    g.add(mk(new THREE.BoxGeometry(W, H, D), pm(col), 0, H / 2, 0)); g.add(mk(new THREE.BoxGeometry(W - b * 2, 0.003, D - b * 2), pm('#ffffff', { emissive: lc, ei: 1.15 }), 0, -0.001, 0));
+  } else if (shape === 'downR') { /* 원형 매입 다운라이트: 테 + 안쪽 빛 */
+    const R = Math.min(W, D) / 2, lc = it.light && it.light.color || (L && L.lightColor) || '#fff1dc';
+    g.add(mk(new THREE.CylinderGeometry(R, R, Math.max(0.004, H * 0.3), 32), pm(col), 0, H * 0.85, 0)); g.add(mk(new THREE.CylinderGeometry(R * 0.72, R * 0.72, 0.003, 32), pm('#ffffff', { emissive: lc, ei: 1.2 }), 0, H * 0.68, 0));
+  } else if (shape === 'linear') { /* 체인형 빈티지 등 · 라인 펜던트: 몸체 + 아래 빛 + 천장까지 줄 2개 */
+    const lc = it.light && it.light.color || (L && L.lightColor) || '#fff1dc', wire = (it.wire ?? 500) * MM, bh = Math.min(H, 0.09);
+    g.add(mk(new THREE.BoxGeometry(W, bh, D), pm(col), 0, bh / 2 + 0.004, 0)); g.add(mk(new THREE.BoxGeometry(W * 0.96, 0.004, D * 0.7), pm('#ffffff', { emissive: lc, ei: 1.2 }), 0, 0.003, 0));
+    for (let i = 0; i < 10; i++) g.add(mk(new THREE.BoxGeometry(0.004, 0.006, D * 0.7), pm('#888c90'), -W * 0.45 + (W * 0.9 * i) / 9, 0.004, 0));
+    for (const x of [-W * 0.38, W * 0.38]) g.add(tube([x, bh + 0.004, 0], [x, bh + wire, 0], 0.0025, pm('#9aa0a6')));
+  } else if (shape === 'cone') { /* 갓 펜던트 */
+    const R = Math.min(W, D) / 2, lc = it.light && it.light.color || (L && L.lightColor) || '#ffd9a8', wire = (it.wire ?? 600) * MM;
+    const sh = mk(new THREE.CylinderGeometry(R * 0.22, R, H * 0.8, 32, 1, true), Object.assign(pm(col).clone(), { side: THREE.DoubleSide }), 0, H * 0.4, 0); g.add(sh);
+    g.add(mk(new THREE.SphereGeometry(R * 0.28, 16, 10), pm('#fff6e0', { emissive: lc, ei: 1.4 }), 0, H * 0.25, 0)); g.add(tube([0, H * 0.8, 0], [0, H * 0.8 + wire, 0], 0.003, pm('#222222')));
+  } else if (shape === 'bulb') { /* 에디슨 전구 펜던트 */
+    const R = Math.min(W, D) / 2, lc = it.light && it.light.color || (L && L.lightColor) || '#ffc27a', wire = (it.wire ?? 700) * MM;
+    const b = mk(new THREE.SphereGeometry(R, 20, 14), Object.assign(pm('#ffe2b0', { emissive: lc, ei: 1.3 }).clone(), { transparent: true, opacity: 0.9 }), 0, R, 0); b.scale.y = 1.35; g.add(b);
+    g.add(mk(new THREE.CylinderGeometry(R * 0.45, R * 0.45, R * 0.6, 16), pm('#2b2b2b'), 0, R * 2.6, 0)); g.add(tube([0, R * 2.9, 0], [0, R * 2.9 + wire, 0], 0.003, pm('#222222')));
+  } else if (shape === 'spot') { /* 원통 스포트 (직부) */
+    const R = Math.min(W, D) / 2, lc = it.light && it.light.color || (L && L.lightColor) || '#fff1dc';
+    const c = mk(new THREE.CylinderGeometry(R, R, H * 0.85, 24), pm(col), 0, H * 0.5, 0); g.add(c); g.add(mk(new THREE.CylinderGeometry(R * 0.75, R * 0.75, 0.003, 24), pm('#ffffff', { emissive: lc, ei: 1.3 }), 0, H * 0.07, 0));
+    g.add(mk(new THREE.CylinderGeometry(R * 0.5, R * 0.5, H * 0.15, 16), pm(col), 0, H * 0.93, 0));
+  } else if (shape === 'bracket') { /* 반원 벽등: 벽에 붙는 반원통 + 위아래 빛 */
+    const lc = it.light && it.light.color || (L && L.lightColor) || '#ffd9a8', geo = new THREE.CylinderGeometry(W / 2, W / 2, H, 28, 1, false, -Math.PI / 2, Math.PI);
+    g.add(mk(geo, pm(col), 0, H / 2, -D / 2)); g.add(mk(new THREE.CylinderGeometry(W * 0.45, W * 0.45, 0.003, 28, 1, false, -Math.PI / 2, Math.PI), pm('#ffffff', { emissive: lc, ei: 1.2 }), 0, H + 0.002, -D / 2)); g.add(mk(new THREE.CylinderGeometry(W * 0.45, W * 0.45, 0.003, 28, 1, false, -Math.PI / 2, Math.PI), pm('#ffffff', { emissive: lc, ei: 1.2 }), 0, -0.002, -D / 2));
   } else if (shape === 'postlamp') { /* 펜스 외부등 */
     g.add(mk(new THREE.CylinderGeometry(0.015, 0.015, H * 0.5, 8), pm('#222222'), 0, H * 0.25, 0)); g.add(mk(new THREE.BoxGeometry(W, H * 0.5, D), pm('#fff1d6', { emissive: '#ffd59a', ei: 0.9 }), 0, H * 0.75, 0)); g.add(mk(new THREE.BoxGeometry(W * 1.2, 0.02, D * 1.2), pm('#222222'), 0, H, 0));
   } else if (shape === 'awning') { /* 수동식 어닝: 벽 쪽 상자 · 앞으로 비스듬히 내려오는 천 · 앞 드림(글자) */

@@ -15,6 +15,8 @@ import { Sketch3D } from './sketch3d.js';
 import { SectionView } from './section3d.js';
 import { initUiMove, regrip, resetUiMove, toggleClean } from './uimove.js';
 import * as DUAL from './dual.js';
+import { pelStore } from './pelstore.js';
+import { kidsItems, placeKids, KID_THEMES } from './kids.js';
 let secView = null;
 let sketch = null;
 import * as lib2 from './store.js';
@@ -28,7 +30,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.43';
+export const APP_VERSION = '2.1.44';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -240,9 +242,11 @@ const ACT = {
   saveCloud: () => saveCloud(),
   saveFile: async () => { const p = await saveFile({ title: 'BYR 프로젝트', defaultName: safeName() + '.byr.json', extensions: ['json'], data: JSON.stringify(S.model) }); if (p) toast('파일로 내보냈어요'); },
   legacy: async () => handleFiles(await openFiles({ title: '기존 앱 JSON', extensions: ['json'], multi: false })),
+  kids: () => kidsDialog(),
   sample: async () => {
-    const k = await ask('샘플 매장', '페리카나 매뉴얼(2025.01) 기준으로 주방 규칙 · 네온 · 시트 · 우드 패널까지 넣은 매장을 만들어요. 만든 뒤 자유롭게 고쳐도 돼요.', [{ label: '취소', value: false }, { label: '예전 앱 샘플', value: 'old' }, { label: '배달 매장 5×8m', value: 'pel_delivery' }, { label: '홀 매장 8×15m', value: 'pel_hall', kind: 'pri' }]);
+    const k = await ask('샘플 매장', '페리카나 매뉴얼(2025.01) 기준으로 주방 규칙 · 네온 · 시트 · 우드 패널까지 넣은 매장을 만들어요. 만든 뒤 자유롭게 고쳐도 돼요.', [{ label: '취소', value: false }, { label: '매뉴얼 그대로 · 홀 타입', value: 'man_hall' }, { label: '매뉴얼 그대로 · 배달 타입', value: 'man_delivery' }, { label: '키즈형 · ㄱ자 키즈룸', value: 'man_kidsL' }, { label: '키즈형 · 일자 키즈룸', value: 'man_kidsI' }, { label: '예전 앱 샘플', value: 'old' }, { label: '배달 매장 5×8m', value: 'pel_delivery' }, { label: '홀 매장 8×15m', value: 'pel_hall', kind: 'pri' }]);
     if (!k) return; if (k === 'old') { const r = await fetch('./data/legacy-sample.json'); return openJson('샘플', new Uint8Array(await r.arrayBuffer())); }
+    if (k.startsWith('man_')) return makeManual(k);
     await makeSample(k);
   },
   asset: async () => handleFiles(await openFiles({ title: '3D 에셋 (연결된 .bin · 텍스처도 함께 고르세요)', extensions: [...ASSET_EXT, ...RES_EXT], multi: true })),
@@ -742,6 +746,31 @@ function renderLine(body, ln) {
 /* ----- 5차: 설비 점검 · 전력 · 견적 · 자동 배치 · A안/B안 (기존 앱 v7~v10) ----- */
 const aisleOf = () => S.model.aisle || 900;
 function mkItem(type, x, y, rot, over = {}) { const L = S.lib[type], it = spItem(type, x, y, rot, {}); delete it.room; if (L.parts) { it.parts = JSON.parse(JSON.stringify(L.parts)); it.pb = { w: L.w, d: L.d, h: L.h }; } return Object.assign(it, over); }
+/** 매뉴얼 그대로 만든 매장 (홀 · 배달 · 키즈형 ㄱ자 / 일자) */
+async function makeManual(k) {
+  const kind = k === 'man_delivery' ? 'delivery' : 'hall', kids = k === 'man_kidsL' ? 'L' : k === 'man_kidsI' ? 'I' : null; await lib2.flush();
+  const M = pelStore(kind, { emptyProject, mkItem, uid, kids }); if (!(await setModel(M))) return; setPane('split'); engine.view('iso'); plan.fit();
+  toast(`${M.name} · 기물 ${level().items.length}개 · 조명 · 재질은 매뉴얼 스펙대로`, 4500);
+}
+/* ---------- 키즈룸 넣기 (ㄱ자 · 일자 · 2단 + 미끄럼틀) ---------- */
+async function kidsDialog() {
+  let c = { form: 'L', len: 5.4, flip: false, theme: 'brown' }; try { c = { ...c, ...(JSON.parse(localStorage.getItem('byr.kids')) || {}) }; } catch {}
+  const w0 = selWall(); const p = ask('키즈룸 넣기', '', [{ label: '취소', value: false }, { label: '넣기', value: 'ok', kind: 'pri' }]);
+  $('#dlgM').innerHTML = `<p class="hint" style="margin:0 0 8px">직영점처럼 2단 파이프 프레임 · 위층 쿠션 발판 · 미끄럼틀 · 웨이브 롤러 · 볼풀 · X 롤러 · 링 터널 · 타공 오르기 · 샌드백을 한 번에 놓아요. ${w0 ? '<b>고른 벽</b>을 따라 놓아요.' : '벽을 먼저 고르면 그 벽을 따라, 아니면 가장 긴 벽을 따라 놓아요.'}</p>
+    <div class="fld">형태<div class="seg2" role="group"><button data-kf="L" aria-pressed="${c.form === 'L'}">ㄱ자 (미끄럼틀 날개)</button><button data-kf="I" aria-pressed="${c.form === 'I'}">일자</button></div></div>
+    <label class="fld">길이 (m · 벽을 따라)<input id="kdLen" type="number" min="3.6" max="12" step="0.1" value="${c.len}"></label>
+    <label class="tog">미끄럼틀을 반대쪽 끝으로<input type="checkbox" id="kdFlip" ${c.flip ? 'checked' : ''}></label>
+    <label class="fld">색<select id="kdTh">${Object.entries(KID_THEMES).map(([k, v]) => `<option value="${k}" ${c.theme === k ? 'selected' : ''}>${v.name}</option>`).join('')}</select></label>`;
+  $$('[data-kf]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); c.form = b.dataset.kf; $$('[data-kf]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); }));
+  if ((await p) !== 'ok') return;
+  c.len = Math.min(12, Math.max(3.6, +$('#kdLen').value || 5.4)); c.flip = $('#kdFlip').checked; c.theme = $('#kdTh').value; try { localStorage.setItem('byr.kids', JSON.stringify(c)); } catch {}
+  const L = level(), w = w0 || L.walls.slice().filter((q) => !q.pz).sort((a, b) => Math.hypot(b.x2 - b.x1, b.y2 - b.y1) - Math.hypot(a.x2 - a.x1, a.y2 - a.y1))[0]; if (!w) return toast('벽이 없어요 · 벽을 먼저 그려 주세요');
+  const wl = Math.hypot(w.x2 - w.x1, w.y2 - w.y1), ux = (w.x2 - w.x1) / wl, uy = (w.y2 - w.y1) / wl, b = levelBox(), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+  let nx = -uy, ny = ux; if (nx * (cx - (w.x1 + w.x2) / 2) + ny * (cy - (w.y1 + w.y2) / 2) < 0) { nx = -nx; ny = -ny; }
+  const res = kidsItems({ form: c.form, len: Math.round(c.len * 1000), flip: c.flip, theme: c.theme }), off = Math.max(0, (wl - res.len) / 2), t2 = (w.t || 150) / 2;
+  const its = placeKids(res, { ax: w.x1, ay: w.y1, ux, uy, nx, ny, off, gap: t2 + 30 }, mkItem); L.items.push(...its);
+  engine.setLevel(L); applyEnv(); commit(); toast(`키즈룸 (${c.form === 'L' ? 'ㄱ자' : '일자'} · ${c.len}m) · 기물 ${its.length}개 · 박스 선택으로 한꺼번에 옮길 수 있어요`, 4500);
+}
 /** 페리카나 샘플 매장: 사각 매장 → 자동 배치(주방 규칙) → 매뉴얼 사인 · 시트 · 조형물 */
 async function makeSample(kind) {
   const hall = kind === 'pel_hall', W = hall ? 8000 : 5000, D = hall ? 15000 : 8000; await lib2.flush();
@@ -1675,6 +1704,7 @@ const DOCK = [
   { act: 'cmt', g: 'check', label: '댓글', icon: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>' },
   { act: 'check', g: 'check', label: '점검', icon: '<path d="M9 11l2.5 2.5L16 9"/><rect x="4" y="3.5" width="16" height="17" rx="2"/>' },
   { act: 'quote', g: 'check', label: '견적', icon: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>' },
+  { act: 'kids', g: 'plan', label: '키즈룸', icon: '<path d="M3 20V8h7v12M3 14h7"/><path d="M10 8l9 10h2"/><circle cx="16" cy="6" r="2"/>' },
   { act: 'auto', g: 'plan', label: '자동 배치', icon: '<rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M3.5 10h17M10 10v10.5"/><path d="M14 14h3v3h-3z"/>' },
   { id: 'dkSim', act: 'sim', g: 'check', label: '동선', icon: '<circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h6a3 3 0 0 0 0-6h-2a3 3 0 0 1 0-6h6" stroke-dasharray="2.5 2"/>' },
 ];
