@@ -30,7 +30,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.44';
+export const APP_VERSION = '2.1.45';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1704,7 +1704,7 @@ const DOCK = [
   { act: 'cmt', g: 'check', label: '댓글', icon: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>' },
   { act: 'check', g: 'check', label: '점검', icon: '<path d="M9 11l2.5 2.5L16 9"/><rect x="4" y="3.5" width="16" height="17" rx="2"/>' },
   { act: 'quote', g: 'check', label: '견적', icon: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>' },
-  { act: 'kids', g: 'plan', label: '키즈룸', icon: '<path d="M3 20V8h7v12M3 14h7"/><path d="M10 8l9 10h2"/><circle cx="16" cy="6" r="2"/>' },
+  { act: 'kids', g: 'plan', label: '키즈 놀이기구', icon: '<path d="M3 20V8h7v12M3 14h7"/><path d="M10 8l9 10h2"/><circle cx="16" cy="6" r="2"/>' },
   { act: 'auto', g: 'plan', label: '자동 배치', icon: '<rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M3.5 10h17M10 10v10.5"/><path d="M14 14h3v3h-3z"/>' },
   { id: 'dkSim', act: 'sim', g: 'check', label: '동선', icon: '<circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h6a3 3 0 0 0 0-6h-2a3 3 0 0 1 0-6h6" stroke-dasharray="2.5 2"/>' },
 ];

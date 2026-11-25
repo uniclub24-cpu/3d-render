@@ -11,13 +11,15 @@ export function pelStore(kind, { emptyProject, mkItem, uid, kids = null, theme =
     CH01: '#8fd3b9', /* 민트 */ CH02: '#a3141a', CH03: '#8a7a55', /* 그린(올리브) */ CH04: '#a3141a',
   };
   const K = (k) => (k >= 5500 ? '#f4f6ff' : k >= 4500 ? '#fff4e6' : k >= 3800 ? '#ffe9d2' : '#ffd9b0');
-  const hall = kind === 'hall', IW = hall ? 7950 : 4350, ID = hall ? 11950 : 7100, W = IW + T, D = ID + T;
+  if (kind !== 'hall') kids = null; /* 키즈룸은 홀 매장만 */
+  const KX = kids ? 4600 : 0; /* 키즈룸 · 룸 구역 폭 (홀 왼쪽, 벽 포함) */
+  const hall = kind === 'hall', IW = hall ? 7950 : 4350, ID = hall ? 11950 : 7100, W = IW + KX + T, D = ID + T;
   const M = emptyProject(kids ? `페리카나 키즈형 (${kids === 'L' ? 'ㄱ자' : '일자'} 키즈룸 · 매뉴얼 2025.01 홀 타입 기준)` : hall ? '페리카나 홀 타입 (리뉴얼 매뉴얼 2025.01)' : '페리카나 배달 타입 (리뉴얼 매뉴얼 2025.01)', W, D);
   const L = M.levels[0]; L.ceilingH = 3000; L.slabH = 3600; L.ceiling = { on: true, color: C.PT01 };
   M.render = { style: 'real', ssao: true, fxaa: true, shadows: true, sunHour: 14, sunPower: 1.6, exposure: 0.9, itemLights: true };
   const [wB, wR, wF, wL] = L.walls; /* 뒤 · 오른쪽 · 앞 · 왼쪽 (emptyProject 순서) */
   for (const w of L.walls) { w.h = 3000; w.color = C.PT01; w.finish = 'paint'; }
-  const X = (x) => H + x, Y = (y) => H + y;
+  const X = (x) => H + KX + x, Y = (y) => H + y, XK = (x) => H + x; /* X = 홀 · 주방 (키즈형이면 오른쪽으로 밀림) · XK = 키즈 구역 */
   const add = (type, x, y, rot, over = {}) => { const it = mkItem(type, Math.round(X(x)), Math.round(Y(y)), rot, over); L.items.push(it); return it; };
   const op = (wall, t, type, w, h, sill = 0, over = {}) => L.openings.push({ id: uid('o'), wall: wall.id, type, t: Math.round(t), w, h, sill, frost: null, ...over });
   const tFront = (xc) => W - X(xc), tLeft = (yc) => D - Y(yc), tBack = (xc) => X(xc), tRight = (yc) => Y(yc);
@@ -26,7 +28,7 @@ export function pelStore(kind, { emptyProject, mkItem, uid, kids = null, theme =
   const tile = (a, b, mode) => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'); g.fillStyle = a; g.fillRect(0, 0, 128, 128);
     if (mode === 'one') { g.fillStyle = b; g.fillRect(0, 0, 64, 64); } else { for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { g.fillStyle = (i + j) % 2 ? a : b; g.fillRect(i * 32, j * 32, 32, 32); } }
     g.strokeStyle = 'rgba(0,0,0,.10)'; g.lineWidth = 1.2; for (let k = 0; k <= 128; k += mode === 'one' ? 64 : 32) { g.beginPath(); g.moveTo(k, 0); g.lineTo(k, 128); g.moveTo(0, k); g.lineTo(128, k); g.stroke(); } return c.toDataURL('image/png'); };
-  const rect = (x0, y0, x1, y1) => [[X(x0), Y(y0)], [X(x1), Y(y0)], [X(x1), Y(y1)], [X(x0), Y(y1)]];
+  const rect = (x0, y0, x1, y1, fx = X) => [[fx(x0), Y(y0)], [fx(x1), Y(y0)], [fx(x1), Y(y1)], [fx(x0), Y(y1)]];
   const PY = hall ? 2930 : 4900; /* 주방 | 홀 경계 (금속프레임 월 중심) */
   L.rooms.push({ id: uid('r'), name: '주방', kind: '주방', pts: rect(0, 0, IW, PY - 50), lift: 0, finish: 'tile', color: C.TL03, slope: null, tex: { img: tile('#a3a19e', '#959390'), size: 400 } });
   L.rooms.push({ id: uid('r'), name: '홀', kind: '홀', pts: rect(0, PY + 50, IW, ID), lift: 0, finish: 'tile', color: C.TL01, slope: null, tex: { img: tile(C.TL01, C.TL02, 'one'), size: 1200 } });
@@ -80,27 +82,58 @@ export function pelStore(kind, { emptyProject, mkItem, uid, kids = null, theme =
     /* ---------- 테이블: 붙박이 쪽(CH-02) · 가운데(CH-03) · 창 쪽(CH-01) — 이동가구 TB-01 700×1200 ---------- */
     const rows = [4700, 6300, 7900, 9500];
     const chairs = (cx, cy, rot, color, name, n2 = true) => { /* 테이블 긴 변(가로 1200) 양쪽 2개씩 */ for (const dx of [-300, 300]) { add('chair', cx + dx, cy - 580, 0, { color, name }); if (n2) add('chair', cx + dx, cy + 580, 180, { color, name }); } };
-    const midX = kids ? 4950 : 3900;
+    const midX = 3900;
     for (const y of rows) {
-      if (!kids) { add('t4', 1000, y, 0, { w: 1200, d: 700, h: 720, color: C.TB, name: '이동 테이블 TB-01 700×1200 (블랙 · 실버엣지)' }); chairs(1000, y, 0, C.CH01, '의자 CH-01 (민트)'); }
-      add('t4', midX, y, 0, { w: 1200, d: 700, h: 720, color: C.TB, name: '이동 테이블 TB-01 700×1200' }); chairs(midX, y, 0, kids ? C.CH01 : C.CH03, kids ? '의자 CH-01 (민트)' : '의자 CH-03 (그린 · 크롬)');
+      add('t4', 1000, y, 0, { w: 1200, d: 700, h: 720, color: C.TB, name: '이동 테이블 TB-01 700×1200 (블랙 · 실버엣지)' }); chairs(1000, y, 0, C.CH01, '의자 CH-01 (민트)');
+      add('t4', midX, y, 0, { w: 1200, d: 700, h: 720, color: C.TB, name: '이동 테이블 TB-01 700×1200' }); chairs(midX, y, 0, C.CH03, '의자 CH-03 (그린 · 크롬)');
       add('t4', IW - 600 - 350 - 60, y + 150, 90, { w: 1200, d: 700, h: 720, color: C.TB, name: '이동 테이블 TB-01 (붙박이 앞)' });
       for (const dy of [-150, 450]) add('chair', IW - 600 - 700 - 60 - 270, y + dy, 270, { color: C.CH02, name: '의자 CH-02 (레드 회전)' });
     }
-    if (kids) { /* ---------- 키즈룸: 왼쪽 창가 벽을 따라 (앞 → 뒤) · 직영점처럼 2단 + 미끄럼틀 ---------- */
-      const res = kidsItems({ form: kids, len: 6000, theme });
-      for (const it of placeKids(res, { ax: X(0), ay: Y(10900), ux: 0, uy: -1, nx: 1, ny: 0, off: 0, gap: 40 }, mkItem)) L.items.push(it);
-      add('f_shoe', 2450, 4300, 90, { w: 880, d: 350, h: 800, color: '#f2efe8', name: '키즈룸 신발장' });
+    if (kids) { /* ---------- 키즈룸 (벽으로 막힌 별도 공간) + 붙은 룸 · 홀 쪽 벽 = 강화유리 ---------- */
+      const YK = 6800, xw = XK(KX - 50), wall = (x1, y1, x2, y2, o = {}) => { const w = { id: uid('w'), x1: Math.round(x1), y1: Math.round(y1), x2: Math.round(x2), y2: Math.round(y2), t: 100, h: 3000, color: C.PT01, finish: 'paint', ...o }; L.walls.push(w); return w; };
+      const len = (w) => Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+      const wK = wall(xw, 0, xw, Y(PY + 50), { name: '키즈룸 | 주방 벽' }); void wK;
+      const gH = wall(xw, Y(PY + 50), xw, Y(YK), { color: C.MT01, t: 60, pz: 'glass', name: '키즈룸 | 홀 강화유리 벽' });
+      const wR = wall(xw, Y(YK), xw, D, { name: '룸 | 홀 벽' });
+      const gK = wall(0, Y(YK), xw, Y(YK), { color: C.MT01, t: 60, pz: 'glass', name: '키즈룸 | 룸 강화유리 벽' });
+      /* 강화유리 벽: 거의 통째로 유리 + 유리문 */
+      const gl = (w, door, dw = 900) => { const Lw = len(w), a = door - dw / 2 - 40, b = door + dw / 2 + 40; op(w, door, 'door1', dw, 2400, 0, { frame: C.MT01, tint: '#d8eef6', name: '강화유리 문' });
+        if (a > 500) op(w, a / 2 + 30, 'full', Math.round(a - 80), 2600, 0, { frame: C.MT01, tint: '#d8eef6', fw: 30, name: '강화유리' }); if (Lw - b > 500) op(w, (b + Lw) / 2 - 30, 'full', Math.round(Lw - b - 80), 2600, 0, { frame: C.MT01, tint: '#d8eef6', fw: 30, name: '강화유리' }); };
+      gl(gH, 700); gl(gK, len(gK) - 800);
+      op(wR, 900, 'door1', 900, 2100, 0, { frame: C.LPM01, name: '룸 출입문' });
+      /* 바깥 통창: 키즈룸 · 룸 옆벽 + 룸 앞벽 */
+      op(wL, D - Y(YK / 2 + 200), 'full', 4400, 2400, 300, { frame: C.MT01 }); op(wL, D - Y((YK + ID) / 2), 'full', 3800, 2400, 300, { frame: C.MT01 });
+      op(wF, W - XK((KX - 100) / 2), 'full', KX - 900, 2400, 300, { frame: C.MT01 });
+      /* 바닥: 키즈룸 쿠션 매트 · 룸 우드 */
+      L.rooms.push({ id: uid('r'), name: '키즈룸', kind: '키즈룸', pts: rect(0, 0, KX - 100, YK - 30, XK), lift: 0, finish: 'tile', color: '#e6dccf', slope: null, tex: { img: tile('#e9dfd2', '#d9c8b4', 'one'), size: 1000 } });
+      L.rooms.push({ id: uid('r'), name: '룸', kind: '룸', pts: rect(0, YK + 30, KX - 100, ID, XK), lift: 0, finish: 'wood', color: '#9a7356', slope: null });
+      /* 키즈룸 벽면: 인테리어 시안 (우드 월 패널 LPM N703 · 레드 띠장) */
+      for (let x = 0; x + 1200 <= KX - 100; x += 1200) L.items.push(mkItem('pel_wood', Math.round(XK(x + 600)), Math.round(Y(9)), 0, { w: 1200, h: 3000, name: '키즈룸 벽패널 LPM N703' }));
+      for (let y = 0; y + 1200 <= PY; y += 1200) L.items.push(mkItem('pel_wood', Math.round(xw - 59), Math.round(Y(y + 600)), 90, { w: 1200, h: 3000, name: '키즈룸 벽패널 LPM N703' }));
+      L.items.push(mkItem('pel_band', Math.round(XK((KX - 100) / 2)), Math.round(Y(22)), 0, { w: KX - 200, elev: 2450, name: '키즈룸 장식 띠장 (레드 아크릴)' }));
+      L.items.push(mkItem('pel_neon_h', Math.round(xw - 75), Math.round(Y(PY / 2 + 300)), 90, { w: 1700, h: 430, elev: 2000, name: '키즈룸 네온사인 (로고)' }));
+      /* 놀이 구조물: 뒷벽을 따라 2단 + 미끄럼틀 (ㄱ자 / 일자) */
+      const res = kidsItems({ form: kids, len: KX - 500, theme });
+      for (const it of placeKids(res, { ax: XK(0), ay: Y(0), ux: 1, uy: 0, nx: 0, ny: 1, off: 150, gap: 40 }, mkItem)) L.items.push(it);
+      L.items.push(mkItem('f_shoe', Math.round(xw - 250), Math.round(Y(PY + 50 + 1400)), 90, { w: 1000, d: 380, h: 1000, color: '#f2efe8', name: '키즈룸 신발장' }));
+      L.items.push(mkItem('bench', Math.round(xw - 270), Math.round(Y(YK - 900)), 90, { w: 1500, d: 400, h: 450, color: C.IL01, name: '보호자 벤치' }));
+      /* 룸: 단체 테이블 · 우드 벽 · TV */
+      for (const [cx, cy] of [[(KX - 100) / 2, YK + 1500], [(KX - 100) / 2, YK + 3300]]) { L.items.push(mkItem('t6', Math.round(XK(cx)), Math.round(Y(cy)), 0, { w: 1800, d: 800, h: 720, color: C.TB, name: '룸 6인 테이블' }));
+        for (const dx of [-600, 0, 600]) { L.items.push(mkItem('chair', Math.round(XK(cx + dx)), Math.round(Y(cy - 620)), 0, { color: C.CH03, name: '의자 CH-03' })); L.items.push(mkItem('chair', Math.round(XK(cx + dx)), Math.round(Y(cy + 620)), 180, { color: C.CH03, name: '의자 CH-03' })); } }
+      for (let y = YK + 1500; y + 1200 <= ID; y += 1200) L.items.push(mkItem('pel_wood', Math.round(xw - 59), Math.round(Y(y + 600)), 90, { w: 1200, h: 3000, name: '룸 벽패널 LPM N703' }));
+      L.items.push(mkItem('tv', Math.round(xw - 90), Math.round(Y(YK + 2400)), 90, { elev: 1300, name: '룸 벽걸이 TV' }));
+      const lk = (x, y, n) => L.items.push(mkItem('l_mold', Math.round(XK(x)), Math.round(Y(y)), 0, { elev: 2920, w: 255, d: 255, h: 80, name: n, light: { on: true, kind: 'spot', color: K(4000), power: 1.1, k: 4000, type: 'led' } }));
+      for (const x of [1100, 3300]) { for (const y of [1500, 3300, 5300]) lk(x, y, 'LT-01 키즈룸 직부등'); for (const y of [YK + 1500, YK + 3300]) lk(x, y, 'LT-01 룸 직부등'); }
     }
     /* ---------- 창가 바테이블 FU-03 (W400) + CH-04 ---------- */
     for (const [x0, x1] of [[150, 2900], [5050, 7800]]) { const bw = x1 - x0; add('tbar', (x0 + x1) / 2, ID - 200, 180, { w: bw, d: 400, h: 1050, color: C.TB, name: `바테이블 TB-02 W400×${bw}` }); for (let x = x0 + 330; x < x1 - 200; x += 640) add('barchair', x, ID - 650, 0, { color: C.CH04, name: '바 의자 CH-04 (레드)' }); }
     /* ---------- 앞 · 옆 창 · 게이트 (p17 · p27 · p29) ---------- */
     op(wF, tFront(3975), 'door2', 1880, 2400, 0, { frame: C.PT02, fw: 110, name: '게이트 (Poppy Red)' });
     op(wF, tFront(1525), 'full', 2750, 2400, 0, { frame: C.MT01 }); op(wF, tFront(6425), 'full', 2750, 2400, 0, { frame: C.MT01 });
-    op(wL, tLeft(5300), 'full', 3600, 2400, 300, { frame: C.MT01 }); op(wL, tLeft(9050), 'full', 2800, 2400, 300, { frame: C.MT01 });
+    if (!kids) { op(wL, tLeft(5300), 'full', 3600, 2400, 300, { frame: C.MT01 }); op(wL, tLeft(9050), 'full', 2800, 2400, 300, { frame: C.MT01 }); }
     add('pel_window', 900, ID - 6, 180, { w: 1000, h: 1500, elev: 700, name: '윈도우 시트 (그래픽 문구)' }); add('pel_glass', 7000, ID - 6, 180, { w: 1000, h: 2000, elev: 200, name: '유리 시트커팅 (로고)' });
     add('pel_neon_v', 260, ID - 1200, 0, { elev: 300, name: '내부 네온사인 (세로형 · 기둥)' });
-    for (const y of [3260, 10300]) for (const x of [250, IW - 250]) add('column', x, y, 0, { w: 500, d: 700, h: 3000, color: C.PT01, name: '기둥' });
+    for (const y of [3260, 10300]) for (const x of kids ? [IW - 250] : [250, IW - 250]) add('column', x, y, 0, { w: 500, d: 700, h: 3000, color: C.PT01, name: '기둥' });
     add('pel_flex', IW / 2, ID + T + 160, 0, { w: 8050, h: 700, elev: 2400, light: { on: true, kind: 'point', color: '#ffffff', power: 1 }, name: '메인간판 LED 플렉스 8M (밝기 조절)' });
     /* ---------- 조명 (p37 천장도 · p58 LIGHTING) ---------- */
     const lx = [940, 2426, 3927, 5428, 6930];
