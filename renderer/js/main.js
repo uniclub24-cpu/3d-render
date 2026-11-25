@@ -97,7 +97,7 @@ export class Engine {
     // 3) OutputPass : 톤 매핑 + sRGB 변환
     // 4) FXAA       : 후처리 뒤 남는 계단 현상을 정리 (렌더러 antialias 는 후처리 버퍼에는 적용되지 않아서 필요)
     const size = r.getDrawingBufferSize(new THREE.Vector2());
-    const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 }); // MSAA 4x
+    const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4, stencilBuffer: true }); // MSAA 4x · 스텐실 = 단면 투시의 검은 단면 뚜껑
     this.composer = new EffectComposer(r, target);
     this.renderPass = new RenderPass(scene, this.camera);
     this.ssaoPass = new SSAOPass(scene, this.camera, size.x, size.y);

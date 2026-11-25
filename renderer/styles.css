@@ -512,3 +512,24 @@ body:has(#home:not([hidden])) #sk3 { display: none !important; }
 #svVP::after { content: ''; position: absolute; left: 5px; top: 5px; width: 4px; height: 4px; border-radius: 50%; background: #ffd400; }
 #svVP[hidden] { display: none; }
 @media (max-width: 640px) { #svBar .sv-r input { width: 70px; } }
+#svVP { pointer-events: auto; cursor: grab; width: 22px; height: 22px; margin: -11px 0 0 -11px; touch-action: none; }
+#svVP.drag { cursor: grabbing; transform: scale(1.25); }
+#svGuide { position: fixed; z-index: 15; pointer-events: none; transition: opacity .5s; }
+#svGuide path { stroke: #ffd400; stroke-width: 1; opacity: .75; fill: none; }
+/* 툴바 손잡이 · 화면 비우기 (2.1.43) */
+.mvgrip { flex: none; align-self: center; display: grid; grid-template-columns: repeat(2, 3px); gap: 3px; padding: 6px 5px; margin: 0 2px; border-radius: 8px; cursor: grab; touch-action: none; opacity: .55; }
+.mvgrip i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; }
+.mvgrip:hover, .mvgrip:focus-visible, .mvgrip.drag { opacity: 1; background: var(--line); }
+.mvgrip.drag { cursor: grabbing; }
+#planTools > .mvgrip { grid-template-columns: repeat(3, 3px); padding: 6px 8px; margin: 2px auto 0; }
+#drawer .dhead { position: relative; } #drawer .dhead > .mvgrip { grid-template-columns: repeat(3, 3px); margin-left: auto; margin-right: 6px; }
+.moved { transition: none; }
+body.uiclean #dock, body.uiclean #planTools, body.uiclean #sk3, body.uiclean #fab, body.uiclean #fitFab, body.uiclean #topbar, body.uiclean #props, body.uiclean #svBar, body.uiclean #drawer { visibility: hidden !important; }
+/* 듀얼 모니터 보조 창 (2.1.43) */
+#sideCorner { position: fixed; z-index: 200; top: calc(8px + env(safe-area-inset-top, 0px)); right: calc(8px + env(safe-area-inset-right, 0px)); display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(14px); font-size: 12.5px; }
+#sideCorner .sc-t { opacity: .7; margin-right: 4px; }
+#sideCorner .btn { min-height: 32px; padding: 0 12px; }
+#sideCorner .btn.danger { background: #d33; color: #fff; border-color: transparent; }
+body.sidefollow #dock, body.sidefollow #planTools, body.sidefollow #drawer, body.sidefollow #topbar, body.sidefollow #fab, body.sidefollow #sk3, body.sidefollow #props, body.sidefollow #fitFab { display: none !important; }
+body.sidefollow #plan { pointer-events: none; }
+body.sidefollow #svBar { top: 56px !important; }

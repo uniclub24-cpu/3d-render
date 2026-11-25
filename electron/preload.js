@@ -13,4 +13,7 @@ contextBridge.exposeInMainWorld('byr', {
   blenderCancel: () => ipcRenderer.invoke('blender:cancel'), blenderOpen: (dir, what) => ipcRenderer.invoke('blender:open', dir, what),
   onBlenderLog: (fn) => { const h = (e, t) => fn(t); ipcRenderer.on('blender:log', h); return () => ipcRenderer.removeListener('blender:log', h); },
   onUpdate: (fn) => ipcRenderer.on('update', (e, m) => fn(m)),
+  /* 듀얼 모니터 보조 창 */
+  sideOpen: (opt) => ipcRenderer.invoke('side:open', opt), sideClose: () => ipcRenderer.invoke('side:close'), sideState: (m) => ipcRenderer.send('side:state', m),
+  onSideState: (fn) => ipcRenderer.on('side:state', (e, m) => fn(m)), onSideClosed: (fn) => ipcRenderer.on('side:closed', () => fn()),
 });

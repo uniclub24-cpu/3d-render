@@ -49,6 +49,16 @@ export class SectionView {
     this.nr = [n0, n1]; this.ur = [u0, u1]; this.vr = [Math.min(0, b.min.y), b.max.y]; this.cut = Math.min(n1 - 0.05, Math.max(n0 + 0.05, this.cut));
     if (this.vpU == null) { this.vpU = (u0 + u1) / 2; this.vpV = 1.5; }
   }
+  /** 깊이 당기기: 0 = 잘린 면만(평면 단면) · 1 = 끝까지 */
+  setPull(k) { this.pull = Math.max(0, Math.min(1, k)); if (this.pull >= 0.999) this.pull = null; this._guides(); this.apply(); this._sync(); }
+  /** 소실점에서 퍼지는 안내선 (끌거나 당길 때만 잠깐) */
+  _guides() {
+    if (!this.gd) { const g = (this.gd = document.createElementNS('http://www.w3.org/2000/svg', 'svg')); g.id = 'svGuide'; g.setAttribute('aria-hidden', 'true'); document.body.appendChild(g); }
+    const r = this.e.canvas.getBoundingClientRect(), [x, y] = this._toScreen(this.vpU, this.vpV), L = Math.hypot(r.width, r.height); let d = '';
+    for (let a = 0; a < 360; a += 15) { const t = (a * Math.PI) / 180; d += `M${x} ${y}L${x + Math.cos(t) * L} ${y + Math.sin(t) * L}`; }
+    Object.assign(this.gd.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', opacity: 1 }); this.gd.setAttribute('viewBox', `0 0 ${r.width} ${r.height}`); this.gd.innerHTML = `<path d="${d}"/>`;
+    clearTimeout(this._gdT); this._gdT = setTimeout(() => this.gd && (this.gd.style.opacity = 0), 700);
+  }
   setCut(v) { this.cut = v; this.apply(); }
   setDepth(k) { this.depth = k; this.apply(); }
   /** 맞춤: 단면 전체가 여백 없이 */
@@ -59,7 +69,10 @@ export class SectionView {
   /* ---------- 카메라: 소실점 고정 · 창만 확대 · 이동 ---------- */
   apply(Wpx, Hpx) {
     if (!this.on) return; const E = this.e, cv = E.canvas, cam = E.persp, w = Wpx || cv.clientWidth, h = Hpx || cv.clientHeight; if (!w || !h) return;
-    E.renderer.clippingPlanes = [new THREE.Plane(this.N.clone().negate(), this.cut)];
+    this._front.normal.copy(this.N).negate(); this._front.constant = this.cut; E.renderer.clippingPlanes = [this._front];
+    const span = this.nr ? this.nr[1] - this.nr[0] : 50, pd = this.pull == null || this.pull >= 1 ? 1e6 : Math.max(0.002, this.pull * (this.cut - this.nr[0]) + 0.002); this._back.normal.copy(this.N); this._back.constant = -(this.cut - pd); void span;
+    if (this.cap) { this.cap.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), this.N); this.cap.position.copy(this.R).multiplyScalar(this.wu ?? 0).addScaledVector(this.N, this.cut - 0.0008).setY(this.box ? (this.box.min.y + this.box.max.y) / 2 : 1); }
+    this._capSync();
     const D = Math.max(1.5, (this.ur[1] - this.ur[0]) * this.depth), eye = this.R.clone().multiplyScalar(this.vpU).addScaledVector(this.N, this.cut).setY(this.vpV);
     cam.position.copy(eye).addScaledVector(this.N, D); cam.up.set(0, 1, 0); cam.lookAt(eye); E.controls.target.copy(eye);
     const A = w / h, hh = this.hh, fH = Math.min(D * 11, Math.max(Math.abs(this.wv - this.vpV) + hh, (Math.abs(this.wu - this.vpU) + hh * A) / A)); /* fov ≤ 170° */
@@ -76,6 +89,8 @@ export class SectionView {
   /** 엔진 틀마다: WASD · 재생 · 모델이 바뀌면 포셰 다시 */
   tick(dt, keys) {
     if (keys && keys.size) { const k = (q) => keys.has(q), ax = (k('d') || k('arrowright') ? 1 : 0) - (k('a') || k('arrowleft') ? 1 : 0), ay = (k('w') || k('arrowup') ? 1 : 0) - (k('s') || k('arrowdown') ? 1 : 0); if (ax || ay) { const sp = this.hh * 1.3 * dt; this.wu += ax * sp; this.wv += ay * sp; this.apply(); this.e._moveT = performance.now(); } }
+    { const E = this.e; if ((E.envGroup && E.envGroup.visible) || E.ground.visible) { if (E.envGroup) E.envGroup.visible = false; E.ground.visible = false; E.invalidate(true); } } /* 배경을 다시 깔아도(모델 바뀜) 작업물만 */
+    if (this.pullAnim) { const p = this.pullAnim; p.t += dt; const k = Math.min(1, p.t / 2.6), e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2; this.setPull(e); if (k >= 1) { this.pullAnim = null; this._sync(); } this.e._moveT = performance.now(); }
     if (this.playing) { let h = this.hour + dt * 1.25; if (h >= 21.5) { h = 21.5; this.playing = false; this._sync(); } this.setHour(h); }
     if (this.e.structure !== this._st) { this._poche(false); this._poche(true); this.box = this._box(); this._frame(); this.apply(); }
   }
@@ -90,38 +105,64 @@ export class SectionView {
     else E.renderer.toneMappingExposure = this.save.exp * 0.62; /* 밤: 조명 근처가 하얗게 날아가지 않게 */
     E.renderer.shadowMap.needsUpdate = true; E.invalidate(true); const t = this.bar && this.bar.querySelector('#svHourV'); if (t) t.textContent = hourName(h); const r = this.bar && this.bar.querySelector('#svHour'); if (r && document.activeElement !== r) r.value = h;
   }
-  /* ---------- 포셰: 잘린 단면 속을 검게 (뒷면만 그리는 검은 껍질) ---------- */
+  /* ---------- 검은 단면 뚜껑 (스텐실): 잘린 물체 속이 보이는 자리만 잘린 면에 검은 판을 그린다 ---------- */
   _poche(on) {
-    const E = this.e; if (this._pk) { for (const k of this._pk) k.parent && k.parent.remove(k); this._pk = null; }
-    if (!on) return; this._ink ||= new THREE.MeshBasicMaterial({ color: '#16181c', side: THREE.BackSide }); const list = []; this._pk = [];
-    E.world.traverse((o) => { if (o.isMesh && !o.isInstancedMesh && !o.userData.poche && o.material && !(o.material.transparent && (o.material.opacity ?? 1) < 0.6)) list.push(o); });
-    for (const o of list) { const k = new THREE.Mesh(o.geometry, this._ink); k.raycast = () => {}; k.userData.poche = 1; o.add(k); this._pk.push(k); }
-    this._st = E.structure;
+    const E = this.e, r = E.renderer;
+    if (this._pk) { for (const k of this._pk) k.parent && k.parent.remove(k); this._pk = null; }
+    if (this._mats) { for (const [m, cp] of this._mats) { m.clippingPlanes = cp; m.needsUpdate = true; } this._mats = null; }
+    if (this.cap) { E.scene.remove(this.cap); this.cap = null; }
+    if (!on) { if (this._lce != null) r.localClippingEnabled = this._lce; this._lce = null; return; }
+    if (this._lce == null) this._lce = r.localClippingEnabled; r.localClippingEnabled = true;
+    this._back ||= new THREE.Plane(new THREE.Vector3(1, 0, 0), 1e6); this._front ||= new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
+    const sm = (side, op) => new THREE.MeshBasicMaterial({ side, colorWrite: false, depthWrite: false, depthTest: false, stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc, stencilFail: op, stencilZFail: op, stencilZPass: op, clippingPlanes: [this._front] });
+    this._sb ||= sm(THREE.BackSide, THREE.IncrementWrapStencilOp); this._sf ||= sm(THREE.FrontSide, THREE.DecrementWrapStencilOp);
+    const list = []; this._pk = []; this._mats = new Map();
+    E.world.traverse((o) => { if (o.isMesh && !o.isInstancedMesh && !o.userData.poche && o.material) list.push(o); });
+    for (const o of list) {
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) if (m && !this._mats.has(m)) { this._mats.set(m, m.clippingPlanes); m.clippingPlanes = [this._back]; m.needsUpdate = true; } /* 뒤쪽 당기기 면 */
+      if (o.material.transparent && (o.material.opacity ?? 1) < 0.6) continue; o.geometry.computeBoundingBox && !o.geometry.boundingBox && o.geometry.computeBoundingBox();
+      for (const mat of [this._sb, this._sf]) { const k = new THREE.Mesh(o.geometry, mat); k.raycast = () => {}; k.userData.poche = 1; k.renderOrder = 1; k.visible = false; o.add(k); this._pk.push(k); }
+    }
+    const cm = new THREE.MeshBasicMaterial({ color: '#16181c', stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.ReplaceStencilOp, stencilZFail: THREE.ReplaceStencilOp, stencilZPass: THREE.ReplaceStencilOp, toneMapped: false });
+    this.cap = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), cm); this.cap.renderOrder = 1.1; this.cap.raycast = () => {}; this.cap.onAfterRender = (rr) => rr.clearStencil(); E.scene.add(this.cap);
+    this._st = E.structure; this._capFor = null;
+  }
+  /** 자르는 면에 걸친 물체만 스텐실 껍질을 켠다 (안 닫힌 판 때문에 생기는 얼룩 방지 · 가벼움) */
+  _capSync() {
+    if (!this._pk) return; const key = this.N.toArray().join() + '|' + this.cut.toFixed(3); if (key === this._capFor) return; this._capFor = key; const bb = new THREE.Box3();
+    for (let i = 0; i < this._pk.length; i += 2) { const o = this._pk[i].parent; bb.setFromObject(o, false); let lo = 1e9, hi = -1e9; for (const x of [bb.min.x, bb.max.x]) for (const y of [bb.min.y, bb.max.y]) for (const z of [bb.min.z, bb.max.z]) { const d = this.N.x * x + this.N.y * y + this.N.z * z; lo = Math.min(lo, d); hi = Math.max(hi, d); } const on = lo < this.cut - 0.002 && hi > this.cut + 0.002; this._pk[i].visible = this._pk[i + 1].visible = on; }
   }
   _box() { const b = new THREE.Box3(); this.e.world.traverse((o) => { if (o.isMesh && !o.userData.poche) { let v = true; for (let p = o; p; p = p.parent) if (!p.visible) { v = false; break; } if (!v) return; const bb = new THREE.Box3().setFromObject(o); if (!bb.isEmpty() && isFinite(bb.min.x)) b.union(bb); } }); if (b.isEmpty()) b.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(8, 2.7, 6)); return b; }
   /* ---------- 화면 위 도구 ---------- */
   _ui(on) {
-    if (!on) { this.bar && this.bar.remove(); this.mk && this.mk.remove(); this.bar = this.mk = null; return; }
+    if (!on) { this.bar && this.bar.remove(); this.mk && this.mk.remove(); this.gd && this.gd.remove(); this.bar = this.mk = this.gd = null; return; }
     const bar = (this.bar = document.createElement('div')); bar.id = 'svBar'; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', '단면 투시');
     bar.innerHTML = `<b class="sv-t">단면 투시</b>
       <div class="sv-g"><button class="qb" data-sv="wall" title="선택한 벽 기준으로 다시 (벽을 먼저 고르세요)">선택한 벽</button><button class="qb" data-sv="rot" title="90° 돌려 다른 벽 기준">⟳ 90°</button><button class="qb" data-sv="flip" title="반대편에서 보기">⇄ 반대편</button></div>
       <label class="sv-r">자르기<input type="range" id="svCut" step="0.05" aria-label="자르는 위치"></label>
+      <label class="sv-r">당기기<input type="range" id="svPull" min="0" max="1" step="0.01" value="${this.pull ?? 1}" aria-label="깊이 당기기 (0 = 평면 단면)"></label>
       <label class="sv-r">깊이감<input type="range" id="svDepth" min="0.35" max="2" step="0.05" value="${this.depth}" aria-label="깊이감"></label>
       <label class="sv-r"><span id="svHourV">${hourName(this.hour)}</span><input type="range" id="svHour" min="5.5" max="21.5" step="0.1" value="${this.hour}" aria-label="시간"></label>
-      <div class="sv-g"><button class="qb" data-sv="play" title="아침부터 밤까지 재생">▶ 하루</button><button class="qb" data-sv="vp" title="소실점 찍기 (더블클릭도 돼요)">🎯 소실점</button><button class="qb" data-sv="fit" title="여백 없이 맞춤">⤢ 맞춤</button><button class="qb" data-sv="x" title="나가기 (Esc)">✕</button></div>`;
-    document.body.appendChild(bar); const mk = (this.mk = document.createElement('div')); mk.id = 'svVP'; mk.setAttribute('aria-hidden', 'true'); document.body.appendChild(mk);
+      <div class="sv-g"><button class="qb" data-sv="pullgo" title="평면 단면에서 깊이가 생기는 장면 (녹화와 같이 쓰면 영상)">▶ 당기기</button><button class="qb" data-sv="play" title="아침부터 밤까지 재생">▶ 하루</button><button class="qb" data-sv="vp" title="소실점 찍기 (더블클릭도 돼요)">🎯 소실점</button><button class="qb" data-sv="fit" title="여백 없이 맞춤">⤢ 맞춤</button><button class="qb" data-sv="x" title="나가기 (Esc)">✕</button></div>`;
+    document.body.appendChild(bar); const mk = (this.mk = document.createElement('div')); mk.id = 'svVP'; mk.title = '소실점 · 끌어서 옮기기';
+    mk.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); try { mk.setPointerCapture(ev.pointerId); } catch {} this._vpDrag = ev.pointerId; mk.classList.add('drag'); });
+    mk.addEventListener('pointermove', (ev) => { if (this._vpDrag !== ev.pointerId) return; const r = this.e.canvas.getBoundingClientRect(), [u, v] = this._toPlane(ev.clientX - r.left, ev.clientY - r.top); this.vpU = u; this.vpV = Math.max(this.vr[0] + 0.05, v); this._guides(); this.apply(); this.e._moveT = performance.now(); });
+    const mu = (ev) => { if (this._vpDrag !== ev.pointerId) return; this._vpDrag = null; mk.classList.remove('drag'); }; mk.addEventListener('pointerup', mu); mk.addEventListener('pointercancel', mu); document.body.appendChild(mk);
     bar.addEventListener('click', (ev) => { const b = ev.target.closest('[data-sv]'); if (!b) return; const a = b.dataset.sv;
       if (a === 'wall') { const w = this.selWall(); if (!w) this.toast('2D 나 3D 에서 벽을 먼저 고르세요 · 지금은 가장 긴 벽 기준'); this.setWall(w); }
       else if (a === 'rot') this.rotate(1); else if (a === 'flip') this.flip(); else if (a === 'fit') this.fit(); else if (a === 'x') this.exit();
       else if (a === 'vp') { this.pickVP = !this.pickVP; if (this.pickVP) this.toast('화면에서 소실점(눈 높이 · 위치)을 누르세요', 2500); }
+      else if (a === 'pullgo') { this.pullAnim = this.pullAnim ? null : { t: 0 }; this.setPull(0); }
       else if (a === 'play') { this.playing = !this.playing; if (this.playing && this.hour >= 21.4) this.hour = 5.5; }
       this._sync(); });
     bar.querySelector('#svCut').oninput = (e) => this.setCut(+e.target.value); bar.querySelector('#svDepth').oninput = (e) => this.setDepth(+e.target.value);
+    bar.querySelector('#svPull').oninput = (e) => { this.pullAnim = null; this.setPull(+e.target.value); };
     bar.querySelector('#svHour').oninput = (e) => { this.playing = false; this.setHour(+e.target.value); this._sync(); };
     this._sync();
   }
   _sync() {
     const b = this.bar; if (!b) return; const c = b.querySelector('#svCut'); if (this.nr) { c.min = this.nr[0] + 0.05; c.max = this.nr[1] - 0.05; c.value = this.cut; }
+    const pl = b.querySelector('#svPull'); if (pl && document.activeElement !== pl) pl.value = this.pull ?? 1; b.querySelector('[data-sv=pullgo]').textContent = this.pullAnim ? '■ 멈춤' : '▶ 당기기';
     b.querySelector('[data-sv=play]').textContent = this.playing ? '■ 멈춤' : '▶ 하루'; b.querySelector('[data-sv=play]').setAttribute('aria-pressed', String(!!this.playing)); b.querySelector('[data-sv=vp]').setAttribute('aria-pressed', String(this.pickVP));
     this.e.canvas.style.cursor = this.pickVP ? 'crosshair' : this.on ? 'grab' : '';
     const r = this.e.canvas.getBoundingClientRect(); b.style.left = Math.round(r.left + r.width / 2) + 'px'; const tb = document.querySelector('#topbar'), tbB = tb && tb.offsetParent ? tb.getBoundingClientRect().bottom : 0; b.style.top = Math.round(Math.max(r.top, tbB) + 8) + 'px'; b.style.maxWidth = Math.round(r.width - 20) + 'px';
@@ -133,12 +174,14 @@ export class SectionView {
     host.addEventListener('pointerdown', (ev) => { if (!this.on || ev.target !== cv) return; ev.preventDefault(); ev.stopImmediatePropagation(); try { cv.setPointerCapture(ev.pointerId); } catch {}
       P.set(ev.pointerId, [ev.clientX, ev.clientY]); const r = cv.getBoundingClientRect();
       if (this.pickVP && P.size === 1) { this.setVP(ev.clientX - r.left, ev.clientY - r.top); return; }
-      if (P.size === 2) { const [a, b] = [...P.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), hh: this.hh }; drag = null; } else { drag = { x: ev.clientX, y: ev.clientY }; cv.style.cursor = 'grabbing'; } }, true);
+      if (P.size === 1 && (ev.ctrlKey || ev.metaKey || ev.button === 2)) { drag = { x: ev.clientX, y: ev.clientY, pull: this.pull ?? 1 }; return; } if (P.size === 2) { const [a, b] = [...P.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), hh: this.hh }; drag = null; } else { drag = { x: ev.clientX, y: ev.clientY }; cv.style.cursor = 'grabbing'; } }, true);
     host.addEventListener('pointermove', (ev) => { if (!this.on || !P.has(ev.pointerId)) return; ev.preventDefault(); ev.stopImmediatePropagation(); P.set(ev.pointerId, [ev.clientX, ev.clientY]);
       if (pinch && P.size >= 2) { const [a, b] = [...P.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]), r = cv.getBoundingClientRect(); this.zoomAt((a[0] + b[0]) / 2 - r.left, (a[1] + b[1]) / 2 - r.top, (pinch.hh * pinch.d) / Math.max(10, d) / this.hh); }
+      else if (drag && drag.pull != null) { const h = cv.clientHeight || 1; this.pullAnim = null; this.setPull(drag.pull + ((ev.clientX - drag.x) - (ev.clientY - drag.y)) / (h * 0.8)); this.e._moveT = performance.now(); }
       else if (drag) { this.panPx(ev.clientX - drag.x, ev.clientY - drag.y); drag.x = ev.clientX; drag.y = ev.clientY; this.e._moveT = performance.now(); } }, true);
     const up = (ev) => { if (!P.has(ev.pointerId)) return; P.delete(ev.pointerId); if (P.size < 2) pinch = null; if (!P.size) drag = null; if (this.on) { ev.stopImmediatePropagation(); this._sync(); } };
     host.addEventListener('pointerup', up, true); host.addEventListener('pointercancel', up, true);
+    host.addEventListener('contextmenu', (ev) => { if (this.on && ev.target === cv) { ev.preventDefault(); ev.stopImmediatePropagation(); } }, true);
     host.addEventListener('dblclick', (ev) => { if (!this.on || ev.target !== cv) return; ev.preventDefault(); ev.stopImmediatePropagation(); const r = cv.getBoundingClientRect(); this.setVP(ev.clientX - r.left, ev.clientY - r.top); }, true);
     host.addEventListener('wheel', (ev) => { if (!this.on || ev.target !== cv) return; ev.preventDefault(); ev.stopImmediatePropagation(); const r = cv.getBoundingClientRect(); this.zoomAt(ev.clientX - r.left, ev.clientY - r.top, Math.exp(ev.deltaY * (ev.deltaMode ? 0.05 : 0.0015))); }, { capture: true, passive: false });
     window.addEventListener('keydown', (ev) => { if (!this.on || ev.key !== 'Escape' || /input|textarea|select/i.test(ev.target.tagName || '') && ev.target.type !== 'range') return; ev.preventDefault(); ev.stopImmediatePropagation(); if (this.pickVP) { this.pickVP = false; this._sync(); } else this.exit(); }, true);

@@ -13,6 +13,8 @@ import { CanvasRec, recType } from './rec.js';
 import * as BL from './blender.js';
 import { Sketch3D } from './sketch3d.js';
 import { SectionView } from './section3d.js';
+import { initUiMove, regrip, resetUiMove, toggleClean } from './uimove.js';
+import * as DUAL from './dual.js';
 let secView = null;
 let sketch = null;
 import * as lib2 from './store.js';
@@ -26,7 +28,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.42';
+export const APP_VERSION = '2.1.43';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -51,7 +53,7 @@ const CN = ['기물', '벽', '문/창', '공간', '설치물', '치수'];
 function histLabel(a, b) { if (!a || a[6] !== b[6]) return a && a[7] !== b[7] ? `층 ${b[7] > a[7] ? '추가' : '삭제'}` : '층 · 설정'; const d = CN.map((n, i) => (b[i] !== a[i] ? `${n} ${b[i] > a[i] ? '+' : '−'}${Math.abs(b[i] - a[i])}` : '')).filter(Boolean); return d.join(' · ') || (S.sel ? `${{ item: '기물', wall: '벽', opening: '문/창', room: '공간' }[S.sel.kind] || ''} 수정`.trim() : '수정'); }
 function commit() { const c = cnts(); S.undo.push(S.last); S.um.push({ t: Date.now(), l: histLabel(S.lastC, c) }); S.lastC = c; if (S.undo.length > 60) { S.undo.shift(); S.um.shift(); } S.redo.length = 0; S.rm.length = 0; S.last = snap(); syncBar(); afterChange(); if (S.panel === 'hist' && S.propsOpen) renderProps(); }
 /** 고칠 때마다: 자동 저장 · 조정 필요 다시 세기 · 2D 다시 그리기 */
-function afterChange() { S.dirty = true; lib2.autosave(S.model); refreshBad(); syncPins(); plan && plan.redraw(); }
+function afterChange() { S.dirty = true; lib2.autosave(S.model); refreshBad(); syncPins(); plan && plan.redraw(); if (DUAL.isOpen()) setTimeout(() => DUAL.notify(), 50); /* 듀얼 모니터: 보조 창에 바로 반영 */ }
 function restore(json) {
   const sel = S.sel; S.model = JSON.parse(json); S.last = json; engine.setLevel(level()); applyEnv(); afterChange();
   const L = level(), still = sel && ({ item: L.items, wall: L.walls, opening: L.openings, room: L.rooms }[sel.kind] || []).some((q) => q.id === sel.id);
@@ -69,6 +71,12 @@ async function leaveOk(nextId) {
 async function saveNow(quiet) { if (!S.model) return; try { await lib2.saveProject(S.model); S.dirty = false; setSaveState('저장됨'); if (!quiet) toast('저장했어요 · 계정에도 두려면 [계정에 저장]', 2200); } catch (e) { toast('저장 실패 · ' + (e.message || e), 4000); } }
 /** [계정에 저장]: 저장 + 내 계정에 올리기 */
 async function saveCloud() { if (!cloud.session()) { toast('먼저 로그인해 주세요'); return ACT.account(); } await saveNow(true); try { await lib2.pushProject(S.model.id); setSaveState('계정에 저장됨'); toast('계정에 저장했어요 · 다른 기기 홈에서 [계정에서 받기]', 2500); } catch (e) { toast('계정 저장 실패 · ' + (e.message || e), 4500); } }
+/** 보조 창(듀얼 모니터)에서 메인 창 모델을 따라갈 때: 저장 · 초안 확인 없이 화면만 바꾼다 */
+let _followed = false;
+async function followModel(model) {
+  S.model = migrate(model, S.lib); S.undo.length = S.redo.length = S.um.length = S.rm.length = 0; S.last = snap(); S.lastC = cnts();
+  await restoreAssets(); engine.setLevel(level()); applyEnv(); if (!_followed) { loadRender(); engine.view('iso'); plan.fit(); _followed = true; } syncCeilBtn(); plan.select(null, true); syncBar(); S.dirty = false;
+}
 async function setModel(model, fit = true) {
   if (S.model && S.model !== model && S.model.id !== model.id && !(await leaveOk(model.id))) return false;
   S.aiPrev = null; if (typeof plan !== 'undefined' && plan) plan.preview = null; S.multi = []; S.tucked = null;
@@ -194,7 +202,7 @@ const ACT = {
   new: async () => {
     const empty = !S.model || (S.model.levels.every((L) => !L.items.length && !L.rooms.length && L.walls.length <= 4) && !S.undo.length);
     if (!empty && !(await ask('새 프로젝트를 시작할까요?', `"${S.model.name}" 은 내 프로젝트에 저장돼 있어요. 지금 화면의 되돌리기 기록은 없어져요.`, [{ label: '취소', value: false }, { label: '새로 시작', value: true, kind: 'pri' }]))) return;
-    const sz = await ask('매장 크기 (사각 매장 템플릿)', '바깥 벽 안쪽 기준 가로 × 세로예요. 만든 뒤 벽 끝점을 끌거나 벽 길이를 바꿔 맞출 수 있어요.', [['6×8', 6000, 8000], ['8×10', 8000, 10000], ['9×12', 9000, 12000], ['10×15', 10000, 15000], ['12×20', 12000, 20000], ['기본 8×6', 8000, 6000]].map(([n, w, d], i) => ({ label: `${n} m`, value: [w, d], kind: i === 5 ? 'pri' : '' })).concat([{ label: '취소', value: false }]));
+    const sz = await askSize(); /* 가로 · 세로 직접 입력 (m) */
     if (!sz) return; await lib2.flush(); await setModel(emptyProject('새 프로젝트', sz[0], sz[1])); toast(`새 프로젝트 · ${sz[0] / 1000}×${sz[1] / 1000}m · 이전 작업은 "내 프로젝트"에 있어요`);
   },
   home: () => showHome(),
@@ -1687,6 +1695,7 @@ function buildDock() {
     else if (d.mode) b.onclick = () => setMode(d.mode); /* 작업군을 바꾸면 단추를 새로 그리므로 여기서 묶는다 */
     else if (d.view) b.onclick = () => { closeHome(); if (S.pane === '2d') setPane('split'); engine.view(d.view); };
     else if (d.run) b.onclick = () => { closeHome(); d.run(); }; });
+  regrip();
 }
 /* ---------- 화면 설정: 가로 모드 손잡이 서랍 · 상단 바 · 도구 고르기/순서 ----------
  * 도구 설정은 세로 / 가로 따로 기억 (byr.dock.port / byr.dock.land) = { hide: [키], order: { 작업군: [키] } } */
@@ -1725,6 +1734,22 @@ function bindUi() {
   applyUi();
 }
 const DGN = () => Object.fromEntries(DGROUPS.map(([k, n]) => [k, n]));
+/* ---------- 듀얼 모니터 설정 ---------- */
+function dualHtml() {
+  const c = DUAL.dualCfg(), on = DUAL.isOpen(), pc = !!(window.byr && window.byr.sideOpen);
+  return `<h4 class="uih4">듀얼 모니터 <small>${pc ? '보조 모니터에 창을 하나 더' : '웹: 새 창(팝업)으로 열려요'} · 끄면 지금처럼 한 창만</small></h4>
+    <div class="fld">보조 창<div class="seg2" role="group"><button data-dual="off" aria-pressed="${!on}">끔</button><button data-dual="on" aria-pressed="${on}">켬</button></div></div>
+    <div class="fld">보조 창 위치<div class="seg2" role="group">${[['left', '왼쪽 모니터'], ['right', '오른쪽 모니터']].map(([v, n]) => `<button data-dw="${v}" aria-pressed="${c.where === v}">${n}</button>`).join('')}</div></div>
+    <div class="fld">보조 창 보기<div class="chips">${DUAL.VIEWS.map(([v, n]) => `<button data-dv="${v}" aria-pressed="${c.view === v}">${n}</button>`).join('')}</div></div>
+    <label class="fld">보조 창 스타일<select id="dualSt"><option value="same">메인과 같게</option>${Object.entries(STYLES).map(([k, v]) => `<option value="${k}" ${c.style === k ? 'selected' : ''}>${v.name}</option>`).join('')}</select></label>
+    <p class="hint">보조 창은 이 프로젝트를 보기 전용으로 따라가요 (메인에서 고치면 바로 반영). 보조 창 오른쪽 위 <b>⌂ 홈</b> = 다른 프로젝트를 열어 대조하며 따로 수정 · <b>✕</b> = 보조 창만 닫기.</p>`;
+}
+function dualBind(body) {
+  $$('[data-dual]', body).forEach((b) => (b.onclick = async () => { if (b.dataset.dual === 'on') await DUAL.openSide(); else DUAL.closeSide(); renderProps(); }));
+  $$('[data-dw]', body).forEach((b) => (b.onclick = () => { DUAL.setCfg('where', b.dataset.dw); renderProps(); }));
+  $$('[data-dv]', body).forEach((b) => (b.onclick = () => { DUAL.setCfg('view', b.dataset.dv); renderProps(); }));
+  const st = $('#dualSt', body); if (st) { st.value = DUAL.dualCfg().style; st.onchange = () => DUAL.setCfg('style', st.value); }
+}
 function renderUiSet(body) {
   $('#propsTitle').textContent = '화면 설정'; const c = uiCfg(), dc = dockCfg(), land = isLandC();
   const seg = (k, opts) => `<div class="seg2" role="group">${opts.map(([v, n]) => `<button data-uk="${k}" data-uv="${v}" aria-pressed="${c[k] === v}">${n}</button>`).join('')}</div>`;
@@ -1735,12 +1760,16 @@ function renderUiSet(body) {
     <div class="fld">가로 모드 상단 바${seg('top', [['mini', '최소 (이름 누르면 열림)'], ['full', '전체']])}</div>
     <h4 class="uih4">도구 막대에 넣을 기능 <small>${land ? '가로' : '세로'} 화면용 · 화살표로 순서</small></h4>
     ${DGROUPS.map(([g, n]) => `<div class="uigrp"><b>${n}</b>${dockList(g, true).map((d, i, A) => { const k = dkKey(d), on = !dc.hide.includes(k), lock = d.act === 'uiset'; return `<div class="uirow"><label><input type="checkbox" data-dk="${esc(k)}" ${on ? 'checked' : ''} ${lock ? 'disabled' : ''}><svg viewBox="0 0 24 24">${d.icon}</svg>${esc(d.label)}</label><button class="ib sm" data-up="${esc(k)}" data-g="${g}" ${i ? '' : 'disabled'} aria-label="위로">↑</button><button class="ib sm" data-dn="${esc(k)}" data-g="${g}" ${i < A.length - 1 ? '' : 'disabled'} aria-label="아래로">↓</button></div>`; }).join('')}</div>`).join('')}
-    <button class="btn" id="uiReset">기본값으로</button>`;
+    <button class="btn" id="uiReset">기본값으로</button>
+    <h4 class="uih4">툴바 위치 <small>툴바 끝의 ⋮⋮ 를 끌어 옮겨요 · Tab = 화면 비우기</small></h4><button class="btn" id="uiMvReset">툴바 원래 자리로</button>
+    ${dualHtml()}`;
   const re = () => { buildDock(); syncDockState(); renderUiSet(body); };
   $$('[data-uk]', body).forEach((b) => (b.onclick = () => { store.set('byr.ui', { ...uiCfg(), [b.dataset.uk]: b.dataset.uv }); applyUi(); re(); }));
   $$('[data-res2]', body).forEach((b) => (b.onclick = () => { engine.setRes(b.dataset.res2); re(); }));
   $$('[data-dk]', body).forEach((b) => (b.onchange = () => { const x = dockCfg(), k = b.dataset.dk; x.hide = x.hide.filter((h) => h !== k); if (!b.checked) x.hide.push(k); store.set(dockCfgK(), x); re(); }));
   $$('[data-up],[data-dn]', body).forEach((b) => (b.onclick = () => { const g = b.dataset.g, k = b.dataset.up || b.dataset.dn, x = dockCfg(), L = dockList(g, true).map(dkKey), i = L.indexOf(k), j = i + (b.dataset.up ? -1 : 1); if (j < 0 || j >= L.length) return; [L[i], L[j]] = [L[j], L[i]]; x.order = { ...x.order, [g]: L }; store.set(dockCfgK(), x); re(); }));
+  $('#uiMvReset', body).onclick = () => { resetUiMove(); toast('툴바를 원래 자리로 옮겼어요'); };
+  dualBind(body);
   $('#uiReset', body).onclick = () => { try { localStorage.removeItem('byr.ui'); localStorage.removeItem(dockCfgK()); } catch {} applyUi(); re(); };
 }
 function stopWalk() { engine.walker.stop(); }
@@ -1833,6 +1862,18 @@ function ask(title, msg, buttons = [{ label: '취소', value: false }, { label: 
     d.onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) done(buttons[+b.dataset.i].value); else if (e.target === d) done(buttons[0].value); };
     d.hidden = false; setTimeout(() => { const last = $('#dlgB').lastElementChild; if (last) last.focus(); }, 30);
   });
+}
+/** 새 프로젝트 크기: 가로 · 세로를 직접 입력 (m · 소수 가능) + 자주 쓰는 크기 빠른 고르기 → [mm, mm] | false */
+function askSize() {
+  let last = [8, 6]; try { last = JSON.parse(localStorage.getItem('byr.newSize')) || last; } catch {}
+  const p = ask('새 매장 크기', '', [{ label: '취소', value: false }, { label: '만들기', value: 'ok', kind: 'pri' }]);
+  $('#dlgM').innerHTML = `<p class="hint" style="margin:0 0 8px">바깥 벽 안쪽 기준이에요. 만든 뒤에도 벽 끝점을 끌어 바꿀 수 있어요.</p>
+    <div class="row" style="gap:8px;align-items:end"><label class="fld" style="flex:1">가로 (m)<input id="nsW" type="number" inputmode="decimal" min="1" max="200" step="0.1" value="${last[0]}"></label><span style="padding-bottom:10px">×</span><label class="fld" style="flex:1">세로 (m)<input id="nsD" type="number" inputmode="decimal" min="1" max="200" step="0.1" value="${last[1]}"></label></div>
+    <div class="chips" style="margin-top:8px">${[[6, 8], [8, 10], [9, 12], [10, 15], [12, 20]].map(([w, d]) => `<button type="button" data-ns="${w},${d}">${w}×${d}</button>`).join('')}</div><p class="hint" id="nsA" style="margin:6px 0 0"></p>`;
+  const W = $('#nsW'), D = $('#nsD'), area = () => { const a = (+W.value || 0) * (+D.value || 0); $('#nsA').textContent = a > 0 ? `${a.toFixed(1)} ㎡ · ${(a / 3.3058).toFixed(1)} 평` : '숫자를 넣어 주세요'; };
+  W.oninput = D.oninput = area; area(); $$('[data-ns]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const [w, d] = b.dataset.ns.split(','); W.value = w; D.value = d; area(); }));
+  const enter = (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#dlgB [data-i="1"]').click(); } }; W.onkeydown = D.onkeydown = enter; setTimeout(() => { W.focus(); W.select(); }, 60);
+  return p.then((v) => { if (v !== 'ok') return false; const w = Math.min(200, Math.max(1, +W.value || 0)), d = Math.min(200, Math.max(1, +D.value || 0)); if (!(w > 0 && d > 0)) return false; try { localStorage.setItem('byr.newSize', JSON.stringify([w, d])); } catch {} return [Math.round(w * 1000), Math.round(d * 1000)]; });
 }
 /* ---------- 새 버전 알림 ----------
  * PC 설치판은 메인 프로세스가 알아서 받고 다시 시작을 묻는다 (여기선 진행 알림만).
@@ -2210,6 +2251,8 @@ async function boot() {
   engine = new Engine($('#view'), { lib: S.lib, shapes: S.shapes, assets: S.assets, zOf: (it) => SL.itemZ(level(), it, S.lib) });
   sketch = new Sketch3D(engine, { toast }); /* 3D 펜 (화면 왼쪽 작은 아이콘) */
   secView = new SectionView(engine, { toast, level: () => level(), selWall: () => selWall(), onChange: () => buildDock && buildDock() }); /* 보기 → 단면 투시 */
+  initUiMove(); /* 툴바 손잡이 ⋮⋮ */
+  if (!DUAL.SIDE) DUAL.initMain({ S, engine, toast, onChange: () => { if (S.panel === 'uiset') renderProps(); } });
   try { bindUi(); } catch (e) { console.warn(e); }
   engine.mepHide = !!store.get('byr.mepHide', false); engine.onSite = (i) => { S.siteSel = i; engine.siteMark(i); S.panel = 'site'; S.propsOpen = true; plan.redraw(); renderProps(); }; SITE.setSiteRedraw(() => { engine.invalidate(true); plan.redraw(); }); window.addEventListener('byr-secrets-in', () => { toast('계정에 저장된 API 키를 받았어요', 2500); renderProps(); if (!$('#home').hidden && $('#homeBody')) { if ($('#sfQ')) renderSiteFind(); } }); engine.onLine = (id) => setSel({ kind: 'line', id });
   lib2.onStatus(setSaveState); $('#btnSave').onclick = () => saveNow(); $('#btnSaveC').onclick = () => saveCloud(); $('#saveState').onclick = () => S.dirty && saveNow();
@@ -2286,6 +2329,7 @@ async function boot() {
     if (mod && k === 'z') { e.preventDefault(); if (engine.design.active) { (e.shiftKey ? engine.design.redo() : engine.design.undo()) || toast(e.shiftKey ? '다시 할 게 없어요' : '되돌릴 게 없어요', 1200); renderProps(); return; } e.shiftKey ? redo() : undo(); return; }
     if (mod && k === 's') { e.preventDefault(); if (e.shiftKey) saveCloud(); else saveNow(); return; }
     if (e.key === 'F1' || (mod && (e.key === '/' || e.code === 'Slash'))) { e.preventDefault(); showKeys(); return; }
+    if (!mod && e.key === 'Tab' && !e.shiftKey && $('#home').hidden && !S.dlgClose) { e.preventDefault(); const on = toggleClean(); toast(on ? '화면 비우기 · Tab 을 다시 누르면 도구가 돌아와요' : '도구를 다시 보여요', 1600); return; }
     if (e.key === 'Escape' && escAll()) { e.preventDefault(); return; }
     if (engine.design.active) { /* 디자인 수정 중: 부품 단축키 */
       const d = engine.design;
@@ -2350,9 +2394,14 @@ async function boot() {
 
   // 마지막으로 작업하던 프로젝트를 연다 (자동 저장)
   setTimeout(() => dropIntro(), 12000); /* 안전장치: 무엇이 오래 걸려도 12초 뒤엔 로딩 화면을 걷는다 */
+  if (DUAL.SIDE) { /* 듀얼 모니터 보조 창: 메인 창 모델을 따라감 */
+    await followModel(emptyProject()); setMode('orbit');
+    window.BYR = { S, engine, plan, setModel, level, setPane, secView };
+    DUAL.initSide({ S, engine, secView, setPane, toggleClean, followModel, showHome, setMode }); initLang(); setTimeout(() => dropIntro(true), 300); return;
+  }
   let first = null; try { const id = lib2.lastId(); first = id && (await lib2.loadLocal(id)); } catch (e) { console.warn(e); }
   await setModel(first || emptyProject());
-  window.__goBack = goBack; window.BYR = { S, engine, present, plan, mkItem, emptyProject, setModel, level, commit, uid, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
+  window.__goBack = goBack; window.BYR = { DUAL, secView, S, engine, present, plan, mkItem, emptyProject, setModel, level, commit, uid, openJson, FORMAT, setStyle, setPane, setSel, applyPlan, placeDetected, lib2, SL, newRoom, setFocus, fitItems, startDesign, endDesign, exportRoom, setDrain, SW, ACT, applyEnv, cloud, startPick, endPick, dxfLoad }; // 디버깅 · 자동 테스트용
   initLang(); checkUpdate(); showHome(); // 켤 때 홈 (이어서 작업 · 내 프로젝트 · 계정 · AI)
   if ($('#introVer')) $('#introVer').textContent = 'v' + APP_VERSION;
   const wait = Math.max(1200, 3000 - performance.now()); /* 로딩 화면: 처음부터 최소 3초 · 준비가 끝난 뒤에도 1.2초 더 */ setTimeout(() => dropIntro(), wait);

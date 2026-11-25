@@ -1,5 +1,5 @@
 // Electron 메인 프로세스: 창 띄우기 · 로컬 파일 서빙(app://) · 파일 열기/저장
-const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, screen } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
 const { pathToFileURL } = require('url');
@@ -47,6 +47,26 @@ function autoUpdate(win) {
   const check = () => au.checkForUpdates().catch(() => {}); setTimeout(check, 8000); setInterval(check, 6 * 3600 * 1000);
 }
 
+/* ---------- 듀얼 모니터: 보조 창 (설정에서 켤 때만) ---------- */
+let mainWin = null, sideWin = null;
+ipcMain.handle('side:open', (e, opt = {}) => {
+  if (!mainWin || e.sender !== mainWin.webContents) return { ok: false };
+  if (sideWin && !sideWin.isDestroyed()) { sideWin.show(); sideWin.focus(); return { ok: true }; }
+  const md = screen.getDisplayMatching(mainWin.getBounds()), others = screen.getAllDisplays().filter((d) => d.id !== md.id);
+  let d = null; if (others.length) { const right = others.filter((o) => o.bounds.x >= md.bounds.x), left = others.filter((o) => o.bounds.x < md.bounds.x); d = (opt.where === 'left' ? left[0] || right[0] : right[0] || left[0]) || others[0]; }
+  const wa = (d || md).workArea, single = !d, b = single ? { x: wa.x + Math.round(wa.width * 0.5), y: wa.y + 40, width: Math.round(wa.width * 0.5), height: wa.height - 80 } : wa;
+  sideWin = new BrowserWindow({ ...b, minWidth: 600, minHeight: 400, backgroundColor: '#1b1d21', autoHideMenuBar: true, title: 'BYR2 · 보조 창',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  sideWin.removeMenu(); if (!single) sideWin.maximize();
+  sideWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  sideWin.webContents.on('will-navigate', (ev, url) => { if (!url.startsWith('app://byr/')) ev.preventDefault(); });
+  sideWin.on('closed', () => { sideWin = null; try { mainWin && !mainWin.isDestroyed() && mainWin.webContents.send('side:closed'); } catch {} });
+  sideWin.loadURL('app://byr/index.html?side=1');
+  return { ok: true, single };
+});
+ipcMain.handle('side:close', () => { if (sideWin && !sideWin.isDestroyed()) sideWin.close(); return true; });
+ipcMain.on('side:state', (e, m) => { if (mainWin && e.sender === mainWin.webContents && sideWin && !sideWin.isDestroyed()) sideWin.webContents.send('side:state', m); });
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 900, minHeight: 600, backgroundColor: '#1b1d21', autoHideMenuBar: true,
@@ -59,6 +79,7 @@ function createWindow() {
       .then((r) => { if (r.response === 0) { win.__quit = true; win.close(); } });
   });
   win.removeMenu(); /* Alt 를 눌러도 메뉴 막대가 뜨지 않게 (Alt+끌기 = 공간 그리기) */
+  mainWin = win; win.on('closed', () => { mainWin = null; if (sideWin && !sideWin.isDestroyed()) sideWin.destroy(); });
   win.loadURL('app://byr/index.html'); autoUpdate(win);
   if (SMOKE) smoke(win);
   // 외부 링크로 창이 넘어가지 않게
