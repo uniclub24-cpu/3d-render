@@ -263,7 +263,20 @@ export class Engine {
     const hide = this.present ? this.present !== 'mep' : !!this.mepHide && !this.xray;
     if (this.structure) for (const c of this.structure.children) if (c.userData.mep) c.visible = !hide;
     if (this.items && this.level) for (const g of this.items.children) { const it = this.level.items.find((q) => q.id === g.userData.itemId); if (it && isMepItem(this.ctx.lib[it.type], it.type)) g.visible = !hide; }
+    this._applyCeil();
     if (this.renderer) this.renderer.shadowMap.needsUpdate = true;
+  }
+  /** 천장 걷기: 천장 + 천장 매립 설비(조명 기구 · 천장 속 전선 · 덕트 · 환기구 · 디퓨저)를 숨긴다. 빛은 그대로 → 인테리어만 깔끔하게 투과해서 보기 */
+  setCeilHide(on) { this.ceilHide = !!on; this._applyMep(); this.invalidate(true); }
+  _applyCeil() {
+    const hide = !!this.ceilHide, H = (this.level && this.level.ceilingH) || 2700;
+    if (this.structure) { for (const g of this.structure.getObjectsByProperty('name', '천장')) g.visible = hide ? false : (this.level.ceiling || {}).on !== false;
+      this.structure.traverse((o) => { if (o.isMesh && o.userData.xr === 'ceil') o.visible = !hide; }); }
+    if (this.items && this.level) for (const g of this.items.children) {
+      const it = this.level.items.find((q) => q.id === g.userData.itemId); if (!it) continue; const L = this.ctx.lib[it.type] || {};
+      const ceilFix = L.layer === 'ceil' || L.layer === 'ceiling' || ((L.cat === '조명' || (it.light && !L.sign)) && (it.elev ?? L.elev ?? 0) + (it.h ?? L.h ?? 0) >= H - 450) || /디퓨저|환기구|급기구|배기구|에어컨 \(천장|천장형|스피커 \(천장/.test(it.name || L.name || '');
+      if (!ceilFix) continue; g.traverse((o) => { if (o.isMesh || o.isLine || o.isSprite) { if (o.userData._cv == null) o.userData._cv = o.visible; o.visible = hide ? false : o.userData._cv; } });
+    }
   }
   /** 벽 · 문/창 · 바닥만 다시 만든다 (2D 도면에서 벽을 그리거나 끌 때 바로 3D 에 반영) */
   rebuildStructure() {
@@ -361,7 +374,7 @@ export class Engine {
   }
 
   /** 천장 보이기 · 끄기 (모델의 level.ceiling.on 과 함께) */
-  showCeiling(on) { if (this.structure) for (const g of this.structure.getObjectsByProperty('name', '천장')) g.visible = on; }
+  showCeiling(on) { if (this.ceilHide) on = false; if (this.structure) for (const g of this.structure.getObjectsByProperty('name', '천장')) g.visible = on; }
   /** 배경(상권) 다시 세우기. E = model.env */
   setEnv(E, meta = {}) {
     if (this.envGroup) { this.scene.remove(this.envGroup); disposeTree(this.envGroup); this.envGroup = null; }

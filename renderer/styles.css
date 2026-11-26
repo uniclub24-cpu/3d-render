@@ -533,3 +533,4 @@ body.uiclean #dock, body.uiclean #planTools, body.uiclean #sk3, body.uiclean #fa
 body.sidefollow #dock, body.sidefollow #planTools, body.sidefollow #drawer, body.sidefollow #topbar, body.sidefollow #fab, body.sidefollow #sk3, body.sidefollow #props, body.sidefollow #fitFab { display: none !important; }
 body.sidefollow #plan { pointer-events: none; }
 body.sidefollow #svBar { top: 56px !important; }
+#sk3 .sk-sep { display: block; width: 22px; height: 1px; background: var(--line); margin: 2px 0; }

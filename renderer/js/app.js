@@ -23,14 +23,14 @@ import * as lib2 from './store.js';
 import * as SL from './slope.js';
 import { ENVTYPES, ENVCOL, ENVLV, envOf, envFront } from './env.js';
 import { bakeParts, applyParts } from './design.js';
-import { LINEKINDS, lineCat, XRN, lineZ, lineRound } from './lines.js';
+import { LINEKINDS, lineCat, XRN, lineZ, lineRound, braceH } from './lines.js';
 import { ROLES, FAMN, SIMCOL } from './sim.js';
 import { findFaces, splitPoly } from './rooms.js';
 import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.49';
+export const APP_VERSION = '2.1.50';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -346,6 +346,7 @@ function renderProps() {
     ${it.onSlope ? '<div class="row2"><span class="hint">구배 · 단 위에 올려져 있어요</span><button class="btn" data-a="unfit">원래 높이로</button></div>' : SL.needFit(level(), it, S.lib) ? `<div class="row2"><span class="hint warn">바닥(구배 · 단)에 ${SL.needFit(level(), it, S.lib)}mm 묻혀요</span><button class="btn pri" data-a="fit">바닥 위로</button></div>` : ''}
     <div class="btns"><button class="btn pri" data-a="design" ${it.asset ? 'disabled title="가져온 3D 파일은 디자인 수정이 안 돼요"' : ''}>디자인 수정 (점 · 면 · 부품 색)</button></div>
     <div class="btns"><button class="btn" data-a="rot90">90° 돌리기</button><button class="btn" data-a="dup">복제</button><button class="btn danger" data-a="del">삭제</button></div>`;
+  swapBlock(body, it, L); /* 디자인 바꾸기 (의자 · 테이블 · 한 번에) */
   if (L && L.sign) bindSignUi(body, it, L);
   const ao = $('#acOn', body); if (ao) ao.onchange = () => { const t = selItem(); if (ao.checked) t.acOn = true; else delete t.acOn; commit(); if (engine.air.on) engine.air.refresh(); else if (ao.checked) toast('공기 흐름(보기 → 공기)을 켜면 찬 바람이 보여요', 2500); renderProps(); };
   const ah = $('#acHp', body); if (ah) ah.onchange = () => { const t = selItem(); t.acHp = Math.max(0.5, +ah.value || 1); commit(); if (engine.air.on) engine.air.refresh(); };
@@ -726,6 +727,19 @@ function bindSignUi(body, it, L) {
 function renderLine(body, ln) {
   const k = LINEKINDS[ln.kind] || {}, z = Math.round(lineZ(k, ln, level())), w = ln.w || k.w, round = lineRound(ln), len = Math.round(ln.pts.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - ln.pts[i][0], q[1] - ln.pts[i][1]), 0));
   $('#propsTitle').textContent = k.name || '배관 · 전선';
+  if (k.plank) { /* 벽 보강재 = 합판: 아래 끝 높이 · 세로 크기 · 두께 */
+    const bh = braceH(ln), bot = Math.round(z - bh / 2);
+    body.innerHTML = `<p class="hint">합판 길이 ${(len / 1000).toFixed(2)}m · 벽 속 선반 · 기기 고정용</p>
+      <div class="row"><label class="fld">아래 끝 높이 (바닥에서, mm)<input type="number" id="brB" step="10" value="${bot}"></label><label class="fld">합판 세로 크기 (mm)<input type="number" id="brH" min="30" max="2400" step="10" value="${bh}"></label></div>
+      <div class="chips">${[200, 300, 400, 600, 900, 1200].map((v) => `<button data-bh="${v}" aria-pressed="${bh === v}">${v / 10}cm</button>`).join('')}</div>
+      <div class="row"><label class="fld">두께 (mm)<input type="number" id="lnW" min="5" max="60" step="1" value="${w}"></label><span class="hint" style="align-self:end">위 끝 ${bot + bh}mm</span></div>
+      <label class="fld">색<input type="color" id="lnC" value="${ln.color || k.color}"></label><div class="btns"><button class="btn danger" id="lnDel">이 보강재 지우기</button></div>`;
+    const up = () => { engine.rebuildLines(); commit(); plan.redraw(); renderProps(); }, setB = (b, h) => { ln.bh = clamp(Math.round(h), 30, 2400); ln.z = Math.round(b + ln.bh / 2); up(); };
+    $('#brB', body).onchange = (e) => setB(+e.target.value || 0, bh); $('#brH', body).onchange = (e) => setB(bot, +e.target.value || bh);
+    $$('[data-bh]', body).forEach((b) => (b.onclick = () => setB(bot, +b.dataset.bh)));
+    $('#lnW', body).onchange = (e) => { ln.w = clamp(Math.round(+e.target.value || w), 5, 60); up(); }; $('#lnC', body).onchange = (e) => { ln.color = e.target.value; engine.rebuildLines(); commit(); };
+    $('#lnDel', body).onclick = () => { const L = level(); L.lines = (L.lines || []).filter((l) => l !== ln); setSel(null); engine.rebuildLines(); commit(); plan.redraw(); toast('보강재를 지웠어요'); }; return;
+  }
   body.innerHTML = `<p class="hint">길이 ${(len / 1000).toFixed(2)}m · 꺾임 ${Math.max(0, ln.pts.length - 2)}곳</p>
     <div class="row"><label class="fld">높이 (바닥에서 중심까지, mm)<input type="number" id="lnZ" step="10" value="${z}"></label><label class="fld">${round ? '지름' : '폭'} (mm)<input type="number" id="lnW" min="5" max="1200" step="5" value="${w}"></label></div>
     <div class="chips"><button data-lz="${-(ln.depth ?? 80)}">바닥 매립</button><button data-lz="20">바닥 위</button><button data-lz="500">벽 속 (500)</button><button data-lz="${(level().ceilingH || 2700) + Math.round(((level().slabH || 3300) - (level().ceilingH || 2700)) / 2)}">천장 속</button><button data-lz="${(level().ceilingH || 2700) - Math.round(w / 2) - 30}">천장 아래 노출</button></div>
@@ -1405,6 +1419,23 @@ async function reloadIfChanged(r) { if (r && r.changed && r.changed.includes(S.m
 
 /* ----- 벽 · 문/창 속성 ----- */
 const FINISH = { paint: '페인트', tile: '타일', wood: '목재', panel: '샌드위치 패널', concrete: '콘크리트', glass: '유리' };
+/* ---------- 한 번에 바꾸기: 의자 → 의자 디자인, 테이블 → 테이블 디자인 ---------- */
+const SWAPCAT = { 의자: '의자', 테이블: '테이블' };
+function swapBlock(body, it, L) {
+  if (!L || !SWAPCAT[L.cat]) return; const cat = L.cat, opts = Object.entries(S.lib).filter(([, v]) => v.cat === cat && !v.hidden).sort((a, b) => a[1].name.localeCompare(b[1].name, 'ko'));
+  const sim = (q) => { const Q = S.lib[q.type] || {}; return Q.cat === cat && (cat !== '의자' || Math.abs((Q.h || 0) - (L.h || 0)) < 250); } /* 의자: 바 의자 · 스툴처럼 높이가 다른 건 빼고 */, all = level().items.filter(sim), same = all.filter((q) => q.type === it.type);
+  const box = document.createElement('div'); box.innerHTML = `<div class="sec">${cat} 디자인 바꾸기 · 한 번에</div>
+    <label class="fld">바꿀 디자인<select id="swT">${opts.map(([k, v]) => `<option value="${k}" ${k === it.type ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
+    <label class="tog">지금 색 유지<input type="checkbox" id="swKeep"></label>
+    <div class="btns"><button class="btn" id="swOne">이것만</button><button class="btn" id="swSame">같은 기물 모두 (${same.length})</button><button class="btn pri" id="swAll">모든 ${cat} (${all.length})</button></div>`;
+  body.appendChild(box);
+  const go = (list) => { const t = $('#swT', box).value, N = S.lib[t], keep = $('#swKeep', box).checked; if (!N) return; let n = 0;
+    for (const q of list) { const old = S.lib[q.type] || {}; q.type = t; if (q.name === old.name || !q.name || /의자|테이블|체어/.test(q.name)) q.name = N.name;
+      if (cat === '의자') { q.w = N.w; q.d = N.d; q.h = N.h; } else { q.h = N.h ?? q.h; } /* 테이블은 놓인 크기(폭 · 깊이) 유지 */
+      if (!keep) { q.color = N.color; } for (const k of ['color2', 'color3']) delete q[k]; n++; }
+    engine.setLevel(level()); applyEnv(); commit(); renderProps(); toast(`${cat} ${n}개를 '${N.name}'(으)로 바꿨어요`, 3000); };
+  $('#swOne', box).onclick = () => go([it]); $('#swSame', box).onclick = () => go(level().items.filter((q) => q.type === it.type)); $('#swAll', box).onclick = () => go(level().items.filter(sim));
+}
 function renderWall(body, w) {
   const len = Math.round(Math.hypot(w.x2 - w.x1, w.y2 - w.y1));
   $('#propsTitle').textContent = '벽';
@@ -1412,6 +1443,7 @@ function renderWall(body, w) {
     <div class="row"><label class="fld">색<input type="color" data-k="color" value="${/^#[0-9a-f]{6}$/i.test(w.color) ? w.color : '#ece8e1'}"></label>
     <label class="fld">마감<select data-k="finish">${Object.entries(FINISH).map(([k, n]) => `<option value="${k}" ${w.finish === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
     <p class="hint">길이를 바꾸면 끝점(두 번째 점)이 움직여요. 2D 에서 파란 끝점을 끌면 붙은 벽도 같이 따라와요.</p>
+    <div class="btns"><button class="btn" id="wAllSame">이 색 · 마감을 같은 색 벽 모두에</button><button class="btn" id="wAll">모든 벽에 (유리 벽 빼고)</button></div>
     <div class="sec">나누기 · 돌리기 · 잇기</div>
     <div class="btns"><button class="btn" data-a="split">2등분</button><button class="btn" data-a="split3">3등분</button><button class="btn" data-a="splitAt">시작점에서 …mm 에서 나누기</button></div>
     <div class="btns"><button class="btn" data-a="rot45">45° 돌리기</button><button class="btn" data-a="rot90">90° 돌리기</button><button class="btn" data-a="rotAt">각도 직접</button><button class="btn" data-a="join">다른 벽과 잇기</button></div>
@@ -1422,6 +1454,8 @@ function renderWall(body, w) {
     <div class="btns"><button class="btn" data-a="shImg">${w.sheet && w.sheet.img ? '시트지 이미지 바꾸기' : '시트지에 이미지 (사진 · 패턴)'}</button>${w.sheet && w.sheet.img ? '<button class="btn" data-a="shImgDel">이미지 빼기</button>' : ''}<button class="btn" data-a="art">벽 그림 넣기</button></div>
     ${(w.arts || []).map((A, i) => `<div class="row2"><span class="hint">그림 ${i + 1} · ${A.w}×${A.h}</span><span><button class="btn" data-art="${i}:big">크게</button><button class="btn" data-art="${i}:small">작게</button><button class="btn" data-art="${i}:left">◀</button><button class="btn" data-art="${i}:right">▶</button><button class="btn" data-art="${i}:up">▲</button><button class="btn" data-art="${i}:down">▼</button><button class="btn danger" data-art="${i}:del">✕</button></span></div>`).join('')}
     <div class="btns"><button class="btn" data-a="alignH">이 벽을 수평으로 (도면 전체 돌리기)</button><button class="btn" data-a="orient">작업 방향…</button><button class="btn danger" data-a="del">삭제</button></div>`;
+  { const c0 = w.color, bulk = (pred) => { let n = 0; for (const o of level().walls) if (o !== w && o.pz !== 'glass' && pred(o)) { o.color = w.color; o.finish = w.finish; n++; } engine.rebuildStructure(); commit(); toast(`벽 ${n}개에 같은 색 · 마감을 적용했어요`); };
+    $('#wAllSame', body).onclick = () => bulk((o) => (o.color || '') === (c0 || '')); $('#wAll', body).onclick = () => bulk(() => true); }
   $$('[data-k]', body).forEach((i) => {
     const k = i.dataset.k;
     if (k === 'color') { i.oninput = () => { w.color = i.value; liveStructure(); }; i.onchange = () => commit(); return; }
@@ -2285,6 +2319,13 @@ async function boot() {
   S.lib = lib.items; S.shapes = shapes; loadMyLib();
   engine = new Engine($('#view'), { lib: S.lib, shapes: S.shapes, assets: S.assets, zOf: (it) => SL.itemZ(level(), it, S.lib) });
   sketch = new Sketch3D(engine, { toast }); /* 3D 펜 (화면 왼쪽 작은 아이콘) */
+  { /* 천장 걷기 아이콘 (3D · 발표): 천장 + 천장 매립 설비(조명 기구 · 전선 · 덕트 · 환기구)를 숨기고 빛은 그대로 */
+    const bar = $('#sk3'), cb = document.createElement('button'); cb.className = 'ib'; cb.id = 'sk3Ceil'; cb.setAttribute('aria-pressed', 'false');
+    cb.title = '천장 걷기 · 천장과 천장 매립 설비(조명 기구 · 전선 · 환기구)를 숨겨 인테리어만 보기'; cb.setAttribute('aria-label', '천장 걷기');
+    cb.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 7h18"/><path d="M6 7v2M12 7v2M18 7v2"/><path d="M5 13l3 3 3-3M13 13l3 3 3-3" opacity=".9"/><path d="M4 20h16"/></svg>';
+    cb.onclick = () => { const on = !engine.ceilHide; engine.setCeilHide(on); cb.setAttribute('aria-pressed', String(on)); toast(on ? '천장 걷기 · 천장 · 조명 기구 · 천장 속 설비를 숨겼어요 (빛은 그대로)' : '천장을 다시 보여요', 2500); };
+    if (bar) { bar.insertBefore(cb, bar.firstChild); const sep = document.createElement('i'); sep.className = 'sk-sep'; bar.insertBefore(sep, cb.nextSibling); }
+  }
   secView = new SectionView(engine, { toast, level: () => level(), selWall: () => selWall(), onChange: () => buildDock && buildDock() }); /* 보기 → 단면 투시 */
   initUiMove(); /* 툴바 손잡이 ⋮⋮ */
   if (!DUAL.SIDE) DUAL.initMain({ S, engine, toast, onChange: () => { if (S.panel === 'uiset') renderProps(); } });

@@ -157,7 +157,7 @@ function signFace(S, w, h, text, it = {}) {
 }
 /* ---------- 손으로 만든 모양 (놀이방 · 테라스 · 경사로 · 어닝 · 조명) ----------
  * lib 의 shape 이름으로 고른다. 기준점: 바닥 가운데, x = 폭(w), z = 깊이(d, 앞 +z), y = 높이 */
-const PROC = new Set(['pipeframe', 'wedge', 'slide', 'wave', 'pool', 'xroll', 'bag', 'ring', 'perf', 'deck', 'turf', 'fence', 'awning', 'light3', 'strip', 'postlamp', 'disc', 'flat', 'downR', 'linear', 'cone', 'bulb', 'spot', 'bracket']);
+const PROC = new Set(['pipeframe', 'wedge', 'slide', 'wave', 'pool', 'xroll', 'bag', 'ring', 'perf', 'deck', 'turf', 'fence', 'awning', 'light3', 'strip', 'postlamp', 'disc', 'flat', 'downR', 'linear', 'cone', 'bulb', 'spot', 'bracket', 'chairStud', 'chairShell', 'chairRey', 'chairRound']);
 const KBROWN = '#b5866a', KCREAM = '#efe6dc';
 function pm(color, opt = {}) { const m = material('plain', color); return opt.emissive ? Object.assign(m.clone(), { emissive: new THREE.Color(opt.emissive), emissiveIntensity: opt.ei ?? 1 }) : m; }
 function mk(geo, mat, x = 0, y = 0, z = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; return m; }
@@ -195,6 +195,33 @@ function procShape(shape, it, L) {
   } else if (shape === 'fence') { /* 철제 펜스: 기둥 1.2m 안팎 · 위아래 난간 · 세로살 */
     const mat = pm(col), n = Math.max(1, Math.round(it.w / 1200)), posts = []; for (let i = 0; i <= n; i++) { const x = -W / 2 + (W * i) / n; posts.push(x); g.add(mk(new THREE.BoxGeometry(0.06, H, 0.06), mat, x, H / 2, 0)); }
     g.add(mk(new THREE.BoxGeometry(W, 0.04, 0.05), mat, 0, H - 0.02, 0)); g.add(mk(new THREE.BoxGeometry(W, 0.04, 0.05), mat, 0, 0.1, 0)); const bars = Math.round(it.w / 120); for (let i = 1; i < bars; i++) g.add(mk(new THREE.BoxGeometry(0.016, H - 0.14, 0.016), mat, -W / 2 + (W * i) / bars, H / 2 + 0.04, 0));
+  } else if (shape === 'chairStud') { /* 가죽 스터드 원목 의자: 짙은 원목 다리 · 검정 가죽 좌판(징 테두리) · 곡면 가죽 등판. 등 = +z */
+    const wood = pm(it.color2 || '#3b3128'), lea = pm(col), stud = pm('#b08d4a'), sh = H * 0.53, lw = 0.034;
+    for (const [x, z, back] of [[-W / 2 + 0.05, -D / 2 + 0.06, 0], [W / 2 - 0.05, -D / 2 + 0.06, 0], [-W / 2 + 0.06, D / 2 - 0.07, 1], [W / 2 - 0.06, D / 2 - 0.07, 1]]) { const top = back ? H * 0.78 : sh - 0.03, leg = mk(new THREE.BoxGeometry(lw, top, lw), wood, x, top / 2, z); leg.rotation.x = back ? -0.06 : 0.04; g.add(leg); }
+    for (const z of [-D / 2 + 0.06, D / 2 - 0.07]) g.add(mk(new THREE.BoxGeometry(W - 0.1, 0.025, 0.022), wood, 0, sh * 0.32, z)); for (const x of [-W / 2 + 0.055, W / 2 - 0.055]) g.add(mk(new THREE.BoxGeometry(0.022, 0.025, D - 0.14), wood, x, sh * 0.24, 0));
+    const seat = mk(new THREE.BoxGeometry(W - 0.02, 0.06, D - 0.04), lea, 0, sh, -0.01); g.add(seat);
+    for (let i = 0; i < 28; i++) { const t = i / 28, x = -W / 2 + 0.02 + (W - 0.04) * (t < 0.5 ? t * 2 : 1), z = t < 0.5 ? -D / 2 + 0.01 : -D / 2 + 0.01 + (D - 0.04) * (t - 0.5) * 2; g.add(mk(new THREE.SphereGeometry(0.006, 6, 4), stud, Math.min(W / 2 - 0.01, x), sh, z)); }
+    const bk = mk(new THREE.BoxGeometry(W * 0.98, H * 0.22, 0.045), lea, 0, H * 0.86, D / 2 - 0.05); bk.rotation.x = -0.1; g.add(bk); /* 가죽 등판 (뒤 = +z) */
+    for (let i = 0; i <= 16; i++) g.add(mk(new THREE.SphereGeometry(0.006, 6, 4), stud, -W * 0.47 + (W * 0.94 * i) / 16, H * 0.86 + H * 0.105, D / 2 - 0.05 - 0.035));
+  } else if (shape === 'chairShell') { /* 쉘 체어 (원목 다리): 한 덩어리 좌판+등판 · 4 원목 다리 · X 철사. 등 = +z */
+    const wood = pm(it.color2 || '#d9b98c'), sh2 = Object.assign(pm(col).clone(), { side: THREE.DoubleSide }), sh = H * 0.55, R = W / 2;
+    const seat = mk(new THREE.CylinderGeometry(R * 0.92, R * 0.8, 0.05, 40), sh2, 0, sh, -0.01); seat.scale.z = D / W; g.add(seat);
+    const lip = mk(new THREE.TorusGeometry(R * 0.9, 0.022, 8, 40), sh2, 0, sh + 0.02, -0.01); lip.rotation.x = Math.PI / 2; lip.scale.y = D / W; g.add(lip);
+    const back = mk(new THREE.CylinderGeometry(R * 0.98, R * 0.86, H * 0.42, 32, 1, true, -Math.PI * 0.42, Math.PI * 0.84), sh2, 0, sh + H * 0.2, -0.02); back.scale.z = (D / W) * 0.95; back.rotation.x = -0.12; g.add(back);
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) g.add(tube([x * W * 0.16, sh - 0.025, z * D * 0.14], [x * W * 0.42, 0, z * D * 0.4], 0.017, wood));
+    g.add(tube([-W * 0.3, sh * 0.38, -D * 0.27], [W * 0.3, sh * 0.38, D * 0.27], 0.003, pm('#8a8d91'))); g.add(tube([W * 0.3, sh * 0.38, -D * 0.27], [-W * 0.3, sh * 0.38, D * 0.27], 0.003, pm('#8a8d91')));
+  } else if (shape === 'chairRey') { /* 라운드 프레임 의자 (직영점 렌더 3번): 판 다리 · 둥근 좌판 · 아치형 둥근 등받이 */
+    const fr = pm(it.color2 || col), seatM = pm(col), sh = H * 0.56, R = Math.min(W, D) * 0.47;
+    const seat = mk(new THREE.CylinderGeometry(R, R, 0.05, 40), seatM, 0, sh, -0.01); g.add(seat); g.add(mk(new THREE.CylinderGeometry(R * 0.98, R * 0.9, 0.03, 40), fr, 0, sh - 0.04, -0.01));
+    for (const sx of [-1, 1]) { g.add(mk(new THREE.BoxGeometry(0.035, sh - 0.05, 0.09), fr, sx * R * 0.78, (sh - 0.05) / 2, -R * 0.6)); /* 앞다리 (판) */
+      const bl = mk(new THREE.BoxGeometry(0.035, H * 0.68, 0.08), fr, sx * R * 0.9, (H * 0.68) / 2, R * 0.64); g.add(bl); } /* 뒷다리 = 등받이 기둥 */
+    const ph = H * 0.68, arch = mk(new THREE.TorusGeometry(R * 0.9, 0.034, 10, 32, Math.PI), fr, 0, ph, R * 0.66); arch.scale.y = 0.75; g.add(arch); /* 뒷다리가 올라가 둥근 등받이로 이어짐 */
+    g.add(mk(new THREE.BoxGeometry(R * 1.7, 0.06, 0.03), fr, 0, ph + 0.02, R * 0.68));
+  } else if (shape === 'chairRound') { /* 원형 좌판 원목 의자: 둥근 쿠션 좌판 · 원형 다리 4 · 둥근 등 띠 */
+    const wood = pm(it.color2 || col), cush = pm(it.color3 || col), sh = H * 0.56, R = Math.min(W, D) * 0.46;
+    g.add(mk(new THREE.CylinderGeometry(R, R, 0.06, 40), cush, 0, sh, -0.02)); g.add(mk(new THREE.BoxGeometry(R * 1.7, 0.04, R * 1.5), wood, 0, sh - 0.05, -0.02));
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) g.add(mk(new THREE.CylinderGeometry(0.02, 0.02, z > 0 ? H * 0.88 : sh - 0.03, 14), wood, x * R * 0.75, z > 0 ? (H * 0.88) / 2 : (sh - 0.03) / 2, z * R * 0.72));
+    const rail = mk(new THREE.CylinderGeometry(R * 1.02, R * 1.02, 0.09, 24, 1, true, -Math.PI * 0.28, Math.PI * 0.56), Object.assign(wood.clone(), { side: THREE.DoubleSide }), 0, H * 0.86, -R * 0.3); g.add(rail);
   } else if (shape === 'disc') { /* 원형 직부등: 금속 테 + 우윳빛 확산판 (아래로 볼록) */
     const R = Math.min(W, D) / 2, lc = it.light && it.light.color || (L && L.lightColor) || '#fff1dc';
     g.add(mk(new THREE.CylinderGeometry(R, R * 0.96, H * 0.45, 40), pm(col), 0, H * 0.775, 0));

@@ -8,7 +8,7 @@ export const LINEKINDS = {
   water: { name: '급수 배관', color: '#4f9cf9', layer: 'plumb', z: 'floor', w: 40 },
   drainpipe: { name: '배수 배관', color: '#38c1b0', layer: 'plumb', z: 'floor', w: 80 },
   gas: { name: '가스 배관', color: '#f28b3a', layer: 'plumb', z: 'mid', w: 30 },
-  brace: { name: '벽 보강재 (선반 · 기기 고정)', color: '#b07a3a', layer: 'plumb', z: 'mid', w: 60 },
+  brace: { name: '벽 보강재 (합판 · 선반 · 기기 고정)', color: '#b07a3a', layer: 'plumb', z: 'mid', w: 18, bh: 300, plank: 1 },
   duct: { name: '환기 덕트', color: '#a9adb5', layer: 'ceil', z: 'above', w: 300 },
   supplyDuct: { name: '급기관', color: '#7fb3d5', layer: 'ceil', z: 'above', w: 250 },
   exhaustDuct: { name: '배기관', color: '#b0a49a', layer: 'ceil', z: 'above', w: 300 },
@@ -29,7 +29,9 @@ export const XRN = { floor: '바닥 매립 · 배관', wall: '벽 속 전선 · 
 export function itemCat(L) { if (!L) return null; if (L.layer === 'elec') return 'wall'; if (L.layer === 'plumb' || L.shape === 'drainpt' || L.drain === 'out') return 'floor'; if (L.layer === 'ceil' || L.layer === 'ceiling') return 'ceil'; return null; }
 export function lineZ(k, l, level) { if (l.z != null && isFinite(l.z)) return +l.z; /* 직접 넣은 높이(바닥에서 중심까지) */ const H = level.ceilingH || 2700, S = level.slabH || 3300; return k.z === 'above' ? (H + S) / 2 : k.z === 'mid' ? (l.h ?? 500) : k.z === 'below' ? -(l.depth ?? 80) - k.w / 2 : k.z === 'hang' ? S - (l.off ?? 300) : k.z === 'frame' ? H + 30 : 20; }
 /** 원형인가: 사각 덕트로 바꾼 것(shape: 'rect') · 천장틀(M바)만 각지게 */
-export const lineRound = (l) => (l.shape ? l.shape !== 'rect' : l.kind !== 'cFrame');
+export const lineRound = (l) => (l.kind === 'brace' ? false : l.shape ? l.shape !== 'rect' : l.kind !== 'cFrame');
+/** 보강재(합판) 세로 크기 mm */
+export const braceH = (l) => Math.max(30, +(l.bh ?? LINEKINDS.brace.bh));
 /** 꺾이는 곳을 부드럽게 (반지름 ≈ 굵기 × 1.5, 짧은 구간이면 그 절반까지) */
 function bentPath(P, w, zM) {
   const V = P.map(([x, y]) => new THREE.Vector3(x * MM, zM, y * MM)), path = new THREE.CurvePath(); let cur = V[0].clone();
@@ -53,7 +55,7 @@ export function buildLines(level, opt = {}) {
       for (const q of [pts[0], pts[pts.length - 1]]) { const cap = new THREE.Mesh(new THREE.SphereGeometry(rad, radial, 6), mat); cap.position.set(q[0] * MM, z * MM, q[1] * MM); tag(cap); } /* 끝 마감 */
     } else for (let i = 1; i < pts.length; i++) {
       const [x1, y1] = pts[i - 1], [x2, y2] = pts[i], L = Math.hypot(x2 - x1, y2 - y1);
-      const m = new THREE.Mesh(new THREE.BoxGeometry((L + w) * MM, Math.min(w, 300) * MM, w * MM), mat); m.position.set(((x1 + x2) / 2) * MM, z * MM, ((y1 + y2) / 2) * MM); m.rotation.y = -Math.atan2(y2 - y1, x2 - x1); tag(m);
+      const vh = k.plank ? braceH(l) : Math.min(w, 300), m = new THREE.Mesh(new THREE.BoxGeometry((L + (k.plank ? 0 : w)) * MM, vh * MM, w * MM), mat); /* 보강재 = 합판 (세로 크기 bh · 두께 w) */ m.position.set(((x1 + x2) / 2) * MM, z * MM, ((y1 + y2) / 2) * MM); m.rotation.y = -Math.atan2(y2 - y1, x2 - x1); tag(m);
     }
   }
   return root;
