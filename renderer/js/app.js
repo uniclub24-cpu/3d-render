@@ -11,6 +11,8 @@ import * as SITE from './site.js';
 import { openMarket, recList as marketRecs } from './market.js';
 import { CanvasRec, recType } from './rec.js';
 import * as BL from './blender.js';
+import * as RM from './realmat.js';
+import { openDash } from './rmdash.js';
 import { Sketch3D } from './sketch3d.js';
 import { SectionView } from './section3d.js';
 import { initUiMove, regrip, resetUiMove, toggleClean } from './uimove.js';
@@ -30,7 +32,7 @@ import { WFI } from './builder.js';
 import * as SH from './shop.js';
 import * as CAD from './cad.js';
 import { initLang, setLang, lang } from './i18n.js';
-export const APP_VERSION = '2.1.50';
+export const APP_VERSION = '2.1.51';
 
 const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -347,6 +349,7 @@ function renderProps() {
     <div class="btns"><button class="btn pri" data-a="design" ${it.asset ? 'disabled title="가져온 3D 파일은 디자인 수정이 안 돼요"' : ''}>디자인 수정 (점 · 면 · 부품 색)</button></div>
     <div class="btns"><button class="btn" data-a="rot90">90° 돌리기</button><button class="btn" data-a="dup">복제</button><button class="btn danger" data-a="del">삭제</button></div>`;
   swapBlock(body, it, L); /* 디자인 바꾸기 (의자 · 테이블 · 한 번에) */
+  { const b = document.createElement('div'); b.className = 'btns'; b.innerHTML = '<button class="btn" id="rmItem" title="블렌더 실사 렌더에 쓸 재질 (Poly Haven) 보기 · 바꾸기">🎨 실사 재질</button>'; body.appendChild(b); $('#rmItem', b).onclick = () => openDash(rmHooks(), { only: it }); }
   if (L && L.sign) bindSignUi(body, it, L);
   const ao = $('#acOn', body); if (ao) ao.onchange = () => { const t = selItem(); if (ao.checked) t.acOn = true; else delete t.acOn; commit(); if (engine.air.on) engine.air.refresh(); else if (ao.checked) toast('공기 흐름(보기 → 공기)을 켜면 찬 바람이 보여요', 2500); renderProps(); };
   const ah = $('#acHp', body); if (ah) ah.onchange = () => { const t = selItem(); t.acHp = Math.max(0.5, +ah.value || 1); commit(); if (engine.air.on) engine.air.refresh(); };
@@ -637,22 +640,27 @@ async function blPop() {
       if (a === 'x') return p.remove(); if (a === 'stop') return window.byr.blenderCancel();
       if (a === 'get') return window.byr.openUrl ? window.byr.openUrl('https://www.blender.org/download/') : window.open('https://www.blender.org/download/', '_blank');
       if (a === 'pick') { const r = await window.byr.blenderPick(); if (r) { BLS.found = r.version ? r : BLS.found; if (r.version) { BLS.exe = r.path; store.set('byr.blExe', r.path); } else toast('블렌더 실행 파일이 아니에요'); draw(); } return; }
-      if (a === 'zip') return blZip(); if (a === 'go') return blRun(draw); })); };
+      if (a === 'zip') return blZip(); if (a === 'go') return openDash(rmHooks(), { onGo: () => blRun(draw) }); })); }; /* 렌더 전에 재질 점검 */
   draw(); if (isPC() && BLS.found === null) { BLS.found = (await window.byr.blenderFind(BLS.exe || null).catch(() => null)) || false; if (BLS.found) { BLS.exe = BLS.found.path; store.set('byr.blExe', BLS.exe); } if ($('#blPop')) draw(); }
 }
+/* 실사 재질 (Poly Haven) — 점검 대시보드 · 내보내기 연결 */
+const rmHooks = () => ({ S, engine, level, toast, commit: () => commit(), quality: () => { const w = BL.SIZES[BLS.sz].w, cv = engine.canvas; return { samples: BL.QUALITY[BLS.q].samples, w, h: Math.round(w / ((cv.clientWidth || 16) / (cv.clientHeight || 9))) }; } });
+const rmPlan = () => RM.meshPlan(RM.buildRows(engine, S, level()));
+const rmFetch = () => (window.byr && window.byr.texFetch ? (ids) => window.byr.texFetch(ids) : null);
 const blItemName = (id) => { const it = level().items.find((q) => q.id === id); return it ? it.name || (S.lib[it.type] && S.lib[it.type].name) || it.type : id; };
 const blAi = async (list) => { const r = await cloud.ask(BL.aiPrompt(list), { name: 'materials.txt', mime: 'text/plain', bytes: new TextEncoder().encode('재질 목록은 위 프롬프트에 있어요') }, 6000); return r && r.materials; };
 async function blRun(draw) {
   if (BLS.busy) return; BLS.busy = true; BLS.log = ''; draw(); const t0 = Date.now(); let cur = '준비 중…', pct = 0;
   const log = (t) => { BLS.log += (BLS.log ? '\n' : '') + t; const el = $('#blLog'); if (el) { el.hidden = false; el.textContent = BLS.log; el.scrollTop = 1e9; } };
   const iv = setInterval(() => { const el = $('#blLive'); if (el) { el.hidden = false; el.innerHTML = `<span class="spin"></span><span>${esc(cur)}</span><b>${pct ? pct + '% · ' : ''}${Math.round((Date.now() - t0) / 1000)}초</b>`; } }, 500);
+  const offT = window.byr.onTexLog ? window.byr.onTexLog((t) => { cur = t; log('· ' + t); }) : () => {};
   const off = window.byr.onBlenderLog((l) => { const m = l.match(/Sample (\d+)\/(\d+)/); if (m) { pct = Math.round((+m[1] / +m[2]) * 100); cur = `렌더 중 (샘플 ${m[1]}/${m[2]})`; return; } const s = l.match(/BYR:\s*(step|device|warn)\s*(.*)/); if (s) { cur = s[1] === 'device' ? `장치: ${s[2] === 'CPU' ? 'CPU (그래픽카드 못 씀 · 느림)' : s[2]}` : s[2]; log((s[1] === 'warn' ? '⚠ ' : '· ') + cur); } else if (/Error|Traceback|rror:/.test(l)) log('⛔ ' + l); });
   try {
-    const job = await BL.blenderJob(engine, { quality: BLS.q, size: BLS.sz, itemName: blItemName, aiRefine: BLS.ai && cloud.aiKey && cloud.aiKey() ? blAi : null, onStep: (m) => { cur = m; log('· ' + m); } });
-    log(`· 재질 ${job.mats}개 · 조명 ${job.lights}개 · ${job.plan.render.w}×${job.plan.render.h} · 샘플 ${job.plan.render.samples}`); cur = '블렌더 실행 중…';
+    const job = await BL.blenderJob(engine, { texPlan: rmPlan, texFetch: rmFetch(), quality: BLS.q, size: BLS.sz, itemName: blItemName, aiRefine: BLS.ai && cloud.aiKey && cloud.aiKey() ? blAi : null, onStep: (m) => { cur = m; log('· ' + m); } });
+    log(`· 재질 ${job.mats}개 (실사 ${job.tex}종) · 조명 ${job.lights}개 · ${job.plan.render.w}×${job.plan.render.h} · 샘플 ${job.plan.render.samples}`); cur = '블렌더 실행 중…';
     const r = await window.byr.blenderRun({ exe: BLS.exe || BLS.found.path, glb: job.glb, plan: job.plan });
     if (!r.ok) { log('⛔ ' + r.error); toast('블렌더 렌더 실패 · ' + r.error, 5000); } else { log(`✓ 완료 · ${Math.round((Date.now() - t0) / 1000)}초`); blShow(r); }
-  } catch (e) { console.error(e); log('⛔ ' + (e.message || e)); } finally { clearInterval(iv); off(); BLS.busy = false; const el = $('#blLive'); if (el) el.hidden = true; if ($('#blPop')) draw(); }
+  } catch (e) { console.error(e); log('⛔ ' + (e.message || e)); } finally { clearInterval(iv); off(); offT(); BLS.busy = false; const el = $('#blLive'); if (el) el.hidden = true; if ($('#blPop')) draw(); }
 }
 function blShow(r) {
   let m = $('#blRes'); if (m) m.remove(); m = document.createElement('div'); m.id = 'blRes'; m.className = 'blres'; const url = URL.createObjectURL(new Blob([r.png], { type: 'image/png' }));
@@ -662,7 +670,7 @@ function blShow(r) {
     const p = await saveFile({ title: '블렌더 렌더', defaultName: `${safeName()}_blender.png`, extensions: ['png'], data: r.png }); if (p) toast('저장했어요'); }));
 }
 async function blZip() {
-  try { toast('블렌더 작업 묶음을 만드는 중…'); const job = await BL.blenderJob(engine, { quality: BLS.q, size: BLS.sz, itemName: blItemName, aiRefine: BLS.ai && cloud.aiKey && cloud.aiKey() ? blAi : null });
+  try { toast('블렌더 작업 묶음을 만드는 중…'); const job = await BL.blenderJob(engine, { texPlan: rmPlan, texFetch: rmFetch(), quality: BLS.q, size: BLS.sz, itemName: blItemName, aiRefine: BLS.ai && cloud.aiKey && cloud.aiKey() ? blAi : null });
     const py = new Uint8Array(await (await fetch('blender/byr_render.py')).arrayBuffer()), readme = `BYR2 블렌더 실사 렌더 묶음\r\n\r\n1. 이 폴더를 풀어 둡니다.\r\n2. 명령창에서: blender -b --factory-startup -P byr_render.py -- "이 폴더 경로"\r\n3. 같은 폴더에 render.png 와 scene.blend 가 생겨요.\r\n`;
     const z = SH.zip([{ name: 'scene.glb', data: new Uint8Array(job.glb) }, { name: 'plan.json', data: new TextEncoder().encode(JSON.stringify(job.plan, null, 1)) }, { name: 'byr_render.py', data: py }, { name: '읽어보기.txt', data: new TextEncoder().encode(readme) }]);
     const p = await saveFile({ title: '블렌더 작업 묶음', defaultName: `${safeName()}_blender.zip`, extensions: ['zip'], data: z }); if (p) toast('내보냈어요'); } catch (e) { toast('내보내기 실패 · ' + (e.message || e), 4000); }

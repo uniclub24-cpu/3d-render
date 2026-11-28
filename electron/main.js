@@ -98,13 +98,33 @@ app.whenReady().then(() => {
   // 파일 열기: [{ name, path, data(Uint8Array) }]
   /* 공공데이터 · 지도 API (브라우저 CORS 우회) — 정해진 주소만 */
   ipcMain.handle('net:get', async (e, url) => {
-    const u = String(url || ''); if (!/^https:\/\/(api\.vworld\.kr|apis\.data\.go\.kr|overpass-api\.de|overpass\.kumi\.systems|nominatim\.openstreetmap\.org)\//.test(u)) return { ok: false, status: 0, text: 'blocked' };
+    const u = String(url || ''); if (!/^https:\/\/(api\.vworld\.kr|apis\.data\.go\.kr|api\.polyhaven\.com|overpass-api\.de|overpass\.kumi\.systems|nominatim\.openstreetmap\.org)\//.test(u)) return { ok: false, status: 0, text: 'blocked' };
     try { const r = await net.fetch(u, { headers: { 'User-Agent': 'BYR2/' + app.getVersion() } }); return { ok: r.ok, status: r.status, text: await r.text() }; } catch (err) { return { ok: false, status: 0, text: String(err && err.message || err) }; }
   });
   ipcMain.handle('net:bin', async (e, url) => {
-    const u = String(url || ''); if (!/^https:\/\/(api\.vworld\.kr|xdworld\.vworld\.kr|s3\.amazonaws\.com\/elevation-tiles-prod|elevation-tiles-prod\.s3\.amazonaws\.com)\//.test(u)) return { ok: false, status: 0, text: 'blocked' };
+    const u = String(url || ''); if (!/^https:\/\/(api\.vworld\.kr|xdworld\.vworld\.kr|cdn\.polyhaven\.com|s3\.amazonaws\.com\/elevation-tiles-prod|elevation-tiles-prod\.s3\.amazonaws\.com)\//.test(u)) return { ok: false, status: 0, text: 'blocked' };
     try { const r = await net.fetch(u, { headers: { 'User-Agent': 'BYR2/' + app.getVersion() } }); return r.ok ? { ok: true, status: r.status, data: new Uint8Array(await r.arrayBuffer()) } : { ok: false, status: r.status, text: (await r.text()).slice(0, 200) }; } catch (err) { return { ok: false, status: 0, text: String(err && err.message || err) }; }
   });
+  /* ---------- 실사 재질 (Poly Haven · CC0): 렌더할 때만 2K 로 받아 PC 에 보관 ---------- */
+  const TEXD = () => path.join(app.getPath('userData'), 'byr-textures');
+  const UA = () => ({ 'User-Agent': 'BYR2-3DRender/' + app.getVersion() });
+  const MAPS = { diff: /^(diffuse|diff|col|color|albedo)$/i, nor: /^nor_gl$/i, rough: /^rough(ness)?$/i, metal: /^metal(ness|lic)?$/i, ao: /^ao$/i };
+  ipcMain.handle('tex:cached', async (e, ids) => { const out = {}; for (const id of [].concat(ids || [])) { const d = path.join(TEXD(), String(id).replace(/[^a-z0-9_-]/gi, ''), '2k'); out[id] = fss.existsSync(path.join(d, 'files.json')); } return out; });
+  ipcMain.handle('tex:fetch', async (e, ids) => {
+    const send = (t) => { try { e.sender.send('tex:log', t); } catch {} }, out = {};
+    for (const raw of [].concat(ids || []).slice(0, 80)) {
+      const id = String(raw).replace(/[^a-z0-9_-]/gi, ''); if (!id) continue; const dir = path.join(TEXD(), id, '2k'), idx = path.join(dir, 'files.json');
+      try {
+        if (fss.existsSync(idx)) { out[raw] = JSON.parse(await fs.readFile(idx, 'utf8')); continue; }
+        send(`재질 받는 중 · ${id}`); const r = await net.fetch(`https://api.polyhaven.com/files/${id}`, { headers: UA() }); if (!r.ok) throw new Error('HTTP ' + r.status); const j = await r.json(); await fs.mkdir(dir, { recursive: true }); const got = {};
+        for (const [k, rx] of Object.entries(MAPS)) { const key = Object.keys(j).find((x) => rx.test(x)); if (!key) continue; const res = j[key]['2k'] || j[key]['1k'] || j[key]['4k']; if (!res) continue; const f = res.jpg || res.png || res.exr; if (!f || !f.url || !/^https:\/\/dl\.polyhaven\.org\//.test(f.url)) continue;
+          const ext = f.url.split('.').pop().split('?')[0], fp = path.join(dir, `${k}.${ext}`); const d = await net.fetch(f.url, { headers: UA() }); if (!d.ok) continue; await fs.writeFile(fp, Buffer.from(await d.arrayBuffer())); got[k] = fp; }
+        if (!got.diff) throw new Error('색 그림이 없어요'); await fs.writeFile(idx, JSON.stringify(got)); out[raw] = got; send(`✓ ${id}`);
+      } catch (err) { send(`⚠ ${id} · ${String(err && err.message || err)}`); }
+    }
+    return out;
+  });
+  ipcMain.handle('tex:dir', () => { shell.openPath(TEXD()); return true; });
   /* ---------- 블렌더 실사 렌더: 이 PC 의 블렌더를 화면 없이 실행 → render.png + scene.blend ---------- */
   const REND = () => path.join(app.getPath('userData'), 'blender-renders');
   const verOf = (exe) => new Promise((ok) => execFile(exe, ['--version'], { timeout: 30000, windowsHide: true }, (err, out) => { const m = String(out || '').match(/Blender\s+(\d+\.\d+(\.\d+)?)/); ok(err && !m ? null : m ? m[1] : null); }));

@@ -33,8 +33,57 @@ def sinp(node, names, val):
             return node.inputs[n]
     return None
 
+# ---------- 실사 재질 (Poly Haven · CC0 · 2K) ----------
+TEXCACHE = os.path.join(DIR, 'textures')
+def fetch_tex(tid):
+    """BYR 가 미리 받아 둔 파일이 없으면 (작업 묶음 .zip 등) 여기서 직접 받는다"""
+    import urllib.request
+    MAPS = {'diff': r'^(diffuse|diff|col|color|albedo)$', 'nor': r'^nor_gl$', 'rough': r'^rough(ness)?$', 'metal': r'^metal(ness|lic)?$', 'ao': r'^ao$'}
+    d = os.path.join(TEXCACHE, re.sub(r'[^a-zA-Z0-9_-]', '', tid)); idx = os.path.join(d, 'files.json')
+    if os.path.exists(idx): return json.load(open(idx))
+    os.makedirs(d, exist_ok=True); H = {'User-Agent': 'BYR2-3DRender-Blender/1'}
+    j = json.loads(urllib.request.urlopen(urllib.request.Request('https://api.polyhaven.com/files/' + tid, headers=H), timeout=60).read()); got = {}
+    for k, rx in MAPS.items():
+        key = next((x for x in j if re.match(rx, x, re.I)), None)
+        if not key: continue
+        res = j[key].get('2k') or j[key].get('1k')
+        if not res: continue
+        f = res.get('jpg') or res.get('png')
+        if not f: continue
+        fp = os.path.join(d, k + '.' + f['url'].split('.')[-1])
+        open(fp, 'wb').write(urllib.request.urlopen(urllib.request.Request(f['url'], headers=H), timeout=120).read()); got[k] = fp
+    json.dump(got, open(idx, 'w')); return got
+def build_tex(mat, spec):
+    t = spec['tex']; files = t.get('files') or {}
+    if not files.get('diff') or not os.path.exists(files['diff']):
+        try: log('step', '재질 받는 중 · ' + t['id']); files = fetch_tex(t['id'])
+        except Exception as e: log('warn', '재질을 못 받았어요 · ' + t['id'] + ' · ' + str(e)); return False
+    mat.use_nodes = True; nt = mat.node_tree; N = nt.nodes; L = nt.links; N.clear()
+    out = N.new('ShaderNodeOutputMaterial'); b = N.new('ShaderNodeBsdfPrincipled'); L.new(b.outputs[0], out.inputs[0])
+    tc = N.new('ShaderNodeTexCoord'); mp = N.new('ShaderNodeMapping'); L.new(tc.outputs['Object'], mp.inputs['Vector'])
+    s_ = 1.0 / max(0.1, float(t.get('size') or 2)); mp.inputs['Scale'].default_value = (s_, s_, s_)   # 실제 크기 (m) 대로
+    def img(fp, data):
+        n = N.new('ShaderNodeTexImage'); n.image = bpy.data.images.load(fp, check_existing=True); n.projection = 'BOX'; n.projection_blend = 0.2
+        if data: n.image.colorspace_settings.name = 'Non-Color'
+        L.new(mp.outputs['Vector'], n.inputs['Vector']); return n
+    d = img(files['diff'], False); col_out = d.outputs['Color']; tint = float(t.get('tint') or 0)
+    tcol = t.get('color') or spec.get('color')
+    if tint > 0 and tcol:   # 매뉴얼 색으로 맞추기: 무늬(밝기)는 사진, 색은 지정 색
+        try:
+            mx = N.new('ShaderNodeMix'); mx.data_type = 'RGBA'; mx.blend_type = 'COLOR'; mx.inputs[0].default_value = tint; L.new(col_out, mx.inputs[6]); mx.inputs[7].default_value = hexrgb(tcol); col_out = mx.outputs[2]
+        except Exception:
+            mx = N.new('ShaderNodeMixRGB'); mx.blend_type = 'COLOR'; mx.inputs['Fac'].default_value = tint; L.new(col_out, mx.inputs['Color1']); mx.inputs['Color2'].default_value = hexrgb(tcol); col_out = mx.outputs['Color']
+    L.new(col_out, b.inputs['Base Color'])
+    if files.get('rough') and os.path.exists(files['rough']): L.new(img(files['rough'], True).outputs['Color'], b.inputs['Roughness'])
+    if files.get('metal') and os.path.exists(files['metal']): L.new(img(files['metal'], True).outputs['Color'], b.inputs['Metallic'])
+    elif spec.get('kind') == 'steel': sinp(b, ['Metallic'], 1.0)
+    if files.get('nor') and os.path.exists(files['nor']):
+        nm = N.new('ShaderNodeNormalMap'); nm.inputs['Strength'].default_value = 0.8; L.new(img(files['nor'], True).outputs['Color'], nm.inputs['Color']); L.new(nm.outputs['Normal'], b.inputs['Normal'])
+    return True
+
 # ---------- 절차 재질 ----------
 def build(mat, spec):
+    if spec.get('tex') and build_tex(mat, spec): return
     kind = spec.get('kind', 'plain'); col = hexrgb(spec.get('color')); rough = spec.get('rough'); scale = float(spec.get('scale') or 1)
     mat.use_nodes = True; nt = mat.node_tree; N = nt.nodes; L = nt.links
     old = [n for n in N if n.type == 'BSDF_PRINCIPLED']

@@ -10,11 +10,13 @@ export const KINDS = ['plain', 'plastic', 'wood', 'plywood', 'tile', 'brick', 's
 const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 
 /** 장면 재질에 이름을 붙이고 계획을 만든다 → { roots, specs, where } */
-function classify(engine, itemName) {
-  const roots = [engine.world, engine.envGroup].filter(Boolean), specs = {}, where = {}, seen = new Map(); let n = 0;
+function classify(engine, itemName, tplan = null) {
+  const roots = [engine.world, engine.envGroup].filter(Boolean), specs = {}, where = {}, seen = new Map(), swaps = []; let n = 0; const texClone = new Map();
   const roleOf = (o) => { for (let p = o; p; p = p.parent) { if (p.userData.itemId) return ['item', p.userData.itemId]; if (p.userData.siteRoot) return ['site']; if (p.name === '벽') return ['wall']; if (p.name === '천장') return ['ceil']; if (p.name === '바닥' || p.userData.roomId) return ['floor']; } return ['etc']; };
   for (const root of roots) root.traverse((o) => {
-    if (!o.isMesh || !o.visible) return; const [role, id] = roleOf(o), list = Array.isArray(o.material) ? o.material : [o.material];
+    if (!o.isMesh || !o.visible) return; const [role, id] = roleOf(o);
+    const tp = tplan && tplan.get(o); if (tp && !Array.isArray(o.material) && o.material) { /* 실사 재질: 같은 BYR 재질이라도 Poly Haven 재질이 다르면 따로 */ const ck = o.material.uuid + '|' + tp.id + '|' + tp.tint; let c = texClone.get(ck); if (!c) { c = o.material.clone(); c.userData = { ...o.material.userData, tex: tp }; texClone.set(ck, c); } swaps.push([o, o.material, c]); o.material = c; }
+    const list = Array.isArray(o.material) ? o.material : [o.material];
     for (const m of list) {
       if (!m) continue; let nm = seen.get(m);
       if (!nm) {
@@ -26,12 +28,13 @@ function classify(engine, itemName) {
         if (m.transparent && (m.opacity ?? 1) < 0.6 && !['glass', 'frost'].includes(kind) && !spec.keep) spec.kind = 'glass';
         if (em > 0.05) { if (!m.map && lum(col) > 0.6 && em > 0.6) { spec.kind = 'emit'; spec.color = '#' + m.emissive.getHexString(); } spec.emit = Math.round(Math.min(12, 2 + em * 4) * 10) / 10; spec.emitColor = '#' + m.emissive.getHexString(); }
         if (m.userData.floor && kind === 'tile') spec.scale = 1;
+        if (m.userData.tex) { spec.tex = { ...m.userData.tex }; delete spec.keep; }
         specs[nm] = spec; where[nm] = { role, items: new Set() };
       }
       if (id && where[nm].items.size < 4) where[nm].items.add(itemName(id));
     }
   });
-  return { roots, specs, where };
+  return { roots, specs, where, restore: () => { for (const [o, m] of swaps) o.material = m; }, apply: () => { for (const [o, , c] of swaps) o.material = c; } };
 }
 /** 조명 · 해 · 하늘 */
 function lightsOf(engine, night) {
@@ -47,14 +50,16 @@ function lightsOf(engine, night) {
   return { lights: L, sun: night || !s.visible ? null : { dir: [dir.x, dir.y, dir.z], strength: 3.5, color: '#' + s.color.getHexString() }, world: night ? { color: '#0b1020', strength: 0.04 } : { color: '#dfe7f0', strength: 0.7 } };
 }
 /** 렌더 작업 만들기 → { glb, plan, mats } */
-export async function blenderJob(engine, { quality = 'normal', size = 'fhd', itemName = (id) => id, aiRefine = null, onStep = () => {} } = {}) {
+export async function blenderJob(engine, { quality = 'normal', size = 'fhd', itemName = (id) => id, aiRefine = null, onStep = () => {}, texPlan = null, texFetch = null } = {}) {
   onStep('장면 정리 중…'); const night = engine.present === 'light';
-  const cls = classify(engine, itemName); let specs = cls.specs;
+  const cls = await engine.withRealMaterials(async () => { const c = classify(engine, itemName, texPlan ? texPlan() : null); c.restore(); return c; }); let specs = cls.specs; /* 실사 재질 복제본은 내보낼 때만 잠깐 끼운다 */
   if (aiRefine) { onStep('AI 가 재질을 고르는 중…'); try { const r = await aiRefine(Object.entries(specs).map(([k, v]) => ({ name: k, ...v, role: cls.where[k].role, items: [...cls.where[k].items] }))); if (r) for (const [k, v] of Object.entries(r)) if (specs[k] && v && typeof v === 'object') specs[k] = { ...specs[k], ...pickSpec(v) }; } catch (e) { onStep('AI 재질 다듬기 실패 · 기본 재질로 진행 (' + (e.message || e) + ')'); } }
   const cam = engine.camera, tg = engine.controls.target, cv = engine.canvas, aspect = (cv.clientWidth || 16) / (cv.clientHeight || 9), W = SIZES[size].w, H = Math.round(W / aspect / 2) * 2;
   const plan = { version: 1, camera: { pos: [cam.position.x, cam.position.y, cam.position.z], target: [tg.x, tg.y, tg.z], fov: cam.fov || 50 }, ...lightsOf(engine, night), materials: specs, render: { w: W, h: H, samples: QUALITY[quality].samples, exposure: night ? 0.3 : 0 } };
-  onStep('장면 내보내는 중 (GLB)…'); const glb = await engine.withRealMaterials(() => exportGLB(cls.roots));
-  return { glb, plan, mats: Object.keys(specs).length, lights: plan.lights.length };
+  const ids = [...new Set(Object.values(specs).filter((x) => x.tex).map((x) => x.tex.id))];
+  if (ids.length && texFetch) { onStep(`실사 재질 ${ids.length}종 준비 중 (Poly Haven · 2K)…`); try { const got = await texFetch(ids); for (const x of Object.values(specs)) if (x.tex && got[x.tex.id]) x.tex.files = got[x.tex.id]; } catch (e) { onStep('재질 받기 실패 · 블렌더에서 다시 받아요 (' + (e.message || e) + ')'); } }
+  onStep('장면 내보내는 중 (GLB)…'); const glb = await engine.withRealMaterials(async () => { cls.apply(); try { return await exportGLB(cls.roots); } finally { cls.restore(); } });
+  return { glb, plan, mats: Object.keys(specs).length, lights: plan.lights.length, tex: ids.length };
 }
 const pickSpec = (v) => { const o = {}; if (KINDS.includes(v.kind)) o.kind = v.kind; if (/^#[0-9a-f]{6}$/i.test(v.color || '')) o.color = v.color; if (isFinite(v.rough)) o.rough = Math.max(0, Math.min(1, +v.rough)); if (isFinite(v.scale) && +v.scale > 0) o.scale = Math.max(0.1, Math.min(10, +v.scale)); return o; };
 export const aiPrompt = (list) => `You are a interior lighting & material artist preparing a Blender Cycles render of a Korean fried-chicken restaurant (or its surroundings).
